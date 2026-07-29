@@ -30,9 +30,8 @@ from collections import defaultdict
 from decimal import Decimal
 from typing import NamedTuple
 
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -156,8 +155,7 @@ class ReportingService:
                     credit=row_credit,
                     gross_debit=debit,
                     gross_credit=credit,
-                    money_from=parties[account.id][0],
-                    money_to=parties[account.id][1],
+                    parties=parties[account.id],
                 )
             )
             total_debit += row_debit
@@ -192,56 +190,47 @@ class ReportingService:
 
     async def _counterparties(
         self, organization_id: uuid.UUID, *, as_of: dt.date, from_date: dt.date | None
-    ) -> dict[uuid.UUID, tuple[list[str], list[str]]]:
-        """Who each account's money came from, and who it went to.
+    ) -> dict[uuid.UUID, list[str]]:
+        """The parties each account has dealt with.
 
         A trial-balance row is one account aggregated over every entry that touched it, so
-        it has no single counterparty - which is why this has to be computed rather than
-        read off the row. For an account A:
+        unlike a journal entry it has no single counterparty - hence a list.
 
-        * A **debited** means value arrived in A, and it came *from* whatever the same
-          entry credited - or from the party the entry names.
-        * A **credited** means value left A, and it went *to* whatever the entry debited.
+        **One list, not a from/to pair.** An account that both received from and paid the
+        same person then showed that name in both columns, which reads as a contradiction
+        even though it is exactly what happened. Direction is a property of a transaction;
+        this row is a balance. The Billing day book and the journal are where a single
+        movement's direction belongs, and both already state it.
 
-        The entry's own ``counterparty`` wins when it has one, because "Airtel" is more
-        use than "Electricity & Water" when the question is who the money was with. The
-        account name stands in otherwise, so a side that saw movement is never blank.
+        **Only what someone actually typed.** These are ``counterparty`` values and nothing
+        else; an entry that named nobody contributes no name. An earlier version fell back
+        to the account on the other side of the entry, which filled the column with "Cash
+        on Hand" and "Salaries & Wages" - the chart of accounts restated, not an answer to
+        "who was this with".
 
-        Aggregated in SQL rather than by walking the entries: this is one grouped query
-        whatever the ledger's size, and the alternative pulls every line in the window
-        into Python to build the same handful of names.
+        Aggregated in SQL rather than by walking the entries: one grouped query whatever
+        the ledger's size, against pulling every line in the window into Python.
         """
-        mine = aliased(JournalEntryLine, name="mine")
-        other = aliased(JournalEntryLine, name="other")
-        other_account = aliased(Account, name="other_account")
-
-        # Which side of the entry this account was on, and therefore which list the
-        # name belongs in.
-        side = case((mine.debit > 0, "from"), else_="to").label("side")
-        name = func.coalesce(JournalEntry.counterparty, other_account.name).label("name")
-
         query = (
-            select(mine.account_id, side, name)
-            .join(JournalEntry, JournalEntry.id == mine.entry_id)
-            .join(other, (other.entry_id == mine.entry_id) & (other.id != mine.id))
-            .join(other_account, other_account.id == other.account_id)
+            select(JournalEntryLine.account_id, JournalEntry.counterparty)
+            .join(JournalEntry, JournalEntry.id == JournalEntryLine.entry_id)
             .where(
                 JournalEntry.organization_id == organization_id,
                 JournalEntry.status.in_(POSTED_STATUSES),
                 JournalEntry.entry_date <= as_of,
+                JournalEntry.counterparty.is_not(None),
             )
-            # Distinct pairs only. An account paid by the same party fifty times should
+            # Distinct pairs only: an account paid by the same party fifty times should
             # name them once.
-            .group_by(mine.account_id, side, name)
-            .order_by(mine.account_id, side, name)
+            .group_by(JournalEntryLine.account_id, JournalEntry.counterparty)
+            .order_by(JournalEntryLine.account_id, JournalEntry.counterparty)
         )
         if from_date is not None:
             query = query.where(JournalEntry.entry_date >= from_date)
 
-        result: dict[uuid.UUID, tuple[list[str], list[str]]] = defaultdict(lambda: ([], []))
-        for account_id, which, party in await self.session.execute(query):
-            sources, destinations = result[account_id]
-            (sources if which == "from" else destinations).append(party)
+        result: dict[uuid.UUID, list[str]] = defaultdict(list)
+        for account_id, party in await self.session.execute(query):
+            result[account_id].append(party)
         return result
 
     async def _reversed_count(

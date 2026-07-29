@@ -341,15 +341,17 @@ class TrialBalanceRow(ResponseSchema):
     gross_debit: Decimal = ZERO
     gross_credit: Decimal = ZERO
 
-    #: Who the money in this account came from, and who it went to.
+    #: The parties this account has dealt with.
     #:
     #: A row here is one account aggregated over every entry that touched it, so unlike a
-    #: journal entry it has no single counterparty - these are the distinct parties, or the
-    #: counter-accounts where an entry named no party. `money_from` is drawn from entries
-    #: that *debited* this account (value arrived, so it came from elsewhere) and
-    #: `money_to` from entries that credited it.
-    money_from: list[str] = Field(default_factory=list)
-    money_to: list[str] = Field(default_factory=list)
+    #: journal entry it has no single counterparty - hence a list. Deliberately not split
+    #: into from/to: an account that both received from and paid the same person showed
+    #: that name in both columns, which reads as a contradiction. Direction belongs to a
+    #: transaction, and this row is a balance.
+    #:
+    #: Names as typed, nothing else. An entry that named nobody contributes no name, so an
+    #: account can legitimately come back with an empty list.
+    parties: list[str] = Field(default_factory=list)
 
     @property
     def nets_to_nil(self) -> bool:

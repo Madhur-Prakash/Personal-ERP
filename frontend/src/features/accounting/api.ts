@@ -155,10 +155,9 @@ export interface TrialBalanceRow {
    *  activity cancelled out - usually a reversal. */
   gross_debit: Money;
   gross_credit: Money;
-  /** Distinct parties this account received from, or the counter-account where an entry
-   *  named no party. Empty when nothing ever moved that way. */
-  money_from: string[];
-  money_to: string[];
+  /** The parties this account has dealt with, as typed. Empty when its entries named
+   *  nobody. Not split by direction — that belongs to a transaction, not a balance. */
+  parties: string[];
   account_id: string;
   code: string;
   name: string;

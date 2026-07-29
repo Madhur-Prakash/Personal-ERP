@@ -543,12 +543,11 @@ class TestParty:
     async def test_the_trial_balance_names_who_each_account_dealt_with(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        """The From/To columns on the trial balance.
+        """The "Dealt with" column.
 
         A row there is one account aggregated over every entry that touched it, so it has
         no single counterparty the way an entry does - the server collects the distinct
-        ones. Money *in* debits the cash account, so the payer belongs on that account's
-        "from" side and on the income account's "to" side.
+        ones. Both accounts an entry touches name the party, because both dealt with them.
         """
         await record(
             authed_client,
@@ -568,30 +567,30 @@ class TestParty:
         )
 
         rows = (await authed_client.get(f"{api}/reports/trial-balance")).json()["rows"]
-        by_name = {row["name"]: row for row in rows}
+        by_code = {row["code"]: row for row in rows}
 
-        cash = next(row for name, row in by_name.items() if "Cash" in name)
-        # Ramesh paid in; Airtel was paid out of the same account.
-        assert "Ramesh" in cash["money_from"]
-        assert "Airtel" in cash["money_to"]
+        # Cash saw both, and each name appears once however many entries there were.
+        cash = next(row for row in rows if "Cash" in row["name"])
+        assert sorted(cash["parties"]) == ["Airtel", "Ramesh"]
 
-        # And from the other side of each entry.
-        income = next(row for name, row in by_name.items() if row["account_type"] == "income")
-        assert "Ramesh" in income["money_to"]
-        expense = next(row for name, row in by_name.items() if row["account_type"] == "expense")
-        assert "Airtel" in expense["money_from"]
+        # The account on the other side of each entry names the same party, because it
+        # dealt with them too - and only that party.
+        income = next(row for row in rows if row["account_type"] == "income")
+        assert income["parties"] == ["Ramesh"]
+        expense = next(row for row in rows if row["account_type"] == "expense")
+        assert expense["parties"] == ["Airtel"]
 
-        # A side that saw no movement stays empty rather than borrowing a name from the
-        # other side, which would assert a transaction that never happened.
-        assert income["money_from"] == []
+        assert by_code  # the report is keyed by code elsewhere; guard against a rename
 
-    async def test_the_trial_balance_falls_back_to_the_counter_account(
+    async def test_the_trial_balance_names_only_what_was_typed(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        """Entries predating the required-party rule still have to name something.
+        """An entry naming no party contributes no name.
 
-        Posted through the journal directly, which is the path that legitimately has no
-        counterparty - so the account on the other side of the entry stands in.
+        The first version filled the gap with the account on the other side of the entry,
+        which put "Owner's Capital" down a column asking who the money was with - the chart
+        of accounts restated. Posted through the journal directly, which is the path that
+        legitimately has no counterparty.
         """
         # One billing entry first, purely to provision the fiscal calendar: this fixture
         # deliberately has no fiscal year, because billing creates one on demand and a
@@ -623,10 +622,13 @@ class TestParty:
 
         rows = (await authed_client.get(f"{api}/reports/trial-balance")).json()["rows"]
         cash_row = next(row for row in rows if row["code"] == cash["code"])
-        # The journal entry named no party, so its counter-account stands in - alongside
-        # the party from the billing entry, which did name one.
-        assert capital["name"] in cash_row["money_from"]
-        assert "Ramesh" in cash_row["money_from"]
+        # Only the billing entry named anyone, so only that name appears.
+        assert cash_row["parties"] == ["Ramesh"]
+        assert capital["name"] not in cash_row["parties"]
+
+        # And the account that entry credited carries no name at all.
+        capital_row = next(row for row in rows if row["code"] == capital["code"])
+        assert capital_row["parties"] == []
 
     async def test_is_required(
         self, authed_client: AsyncClient, api: str, books: Organization

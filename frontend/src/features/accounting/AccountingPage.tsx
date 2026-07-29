@@ -15,6 +15,7 @@ import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import type { Column } from '@/components/ui/DataTable';
 import { DataTable, PageHeader, Pagination } from '@/components/ui/DataTable';
+import { InfoTip } from '@/components/ui/InfoTip';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
   type JournalEntry,
@@ -173,9 +174,22 @@ function ChartOfAccounts() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Journal entries
-// ---------------------------------------------------------------------------
+/**
+ * The parties an account has dealt with.
+ *
+ * One column, not a from/to pair. An account that both received from and paid the same
+ * person showed that name in both columns, which reads as a contradiction even though it
+ * is exactly what happened - because direction belongs to a transaction and this row is a
+ * balance over many of them. The Billing day book states each movement's direction, and so
+ * does the journal.
+ *
+ * Names as typed into Billing's From/To field, never account names. An earlier version
+ * filled blanks with the counter-account, which put "Cash on Hand" and "Salaries & Wages"
+ * down the column - the chart of accounts restated, which the Account column already says.
+ *
+ * A dash means the entries behind this balance named nobody, which is the honest answer
+ * for anything recorded before naming the party became required.
+ */
 function Parties({ names }: { names: string[] }) {
   if (names.length === 0) return <span className="text-content-muted">-</span>;
 
@@ -184,7 +198,7 @@ function Parties({ names }: { names: string[] }) {
     <div className="min-w-0">
       <p className="text-content truncate text-[12px]">{first}</p>
       {rest.length > 0 && (
-        // Named in the tooltip rather than listed: a cell that grows with the number of
+        // Counted, with the names in the tooltip: a cell that grew with the number of
         // parties would set the row height for the whole table.
         <p className="text-content-muted truncate text-[11px]" title={rest.join(', ')}>
           and {rest.length} more
@@ -194,6 +208,9 @@ function Parties({ names }: { names: string[] }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Journal entries
+// ---------------------------------------------------------------------------
 function JournalEntries() {
   const [page, setPage] = useState(1);
   const { data, isLoading } = useQuery({
@@ -346,7 +363,39 @@ function TrialBalanceReport() {
 
       <Card>
         <CardHeader
-          title="Trial balance"
+          // The ⓘ rather than a paragraph under the heading: the explanation is long
+          // enough to push the figures down the page, and most visits do not need it.
+          title={
+            <span className="flex items-center gap-1.5">
+              Trial balance
+              <InfoTip label="About the trial balance">
+                <p>Every account that has money in it, and which side that money sits on.</p>
+                <p className="mt-2">
+                  <strong>Debit</strong> is what you have and what you have spent.{' '}
+                  <strong>Credit</strong> is what you owe and what you have earned. They are just
+                  the two sides of an entry, not good and bad.
+                </p>
+                <p className="mt-2">
+                  Every entry puts the same amount on both sides, so the two totals at the bottom
+                  must match. That is the one thing this table proves - and if they ever did not
+                  match, something would be wrong with the books themselves rather than with any
+                  single entry.
+                </p>
+                <p className="mt-2">
+                  <strong>A cash or bank account should appear under Debit.</strong> If one shows
+                  under Credit, the books say more went out of it than ever went in - which is
+                  impossible for real cash, and usually means money that came from a different
+                  account was recorded against this one. The totals still balance, because a wrong
+                  pair of entries balances just as well as a right one.
+                </p>
+                <p className="mt-2">
+                  <strong>Dealt with</strong> lists the people and businesses behind an account's
+                  balance, from the From/To field on the Billing screen. A dash means those entries
+                  did not name anyone.
+                </p>
+              </InfoTip>
+            </span>
+          }
           description={data ? `As at ${formatDate(data.as_of)}` : undefined}
           action={
             data?.is_balanced ? (
@@ -380,14 +429,9 @@ function TrialBalanceReport() {
               ),
             },
             {
-              header: 'Money from',
+              header: 'Dealt with',
               hideOnMobile: true,
-              cell: (row) => <Parties names={row.money_from} />,
-            },
-            {
-              header: 'Money to',
-              hideOnMobile: true,
-              cell: (row) => <Parties names={row.money_to} />,
+              cell: (row) => <Parties names={row.parties} />,
             },
             {
               header: 'Debit',
