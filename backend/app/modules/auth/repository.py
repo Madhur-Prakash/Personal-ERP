@@ -57,9 +57,18 @@ class SessionRepository(BaseRepository[UserSession]):
 
         Revoked rows are intentionally returned: reuse detection needs to see
         that a presented token *was* valid once.
+
+        **Locked for update**, because rotation is read-then-write and the read decides
+        whether the write is a legitimate rotation or a token being replayed. Two refreshes
+        arriving together on the same token both read it as valid, both mint a successor,
+        and both revoke the original - leaving two live sessions descended from one login,
+        which is how a single sign-in came to show six devices. Sole caller is
+        :meth:`AuthService.refresh`, so the lock costs nothing elsewhere.
         """
-        query = select(UserSession).where(
-            UserSession.refresh_token_hash == hash_token(refresh_token)
+        query = (
+            select(UserSession)
+            .where(UserSession.refresh_token_hash == hash_token(refresh_token))
+            .with_for_update()
         )
         return (await self.session.execute(query)).scalar_one_or_none()
 

@@ -520,6 +520,76 @@ class TestRefresh:
         assert entries, "reuse detection wrote no audit row"
         assert entries[0].severity == AuditSeverity.CRITICAL
 
+    async def test_one_login_leaves_one_live_session_however_often_it_refreshes(
+        self, client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        """Rotation replaces a session; it must never add one.
+
+        Each rotation mints a successor and revokes its predecessor, so a lineage holds
+        exactly one live row no matter how many times the tab reloads. Asserted because the
+        Settings screen listed six live sessions after a single sign-in - every reload was
+        leaving its predecessor behind.
+        """
+        login = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        assert login.status_code == 200, login.text
+
+        for _ in range(5):
+            rotated = await client.post(f"{api}/auth/refresh")
+            assert rotated.status_code == 200, rotated.text
+
+        live = (
+            await db.scalars(
+                select(UserSession).where(
+                    UserSession.user_id == user.id,
+                    UserSession.revoked_at.is_(None),
+                )
+            )
+        ).all()
+        assert len(live) == 1, f"{len(live)} live sessions after one login and five refreshes"
+
+        # And the survivor is the newest generation, not the original.
+        assert live[0].generation == 5
+
+    async def test_two_refreshes_on_one_token_cannot_both_succeed(
+        self, client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        """The race that produced the duplicates.
+
+        Two refreshes presenting the *same* token both read it as valid, both mint a
+        successor, and both revoke the original - two live sessions from one login. The row
+        is locked for the duration of the rotation now, so the second must serialise behind
+        the first and be rejected as a replay.
+        """
+        login = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        token = login.cookies[REFRESH_COOKIE_NAME]
+
+        first = await client.post(f"{api}/auth/refresh", json={"refresh_token": token})
+        assert first.status_code == 200, first.text
+
+        # Cookies cleared first, or the client simply presents the *rotated* cookie the
+        # first call set and performs a second legitimate refresh - the endpoint prefers the
+        # cookie over the body. Clearing them is what makes this a replay of the original
+        # token rather than a fresh one.
+        client.cookies.clear()
+        second = await client.post(f"{api}/auth/refresh", json={"refresh_token": token})
+        assert second.status_code == 401, second.text
+
+        # Never two live sessions - reuse detection revokes the lineage, so zero is the
+        # correct answer here, and the user is asked to sign in again.
+        live = (
+            await db.scalars(
+                select(UserSession).where(
+                    UserSession.user_id == user.id,
+                    UserSession.revoked_at.is_(None),
+                )
+            )
+        ).all()
+        assert len(live) <= 1, f"{len(live)} live sessions after a replayed token"
+
     async def test_unknown_refresh_token_rejected(self, client: AsyncClient, api: str) -> None:
         response = await client.post(
             f"{api}/auth/refresh", json={"refresh_token": "totally-made-up-token"}

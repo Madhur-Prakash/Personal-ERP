@@ -293,7 +293,18 @@ export const api = {
  */
 export async function bootstrapSession(): Promise<boolean> {
   try {
-    await refreshAccessToken();
+    // Through the same single-flight promise the interceptor uses, not a direct call.
+    //
+    // This used to call `refreshAccessToken()` straight, which sidesteps exactly the
+    // guard this module's docstring exists to explain - and React's StrictMode
+    // double-invokes the effect that calls this, so every mount in development fired two
+    // refreshes on one cookie. Two outcomes, both bad: they race and the session ends up
+    // duplicated, or the second arrives after the first has rotated, looks like a replayed
+    // token, and the whole lineage is revoked - a logout nobody asked for.
+    refreshPromise ??= refreshAccessToken().finally(() => {
+      refreshPromise = null;
+    });
+    await refreshPromise;
     return true;
   } catch {
     setAccessToken(null);
