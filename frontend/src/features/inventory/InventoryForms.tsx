@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { NumberInput } from '@/components/ui/NumberInput';
 import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import { type Product, inventoryApi } from '@/features/inventory/api';
@@ -195,12 +196,11 @@ export function ProductFormModal({
             value={draft.unit}
             onChange={(event) => setDraft({ ...draft, unit: event.target.value })}
           />
-          <Input
+          <NumberInput
             label="GST %"
-            inputMode="decimal"
             value={draft.tax_rate}
             error={fieldErrors['tax_rate']}
-            onChange={(event) => setDraft({ ...draft, tax_rate: event.target.value })}
+            onValueChange={(tax_rate) => setDraft({ ...draft, tax_rate })}
           />
           <Input
             label="HSN code"
@@ -212,26 +212,23 @@ export function ProductFormModal({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
-          <Input
+          <NumberInput
             label="Sale price"
-            inputMode="decimal"
             value={draft.sale_price}
             error={fieldErrors['sale_price']}
-            onChange={(event) => setDraft({ ...draft, sale_price: event.target.value })}
+            onValueChange={(sale_price) => setDraft({ ...draft, sale_price })}
           />
-          <Input
+          <NumberInput
             label="Purchase price"
-            inputMode="decimal"
             value={draft.purchase_price}
             error={fieldErrors['purchase_price']}
-            onChange={(event) => setDraft({ ...draft, purchase_price: event.target.value })}
+            onValueChange={(purchase_price) => setDraft({ ...draft, purchase_price })}
           />
-          <Input
+          <NumberInput
             label="Reorder at"
-            inputMode="decimal"
             value={draft.reorder_level}
             hint="Flags a shortfall"
-            onChange={(event) => setDraft({ ...draft, reorder_level: event.target.value })}
+            onValueChange={(reorder_level) => setDraft({ ...draft, reorder_level })}
           />
         </div>
 
@@ -443,13 +440,12 @@ export function StockAdjustModal({
           />
         </div>
 
-        <Input
+        <NumberInput
           label="Quantity"
           required
-          inputMode="decimal"
           placeholder="0"
           value={quantity}
-          onChange={(event) => setQuantity(event.target.value)}
+          onValueChange={setQuantity}
           hint="A positive number. The direction above decides the sign."
         />
 
@@ -568,13 +564,12 @@ export function StockTransferModal({ open, onClose }: { open: boolean; onClose: 
           />
         </div>
 
-        <Input
+        <NumberInput
           label="Quantity"
           required
-          inputMode="decimal"
           placeholder="0"
           value={quantity}
-          onChange={(event) => setQuantity(event.target.value)}
+          onValueChange={setQuantity}
         />
 
         <p className="text-content-muted text-[12px]">

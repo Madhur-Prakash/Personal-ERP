@@ -34,6 +34,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import type { Column } from '@/components/ui/DataTable';
 import { DataTable, PageHeader, Pagination } from '@/components/ui/DataTable';
 import { Input } from '@/components/ui/Input';
+import { NumberInput } from '@/components/ui/NumberInput';
 import {
   type BillFromDocument,
   type Document,
@@ -831,41 +832,38 @@ function ConfirmForm({ document, onConfirmed }: { document: Document; onConfirme
                 }
                 placeholder="Description"
               />
-              <Input
+              <NumberInput
                 value={line.quantity}
-                onChange={(event) =>
+                onValueChange={(quantity) =>
                   setLines((current) =>
                     current.map((item, position) =>
-                      position === index ? { ...item, quantity: event.target.value } : item,
+                      position === index ? { ...item, quantity } : item,
                     ),
                   )
                 }
                 placeholder="Qty"
-                inputMode="decimal"
               />
-              <Input
+              <NumberInput
                 value={line.unit_price}
-                onChange={(event) =>
+                onValueChange={(unit_price) =>
                   setLines((current) =>
                     current.map((item, position) =>
-                      position === index ? { ...item, unit_price: event.target.value } : item,
+                      position === index ? { ...item, unit_price } : item,
                     ),
                   )
                 }
                 placeholder="Unit price"
-                inputMode="decimal"
               />
-              <Input
+              <NumberInput
                 value={line.tax_rate}
-                onChange={(event) =>
+                onValueChange={(tax_rate) =>
                   setLines((current) =>
                     current.map((item, position) =>
-                      position === index ? { ...item, tax_rate: event.target.value } : item,
+                      position === index ? { ...item, tax_rate } : item,
                     ),
                   )
                 }
                 placeholder="GST %"
-                inputMode="decimal"
               />
               <button
                 type="button"

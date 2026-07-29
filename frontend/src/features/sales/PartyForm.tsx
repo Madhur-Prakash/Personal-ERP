@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { NumberInput } from '@/components/ui/NumberInput';
 import { Modal } from '@/components/ui/Modal';
 import { inventoryApi } from '@/features/inventory/api';
 import { salesApi } from '@/features/sales/api';
@@ -207,12 +208,13 @@ export function PartyFormModal({
             value={draft.city}
             onChange={(event) => setDraft({ ...draft, city: event.target.value })}
           />
-          <Input
+          <NumberInput
             label="Payment terms"
-            inputMode="numeric"
+            // Whole days: "30.5 days until due" is not a thing anyone means.
+            decimals={0}
             value={draft.payment_terms_days}
             hint="Days until due"
-            onChange={(event) => setDraft({ ...draft, payment_terms_days: event.target.value })}
+            onValueChange={(payment_terms_days) => setDraft({ ...draft, payment_terms_days })}
           />
         </div>
 

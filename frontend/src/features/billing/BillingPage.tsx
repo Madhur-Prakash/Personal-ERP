@@ -26,6 +26,7 @@ import type { Column } from '@/components/ui/DataTable';
 import { DataTable, PageHeader, Pagination } from '@/components/ui/DataTable';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { Input } from '@/components/ui/Input';
+import { NumberInput } from '@/components/ui/NumberInput';
 import { Select, type SelectGroup } from '@/components/ui/Select';
 import {
   type BillingEntry,
@@ -309,15 +310,14 @@ function EntryForm({
           }}
         >
           <div className="grid gap-3 sm:grid-cols-[9rem_1fr_10rem]">
-            <Input
+            <NumberInput
               ref={amountRef}
               label="Amount"
               required
               autoFocus
-              inputMode="decimal"
               placeholder="0.00"
               value={amount}
-              onChange={(event) => setAmount(event.target.value)}
+              onValueChange={setAmount}
               className="text-[15px] tabular-nums"
             />
             <Input
