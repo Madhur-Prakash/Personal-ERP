@@ -53,6 +53,7 @@ from app.db.types import ZERO
 from app.modules.accounting.coa_template import SystemAccount
 from app.modules.accounting.models import (
     Account,
+    AccountSubtype,
     AccountType,
     EntryStatus,
     JournalEntry,
@@ -74,6 +75,18 @@ log = get_logger(__name__)
 #: Tags the ledger entries this module owns, so they can be read back and so an
 #: accountant can tell a hand-entered movement from an invoice posting.
 SOURCE_TYPE: Final = "billing"
+
+
+class MoneyKind(StrEnum):
+    """How a money account reconciles.
+
+    Both are cash-equivalent for the cash flow statement. They are separate because
+    they are checked differently: cash against a physical count, a bank against a
+    statement — and a UPI wallet or card-settlement account behaves like a bank.
+    """
+
+    CASH = "cash"
+    BANK = "bank"
 
 
 class Direction(StrEnum):
@@ -288,6 +301,81 @@ class BillingService:
             group=parent.name,
             is_default=False,
         )
+
+    async def create_money_account(
+        self,
+        organization_id: uuid.UUID,
+        actor: User,
+        *,
+        name: str,
+        kind: MoneyKind,
+        ctx: RequestContext | None = None,
+    ) -> MoneyAccount:
+        """Add a cash box or a bank account.
+
+        The seeded chart gives one of each, which covers a business with a till and a
+        current account and nobody else. A second bank, a UPI wallet, a partner's
+        petty cash, or the card machine's settlement account are all ordinary, and
+        without this the only choices are "Cash on Hand" and "Primary Bank Account" —
+        so money that moved through a wallet gets filed as cash and the balances stop
+        matching anything real.
+
+        Only a name and whether it behaves like cash or a bank. The subtype is what
+        matters to the software: both are cash-equivalent for the cash flow statement,
+        but they reconcile differently — cash against a physical count, a bank against
+        a statement — so they are separate subtypes rather than one.
+        """
+        await self.ensure_books(organization_id)
+
+        cleaned = name.strip()
+        if not cleaned:
+            raise ValidationError("Give the account a name.")
+
+        every = await self.accounts.list_for_org(organization_id, include_inactive=True)
+        if any(a.name.casefold() == cleaned.casefold() for a in every):
+            raise ConflictError(
+                f'An account called "{cleaned}" already exists.', code="account_exists"
+            )
+
+        by_code = {a.code: a for a in every}
+        if kind is MoneyKind.BANK:
+            # Bank accounts nest under their own group, so several read as a set.
+            group = by_code.get("1120")
+            parent = group if group is not None and group.is_group else by_code.get("1100")
+            anchor = "1120"
+            subtype = AccountSubtype.BANK
+        else:
+            parent = by_code.get("1100")
+            # Numbered after Cash on Hand rather than from the parent, so a second till
+            # sorts next to the first instead of ahead of it at 1101.
+            anchor = "1110"
+            subtype = AccountSubtype.CASH
+
+        if parent is None:  # pragma: no cover — ensure_books guarantees the group
+            raise BusinessRuleError(
+                "The chart of accounts has no current-assets group.", code="no_parent_group"
+            )
+
+        account = await self.chart.create_account(
+            organization_id,
+            AccountCreate(
+                code=self._next_code(every, anchor),
+                name=cleaned,
+                account_type=AccountType.ASSET,
+                subtype=subtype,
+                parent_id=parent.id,
+                is_group=False,
+                is_reconcilable=True,
+            ),
+            actor,
+            ctx,
+        )
+
+        log.info(
+            "money account created",
+            extra={"name": cleaned, "code": account.code, "kind": kind.value},
+        )
+        return MoneyAccount(id=account.id, code=account.code, name=account.name, is_default=False)
 
     @staticmethod
     def _next_code(existing: Sequence[Account], parent_code: str) -> str:
@@ -709,5 +797,6 @@ __all__ = [
     "Direction",
     "Entry",
     "MoneyAccount",
+    "MoneyKind",
     "Summary",
 ]

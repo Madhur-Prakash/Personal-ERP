@@ -24,6 +24,7 @@ from app.modules.billing.schemas import (
     BillingSummary,
     CategoryRead,
     CreateCategoryRequest,
+    CreateMoneyAccountRequest,
     EntryRead,
     MoneyAccountRead,
     RecordEntryRequest,
@@ -163,6 +164,35 @@ async def create_category(
         direction=category.direction,
         group=category.group,
         is_default=category.is_default,
+    )
+
+
+@router.post(
+    "/money-accounts",
+    response_model=MoneyAccountRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a cash or bank account",
+)
+async def create_money_account(
+    data: CreateMoneyAccountRequest,
+    organization_id: ActiveOrganizationId,
+    user: CurrentUser,
+    service: BillingDep,
+    ctx: RequestCtx,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> MoneyAccountRead:
+    """Create a place money can sit.
+
+    The seeded chart has one till and one current account, which covers a business
+    with exactly those. A second bank, a UPI wallet, a card-settlement account, or a
+    partner's petty cash are all ordinary — and without this, money that moved through
+    a wallet gets filed as cash and no balance matches anything real.
+    """
+    account = await service.create_money_account(
+        organization_id, user, name=data.name, kind=data.kind, ctx=ctx
+    )
+    return MoneyAccountRead(
+        id=account.id, code=account.code, name=account.name, is_default=account.is_default
     )
 
 

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import {
   AlertTriangle,
@@ -31,6 +32,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button, buttonClasses } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { InfoTip } from '@/components/ui/InfoTip';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { type Movement, type Period, type Trend, analyticsApi } from '@/features/analytics/api';
 import { useAuth } from '@/features/auth/AuthProvider';
@@ -219,6 +221,18 @@ export function DashboardPage() {
               movement={dashboard?.revenue}
               currency={currency}
               icon={TrendingUp}
+              info={
+                <>
+                  <p>
+                    Everything you earned this period — money recorded as coming in, plus any
+                    invoices you posted.
+                  </p>
+                  <p>
+                    <strong>GST is excluded.</strong> Tax you collect belongs to the government, so
+                    counting it as revenue would flatter the business.
+                  </p>
+                </>
+              }
             />
             <MovementCard
               label="Expenses"
@@ -226,18 +240,45 @@ export function DashboardPage() {
               currency={currency}
               icon={Wallet}
               risingIsGood={false}
+              info={
+                <p>
+                  Everything you spent this period. Includes household categories if you use them,
+                  which is why this can look higher than a purely business figure.
+                </p>
+              }
             />
             <MovementCard
               label="Net profit"
               movement={dashboard?.net_profit}
               currency={currency}
               icon={TrendingUp}
+              info={
+                <>
+                  <p>Revenue less expenses. Negative means you spent more than you earned.</p>
+                  <p>
+                    This is not the same as cash: an unpaid invoice counts as revenue before the
+                    money arrives.
+                  </p>
+                </>
+              }
             />
             <StatCard
               label="Cash and bank"
               value={dashboard ? formatMoney(dashboard.cash, currency) : undefined}
               icon={Landmark}
               hint={dashboard ? `as at ${formatDate(dashboard.span.end)}` : undefined}
+              info={
+                <>
+                  <p>
+                    What you actually hold across every cash and bank account, right now — not for
+                    the period.
+                  </p>
+                  <p>
+                    <strong>A negative figure means an entry is wrong</strong>, since you cannot pay
+                    out cash you never had. Usually a payment recorded against the wrong account.
+                  </p>
+                </>
+              }
             />
           </>
         ) : (
@@ -254,6 +295,19 @@ export function DashboardPage() {
         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Owed to you"
+            info={
+              <>
+                <p>
+                  Money customers still owe on <strong>invoices you posted</strong> and they have
+                  not fully paid.
+                </p>
+                <p>
+                  It stays ₹0 if you only use the Billing screen — recording money in means the cash
+                  already arrived, so nobody owes you anything. This fills up only when you raise an
+                  invoice under Sales and wait to be paid.
+                </p>
+              </>
+            }
             value={dashboard ? formatMoney(dashboard.receivables, currency) : undefined}
             icon={Receipt}
             hint={
@@ -267,6 +321,19 @@ export function DashboardPage() {
           />
           <StatCard
             label="You owe"
+            info={
+              <>
+                <p>
+                  Money you still owe on <strong>supplier bills you entered</strong> and have not
+                  paid yet.
+                </p>
+                <p>
+                  Also ₹0 while you only use Billing: recording money out means you have already
+                  paid, so there is no debt left to track. Entering a bill under Inventory without
+                  paying it is what fills this in.
+                </p>
+              </>
+            }
             value={dashboard ? formatMoney(dashboard.payables, currency) : undefined}
             icon={FileText}
             hint={
@@ -278,6 +345,12 @@ export function DashboardPage() {
           />
           <StatCard
             label="Stock value"
+            info={
+              <p>
+                What your unsold stock cost you, valued at weighted average. Only fills in if you
+                track products under Inventory.
+              </p>
+            }
             value={dashboard ? formatMoney(dashboard.inventory_value, currency) : undefined}
             icon={Boxes}
           />
@@ -554,6 +627,7 @@ function MovementCard({
   currency,
   icon,
   risingIsGood = true,
+  info,
 }: {
   label: string;
   movement: Movement | undefined;
@@ -561,6 +635,7 @@ function MovementCard({
   icon: typeof TrendingUp;
   /** Whether an increase is good news. Expenses going up is not. */
   risingIsGood?: boolean;
+  info?: ReactNode;
 }) {
   // No percentage is possible, so say why rather than printing a misleading number.
   // Skipped when the current figure is also zero — "no prior data" on an empty set
@@ -576,6 +651,7 @@ function MovementCard({
       delta={movement?.change_percent ?? null}
       deltaGood={risingIsGood}
       hint={noBasis ? 'no prior data' : undefined}
+      info={info}
     />
   );
 }
@@ -588,6 +664,7 @@ function StatCard({
   icon: Icon,
   hint,
   hintTone,
+  info,
 }: {
   label: string;
   value: string | undefined;
@@ -597,6 +674,8 @@ function StatCard({
   icon: typeof TrendingUp;
   hint?: string | undefined;
   hintTone?: 'danger';
+  /** Explains the figure. Worth writing for anything an owner might misread. */
+  info?: ReactNode;
 }) {
   // Safe to convert: this picks an arrow direction and a rounded label, not a figure
   // anyone acts on, and the server already rounded it to one decimal place.
@@ -606,9 +685,16 @@ function StatCard({
 
   return (
     <Card className="p-4">
-      <div className="flex items-start justify-between">
-        <span className="text-content-muted text-[12px] font-medium">{label}</span>
-        <Icon className="text-content-muted h-4 w-4" aria-hidden />
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-content-muted flex items-center gap-1.5 text-[12px] font-medium">
+          {label}
+          {info && (
+            <InfoTip label={label} align="left">
+              {info}
+            </InfoTip>
+          )}
+        </span>
+        <Icon className="text-content-muted h-4 w-4 shrink-0" aria-hidden />
       </div>
 
       <div className="mt-2 flex items-baseline gap-2">

@@ -30,6 +30,7 @@ from collections import defaultdict
 from decimal import Decimal
 from typing import NamedTuple
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ValidationError
@@ -40,6 +41,8 @@ from app.modules.accounting.models import (
     AccountSubtype,
     AccountType,
     BalanceSide,
+    EntryStatus,
+    JournalEntry,
 )
 from app.modules.accounting.repository import (
     AccountRepository,
@@ -127,7 +130,12 @@ class ReportingService:
             credit = balance.total_credit if balance else ZERO
             net = debit - credit
 
-            if net == 0 and not include_zero:
+            # An account that had movement stays on the report even when it nets to
+            # nothing. Dropping it is how a reversed ₹100 charge vanishes without trace:
+            # the journal shows the entry and its reversal, and the trial balance shows
+            # neither, which makes the two impossible to reconcile.
+            had_activity = debit != 0 or credit != 0
+            if net == 0 and not had_activity and not include_zero:
                 continue
 
             # Present the net on whichever side it falls, not the gross of both.
@@ -142,6 +150,8 @@ class ReportingService:
                     account_type=account.account_type,
                     debit=row_debit,
                     credit=row_credit,
+                    gross_debit=debit,
+                    gross_credit=credit,
                 )
             )
             total_debit += row_debit
@@ -169,7 +179,27 @@ class ReportingService:
             total_debit=total_debit,
             total_credit=total_credit,
             is_balanced=is_balanced,
+            reversed_entry_count=await self._reversed_count(
+                organization_id, as_of=as_of, from_date=from_date
+            ),
         )
+
+    async def _reversed_count(
+        self, organization_id: uuid.UUID, *, as_of: dt.date, from_date: dt.date | None
+    ) -> int:
+        """How many entries in this window were cancelled by a reversal."""
+        query = (
+            select(func.count())
+            .select_from(JournalEntry)
+            .where(
+                JournalEntry.organization_id == organization_id,
+                JournalEntry.status == EntryStatus.REVERSED,
+                JournalEntry.entry_date <= as_of,
+            )
+        )
+        if from_date is not None:
+            query = query.where(JournalEntry.entry_date >= from_date)
+        return (await self.session.execute(query)).scalar_one()
 
     # -------------------------------------------------------------------------
     # General ledger

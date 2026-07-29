@@ -217,6 +217,26 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+/**
+ * A `beforeLoad` guard that requires one permission.
+ *
+ * **It must not act while the session is still loading**, and that is the whole reason
+ * this is a shared helper rather than six inline checks. On a hard reload, permissions
+ * have not arrived yet, so `hasPermission` answers `false` for everything — and a guard
+ * that redirects on that answer sends the user to the dashboard every single time they
+ * refresh a page. Which is exactly what happened.
+ *
+ * Returning early is safe because the router re-evaluates guards when the context
+ * changes, and `App.tsx` re-provides it once the session resolves. `appRoute` has always
+ * relied on that; the per-route guards simply did not.
+ */
+function requirePermission(permission: string) {
+  return ({ context }: { context: RouterContext }) => {
+    if (context.isLoading) return;
+    if (!context.hasPermission(permission)) throw redirect({ to: '/', replace: true });
+  };
+}
+
 // Built modules. Each is permission-guarded in `beforeLoad` rather than inside
 // the component, so an unauthorised user is redirected before the page renders
 // and never briefly sees data they are not entitled to.
@@ -226,54 +246,84 @@ const settingsRoute = createRoute({
 const billingRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/billing',
-  beforeLoad: ({ context }) => {
-    if (!context.hasPermission('journal:read')) throw redirect({ to: '/' });
-  },
+  beforeLoad: requirePermission('journal:read'),
   component: BillingPage,
 });
 
 const accountingRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/accounting',
-  beforeLoad: ({ context }) => {
-    if (!context.hasPermission('account:read')) throw redirect({ to: '/' });
-  },
+  /**
+   * The selected tab lives in the URL.
+   *
+   * It was `useState`, so a reload dropped the user back on the first tab — they were
+   * reading the trial balance, refreshed, and landed on the chart of accounts. A tab is
+   * a location as far as the user is concerned, so it belongs in the address, which also
+   * makes it linkable and survivable across a browser restart.
+   *
+   * Validated loosely on purpose: an unknown or hand-edited value falls back to the
+   * default tab rather than throwing, because a bad query string should not be able to
+   * break a page.
+   */
+  validateSearch: (search: Record<string, unknown>): { tab?: string } =>
+    typeof search.tab === 'string' ? { tab: search.tab } : {},
+  beforeLoad: requirePermission('account:read'),
   component: AccountingPage,
 });
 
 const invoicesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/invoices',
-  beforeLoad: ({ context }) => {
-    if (!context.hasPermission('invoice:read')) throw redirect({ to: '/' });
-  },
+  /**
+   * The selected tab lives in the URL.
+   *
+   * It was `useState`, so a reload dropped the user back on the first tab — they were
+   * reading the trial balance, refreshed, and landed on the chart of accounts. A tab is
+   * a location as far as the user is concerned, so it belongs in the address, which also
+   * makes it linkable and survivable across a browser restart.
+   *
+   * Validated loosely on purpose: an unknown or hand-edited value falls back to the
+   * default tab rather than throwing, because a bad query string should not be able to
+   * break a page.
+   */
+  validateSearch: (search: Record<string, unknown>): { tab?: string } =>
+    typeof search.tab === 'string' ? { tab: search.tab } : {},
+  beforeLoad: requirePermission('invoice:read'),
   component: InvoicesPage,
 });
 
 const inventoryRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/inventory',
-  beforeLoad: ({ context }) => {
-    if (!context.hasPermission('inventory:read')) throw redirect({ to: '/' });
-  },
+  /**
+   * The selected tab lives in the URL.
+   *
+   * It was `useState`, so a reload dropped the user back on the first tab — they were
+   * reading the trial balance, refreshed, and landed on the chart of accounts. A tab is
+   * a location as far as the user is concerned, so it belongs in the address, which also
+   * makes it linkable and survivable across a browser restart.
+   *
+   * Validated loosely on purpose: an unknown or hand-edited value falls back to the
+   * default tab rather than throwing, because a bad query string should not be able to
+   * break a page.
+   */
+  validateSearch: (search: Record<string, unknown>): { tab?: string } =>
+    typeof search.tab === 'string' ? { tab: search.tab } : {},
+  beforeLoad: requirePermission('inventory:read'),
   component: InventoryPage,
 });
 
 const documentsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/documents',
-  beforeLoad: ({ context }) => {
-    if (!context.hasPermission('document:read')) throw redirect({ to: '/' });
-  },
+  beforeLoad: requirePermission('document:read'),
   component: DocumentsPage,
 });
 
 const analyticsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/analytics',
-  beforeLoad: ({ context }) => {
-    if (!context.hasPermission('report:read')) throw redirect({ to: '/' });
-  },
+  beforeLoad: requirePermission('report:read'),
   component: AnalyticsPage,
 });
 

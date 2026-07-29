@@ -16,7 +16,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, ArrowUpRight, Plus, Undo2, Wallet } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/Badge';
@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import type { Column } from '@/components/ui/DataTable';
 import { DataTable, PageHeader, Pagination } from '@/components/ui/DataTable';
+import { InfoTip } from '@/components/ui/InfoTip';
 import { Input } from '@/components/ui/Input';
 import { Select, type SelectGroup } from '@/components/ui/Select';
 import {
@@ -31,6 +32,8 @@ import {
   type BillingOptions,
   type Category,
   type Direction,
+  type MoneyAccount,
+  type MoneyKind,
   billingApi,
 } from '@/features/billing/api';
 import { ApiError } from '@/lib/api';
@@ -115,6 +118,12 @@ export function BillingPage() {
         />
         <TotalTile
           label="Net"
+          info={
+            <p>
+              Money in less money out, for the entries on this screen only. Not the same as profit,
+              which also counts invoices and bills.
+            </p>
+          }
           value={summary ? formatMoney(summary.net, currency) : undefined}
           tone="net"
           hint={
@@ -224,6 +233,7 @@ function EntryForm({
   const [categoryId, setCategoryId] = useState(defaultCategory?.id ?? '');
   const [accountId, setAccountId] = useState(defaultAccount?.id ?? '');
   const [addingCategory, setAddingCategory] = useState(false);
+  const [addingAccount, setAddingAccount] = useState(false);
 
   // Grouped in template order rather than alphabetically: the chart is already
   // ordered so that trading categories come before household ones, and reordering
@@ -379,6 +389,15 @@ function EntryForm({
                 value: account.id,
                 label: account.name,
               }))}
+              action={
+                <button
+                  type="button"
+                  onClick={() => setAddingAccount(true)}
+                  className="text-primary text-[12px] font-medium hover:underline"
+                >
+                  + Add account
+                </button>
+              }
             />
           </div>
 
@@ -389,6 +408,16 @@ function EntryForm({
               onCreated={(category) => {
                 setCategoryId(category.id);
                 setAddingCategory(false);
+              }}
+            />
+          )}
+
+          {addingAccount && (
+            <NewMoneyAccountRow
+              onCancel={() => setAddingAccount(false)}
+              onCreated={(account) => {
+                setAccountId(account.id);
+                setAddingAccount(false);
               }}
             />
           )}
@@ -467,6 +496,81 @@ function NewCategoryRow({
             if (event.key === 'Escape') onCancel();
           }}
           hint="Filed alongside the other categories of this kind."
+        />
+      </div>
+      <Button type="button" onClick={() => create.mutate()} disabled={!canSave || create.isPending}>
+        {create.isPending ? 'Adding…' : 'Add'}
+      </Button>
+      <Button type="button" variant="ghost" onClick={onCancel} disabled={create.isPending}>
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Add a place money can sit.
+ *
+ * The seeded chart has one till and one current account, which covers a business with
+ * exactly those. A second bank, a UPI wallet, a card-settlement account, or a partner's
+ * petty cash are all ordinary — and without this, money that moved through a wallet gets
+ * filed as cash and no balance matches anything real.
+ */
+function NewMoneyAccountRow({
+  onCancel,
+  onCreated,
+}: {
+  onCancel: () => void;
+  onCreated: (account: MoneyAccount) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState<MoneyKind>('bank');
+
+  const create = useMutation({
+    mutationFn: () => billingApi.createMoneyAccount(name.trim(), kind),
+    onSuccess: (account) => {
+      void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      toast.success(`Added "${account.name}"`);
+      onCreated(account);
+    },
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : 'Could not add the account'),
+  });
+
+  const canSave = name.trim().length > 0;
+
+  return (
+    <div className="border-border bg-surface-sunken/50 flex flex-wrap items-end gap-2 rounded-lg border border-dashed p-3">
+      <div className="min-w-[12rem] flex-1">
+        <Input
+          label="New account"
+          autoFocus
+          placeholder="UPI wallet"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              if (canSave) create.mutate();
+            }
+            if (event.key === 'Escape') onCancel();
+          }}
+        />
+      </div>
+      <div className="w-44">
+        <Select
+          label="Behaves like"
+          value={kind}
+          onChange={(event) => setKind(event.target.value as MoneyKind)}
+          options={[
+            { value: 'bank', label: 'A bank account' },
+            { value: 'cash', label: 'Cash in hand' },
+          ]}
+          /* The distinction is how it gets checked, not what it is called: cash against
+             a physical count, a bank against a statement. A UPI wallet is a bank. */
+          hint={kind === 'bank' ? 'Checked against a statement' : 'Checked by counting'}
         />
       </div>
       <Button type="button" onClick={() => create.mutate()} disabled={!canSave || create.isPending}>
@@ -671,16 +775,21 @@ function TotalTile({
   value,
   tone,
   hint,
+  info,
 }: {
   label: string;
   value: string | undefined;
   tone: 'in' | 'out' | 'net';
   hint?: string | undefined;
+  info?: ReactNode;
 }) {
   return (
     <Card className="p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-content-muted text-[12px] font-medium">{label}</span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-content-muted flex items-center gap-1.5 text-[12px] font-medium">
+          {label}
+          {info && <InfoTip label={label}>{info}</InfoTip>}
+        </span>
         {tone === 'in' && <ArrowDownLeft className="text-success h-3.5 w-3.5" aria-hidden />}
         {tone === 'out' && <ArrowUpRight className="text-danger h-3.5 w-3.5" aria-hidden />}
         {tone === 'net' && <Wallet className="text-content-muted h-3.5 w-3.5" aria-hidden />}

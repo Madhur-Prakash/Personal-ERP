@@ -6,8 +6,9 @@
  * refetch) on every switch is slower than keeping the queries warm in one place.
  */
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import type { LucideIcon } from 'lucide-react';
-import { AlertTriangle, BookOpen, Scale, TrendingUp } from 'lucide-react';
+import { AlertTriangle, BookOpen, Scale, TrendingUp, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { Badge, type BadgeTone } from '@/components/ui/Badge';
@@ -19,8 +20,10 @@ import {
   type AccountType,
   type JournalEntry,
   type ReportLine,
+  type TrialBalanceRow,
   accountingApi,
 } from '@/features/accounting/api';
+import { useReportRange } from '@/features/accounting/ReportRange';
 import { cn } from '@/lib/cn';
 import { formatDate, formatMoney, isZeroMoney } from '@/lib/format';
 
@@ -42,8 +45,26 @@ const TYPE_TONES: Record<AccountType, BadgeTone> = {
   expense: 'danger',
 };
 
+/** Narrows an untrusted search param to a known tab, so a hand-edited query
+ *  string falls back to the default instead of breaking the page. */
+const TAB_KEYS = ['chart', 'entries', 'trial-balance', 'pnl', 'balance-sheet'] as const;
+
+function isTab(value: unknown): value is Tab {
+  return typeof value === 'string' && (TAB_KEYS as readonly string[]).includes(value);
+}
+
 export function AccountingPage() {
-  const [tab, setTab] = useState<Tab>('chart');
+  // The tab lives in the URL, not in component state, so a reload returns to it and
+  // the view can be linked to. Read untyped and narrowed by `isTab`: that is safer
+  // than a typed `from`, because a hand-edited query string then falls back to the
+  // default rather than throwing.
+  const navigate = useNavigate();
+  const search = useSearch({ strict: false });
+  const tab: Tab = isTab(search.tab) ? search.tab : 'chart';
+  const setTab = (next: Tab) => {
+    // `replace` keeps tab switching out of the back stack.
+    void navigate({ to: '/accounting', search: { tab: next }, replace: true });
+  };
 
   return (
     <div>
@@ -194,11 +215,48 @@ function JournalEntries() {
       ),
     },
     {
+      header: 'Money',
+      hideOnMobile: true,
+      cell: (row) =>
+        row.cash_direction === null ? (
+          // No cash leg, or a transfer between your own accounts that nets to nothing.
+          <span className="text-content-muted text-[12px]">no cash movement</span>
+        ) : (
+          <span
+            className={cn(
+              'text-[12px] font-medium',
+              row.cash_direction === 'in' ? 'text-success' : 'text-danger',
+            )}
+          >
+            {row.cash_direction === 'in' ? 'In' : 'Out'} {formatMoney(row.cash_amount)}
+          </span>
+        ),
+    },
+    {
       header: 'Status',
       hideOnMobile: true,
-      cell: (row) => <Badge tone={statusTone[row.status] ?? 'neutral'}>{row.status}</Badge>,
+      cell: (row) =>
+        row.status === 'reversed' ? (
+          <Badge tone="warning" title="Cancelled by an opposite entry. Both remain on the record.">
+            Reversed — cancelled
+          </Badge>
+        ) : row.reverses_id ? (
+          <Badge tone="neutral" title="This entry cancels an earlier one.">
+            Reversal entry
+          </Badge>
+        ) : (
+          <Badge tone={statusTone[row.status] ?? 'neutral'}>{row.status}</Badge>
+        ),
     },
-    { header: 'Amount', numeric: true, cell: (row) => formatMoney(row.total_debit) },
+    {
+      header: 'Amount',
+      numeric: true,
+      cell: (row) => (
+        <span className={cn(row.status === 'reversed' && 'text-content-muted line-through')}>
+          {formatMoney(row.total_debit)}
+        </span>
+      ),
+    },
   ];
 
   return (
@@ -228,6 +286,20 @@ function JournalEntries() {
 // ---------------------------------------------------------------------------
 // Trial balance
 // ---------------------------------------------------------------------------
+/**
+ * Did this account have movement that cancelled out?
+ *
+ * Distinct from "no activity": an account whose ₹100 charge was reversed has a story,
+ * an untouched account does not, and showing both as two dashes conflates them.
+ */
+function netsToNil(row: TrialBalanceRow): boolean {
+  return (
+    isZeroMoney(row.debit) &&
+    isZeroMoney(row.credit) &&
+    !(isZeroMoney(row.gross_debit) && isZeroMoney(row.gross_credit))
+  );
+}
+
 function TrialBalanceReport() {
   const { data, isLoading } = useQuery({
     queryKey: ['trial-balance'],
@@ -271,7 +343,30 @@ function TrialBalanceReport() {
               header: 'Code',
               cell: (row) => <span className="font-mono text-[12px]">{row.code}</span>,
             },
-            { header: 'Account', cell: (row) => row.name },
+            {
+              header: 'Account',
+              cell: (row) => (
+                <div>
+                  <span className="text-content">{row.name}</span>
+                  {netsToNil(row) && (
+                    // Stated here rather than in the amount columns. Putting the
+                    // cancelled ₹100 in the Debit column made that column add up to
+                    // more than its own total, which is worse than hiding it: a figure
+                    // in an amount column that is not in the total is simply wrong.
+                    // At the table's own 13px rather than 11px. A line whose entire job
+                    // is to explain something should not be set as fine print — and the
+                    // icon carries the meaning without relying on colour alone.
+                    <p className="text-warning mt-1 flex items-start gap-1.5 text-[13px]">
+                      <Undo2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                      <span>
+                        <strong className="font-semibold">{formatMoney(row.gross_debit)}</strong>{' '}
+                        was posted here and then reversed, so it does not affect the balance.
+                      </span>
+                    </p>
+                  )}
+                </div>
+              ),
+            },
             {
               header: 'Debit',
               numeric: true,
@@ -322,15 +417,10 @@ function TrialBalanceReport() {
 // Profit & loss
 // ---------------------------------------------------------------------------
 function ProfitAndLossReport() {
-  const [range] = useState(() => {
-    const today = new Date();
-    // Indian fiscal year starts in April.
-    const fyStartYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
-    return {
-      from_date: `${fyStartYear}-04-01`,
-      to_date: today.toISOString().slice(0, 10),
-    };
-  });
+  // The range is a control now, and the fiscal-year start comes from the server rather
+  // than a hardcoded April — which was wrong for any organization on a January year and
+  // duplicated a rule the backend already owns.
+  const { range, control } = useReportRange();
 
   const { data, isLoading } = useQuery({
     queryKey: ['pnl', range],
@@ -339,9 +429,14 @@ function ProfitAndLossReport() {
 
   if (isLoading || !data) {
     return (
-      <Card>
-        <DataTable columns={[]} rows={[]} rowKey={() => ''} isLoading />
-      </Card>
+      <div className="space-y-4">
+        <Card>
+          <CardHeader title="Profit & loss" action={control} />
+        </Card>
+        <Card>
+          <DataTable columns={[]} rows={[]} rowKey={() => ''} isLoading />
+        </Card>
+      </div>
     );
   }
 
@@ -362,6 +457,7 @@ function ProfitAndLossReport() {
         <CardHeader
           title="Profit & loss"
           description={`${formatDate(data.from_date)} to ${formatDate(data.to_date)}`}
+          action={control}
         />
         <CardBody className="space-y-5">
           <ReportSection title="Income" lines={data.income} total={data.total_income} />

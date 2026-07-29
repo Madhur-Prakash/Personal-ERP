@@ -9,6 +9,9 @@ import type { Money, Page, PageQuery } from '@/features/accounting/api';
 
 export type Direction = 'in' | 'out';
 
+/** How a money account reconciles: cash against a count, a bank against a statement. */
+export type MoneyKind = 'cash' | 'bank';
+
 export interface Category {
   id: string;
   code: string;
@@ -102,6 +105,13 @@ export const billingApi = {
    */
   createCategory: (name: string, direction: Direction) =>
     api.post<Category>('/billing/categories', { name, direction }),
+
+  /**
+   * Add a place money can sit — a second bank, a UPI wallet, a partner's petty cash.
+   * The seeded chart only has one till and one current account.
+   */
+  createMoneyAccount: (name: string, kind: MoneyKind) =>
+    api.post<MoneyAccount>('/billing/money-accounts', { name, kind }),
 
   /**
    * Cancel an entry by posting its mirror image. There is no delete and no edit —

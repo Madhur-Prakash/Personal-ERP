@@ -10,7 +10,7 @@ from typing import Annotated
 from pydantic import Field, StringConstraints
 
 from app.core.schemas import BaseSchema, ResponseSchema
-from app.modules.billing.service import Direction
+from app.modules.billing.service import Direction, MoneyKind
 
 #: A money amount on the way in. Positive only — a correction is a reversal, not a
 #: negative entry, because a ledger records what happened rather than the net of it.
@@ -71,6 +71,18 @@ class CreateCategoryRequest(BaseSchema):
 
     name: Annotated[str, Field(min_length=1, max_length=150)]
     direction: Direction
+
+
+class CreateMoneyAccountRequest(BaseSchema):
+    """Add a cash box or bank account.
+
+    A name and which of the two it behaves like. Everything else — the account code,
+    the parent group, the subtype — is derived, for the same reason the category form
+    derives them: nobody should need the chart of accounts to add a UPI wallet.
+    """
+
+    name: Annotated[str, Field(min_length=1, max_length=150)]
+    kind: MoneyKind = MoneyKind.BANK
 
 
 class MoneyAccountRead(ResponseSchema):

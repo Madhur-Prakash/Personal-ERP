@@ -371,6 +371,138 @@ class TestReflectedAcrossTheApp:
 # ---------------------------------------------------------------------------
 # Reading back
 # ---------------------------------------------------------------------------
+class TestAddingCategoriesAndAccounts:
+    """The escape hatches. The template cannot anticipate every trade or every wallet."""
+
+    async def test_adds_an_expense_category_from_a_name(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        response = await authed_client.post(
+            f"{api}/billing/categories", json={"name": "Tempo Hire", "direction": "out"}
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+
+        assert body["name"] == "Tempo Hire"
+        assert body["direction"] == "out"
+        # Derived, so the user never sees a chart-of-accounts field.
+        assert body["code"]
+        assert body["group"]
+
+    async def test_the_new_category_is_immediately_usable(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        created = await authed_client.post(
+            f"{api}/billing/categories", json={"name": "Tempo Hire", "direction": "out"}
+        )
+        category_id = created.json()["id"]
+
+        options = (await authed_client.get(f"{api}/billing/options")).json()
+        assert category_id in [c["id"] for c in options["categories"]]
+
+        entry = await record(
+            authed_client,
+            api,
+            direction="out",
+            amount="1200",
+            description="Delivery run",
+            category_id=category_id,
+        )
+        assert entry["category_name"] == "Tempo Hire"
+
+    async def test_refuses_a_duplicate_category_name(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Two categories with one name makes every report ambiguous."""
+        await authed_client.post(
+            f"{api}/billing/categories", json={"name": "Tempo Hire", "direction": "out"}
+        )
+        again = await authed_client.post(
+            f"{api}/billing/categories", json={"name": "tempo hire", "direction": "out"}
+        )
+        assert again.status_code == 409
+
+    async def test_adds_a_bank_account(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """A UPI wallet is a bank: reconciled against a statement, not by counting."""
+        response = await authed_client.post(
+            f"{api}/billing/money-accounts", json={"name": "UPI Wallet", "kind": "bank"}
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["name"] == "UPI Wallet"
+
+        options = (await authed_client.get(f"{api}/billing/options")).json()
+        assert "UPI Wallet" in [a["name"] for a in options["money_accounts"]]
+
+    async def test_adds_a_second_cash_box(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        response = await authed_client.post(
+            f"{api}/billing/money-accounts", json={"name": "Counter Till", "kind": "cash"}
+        )
+        assert response.status_code == 201, response.text
+        # Numbered next to Cash on Hand rather than ahead of it.
+        assert response.json()["code"].startswith("111")
+
+    async def test_money_can_be_recorded_against_a_new_account(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        created = await authed_client.post(
+            f"{api}/billing/money-accounts", json={"name": "UPI Wallet", "kind": "bank"}
+        )
+        account_id = created.json()["id"]
+
+        response = await authed_client.post(
+            f"{api}/billing",
+            json={
+                "direction": "in",
+                "amount": "2500",
+                "description": "Online order",
+                "money_account_id": account_id,
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["money_account_name"] == "UPI Wallet"
+
+        # And it counts as cash on the dashboard, like any cash-equivalent.
+        dashboard = (await authed_client.get(f"{api}/analytics/dashboard")).json()
+        assert D(dashboard["cash"]) == D("2500")
+
+    async def test_refuses_a_duplicate_account_name(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        response = await authed_client.post(
+            f"{api}/billing/money-accounts", json={"name": "Cash on Hand", "kind": "cash"}
+        )
+        assert response.status_code == 409
+
+    async def test_the_books_still_balance_after_adding_both(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """New accounts must not break the accounting equation."""
+        category = await authed_client.post(
+            f"{api}/billing/categories", json={"name": "Tempo Hire", "direction": "out"}
+        )
+        account = await authed_client.post(
+            f"{api}/billing/money-accounts", json={"name": "UPI Wallet", "kind": "bank"}
+        )
+        await authed_client.post(
+            f"{api}/billing",
+            json={
+                "direction": "out",
+                "amount": "1200",
+                "description": "Delivery run",
+                "category_id": category.json()["id"],
+                "money_account_id": account.json()["id"],
+            },
+        )
+
+        report = (await authed_client.get(f"{api}/reports/trial-balance")).json()
+        assert report["is_balanced"] is True
+        assert D(report["total_debit"]) == D("1200")
+
+
 class TestParty:
     """Who the money came from or went to — free text, no master record."""
 
@@ -649,3 +781,105 @@ class TestPermissions:
             f"{api}/billing", json={"direction": "out", "amount": "1", "description": "x"}
         )
         assert response.status_code == 401
+
+
+class TestReversalIsVisibleInTheReports:
+    """A reversal must not vanish.
+
+    Both entries stay in the ledger and sum to zero, so nothing in the *net* figures
+    records that anything happened. The journal then shows two entries the trial balance
+    cannot account for — and an account whose only movement was cancelled disappeared
+    from the report entirely, which is indistinguishable from never having been touched.
+    """
+
+    async def test_the_journal_marks_the_entry_and_its_reversal(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(
+            authed_client, api, direction="out", amount="100", description="Wrong amount"
+        )
+        await authed_client.post(f"{api}/billing/{entry['id']}/reverse", json={})
+
+        entries = (await authed_client.get(f"{api}/journal-entries")).json()["items"]
+        original = next(e for e in entries if e["entry_number"] == entry["entry_number"])
+        reversal = next(e for e in entries if e["reverses_id"] == original["id"])
+
+        assert original["status"] == "reversed"
+        assert reversal["status"] == "posted"
+
+    async def test_the_journal_reports_which_way_cash_moved(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """An entry has both a debit and a credit, so the useful question is direction."""
+        await record(authed_client, api, direction="in", amount="500", description="Sale")
+        await record(authed_client, api, direction="out", amount="200", description="Rent")
+
+        entries = (await authed_client.get(f"{api}/journal-entries")).json()["items"]
+        by_narration = {e["narration"]: e for e in entries}
+
+        assert by_narration["Sale"]["cash_direction"] == "in"
+        assert D(by_narration["Sale"]["cash_amount"]) == D("500")
+        assert by_narration["Rent"]["cash_direction"] == "out"
+        assert D(by_narration["Rent"]["cash_amount"]) == D("200")
+
+    async def test_the_trial_balance_counts_the_reversal(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(
+            authed_client, api, direction="out", amount="100", description="Wrong amount"
+        )
+
+        before = (await authed_client.get(f"{api}/reports/trial-balance")).json()
+        assert before["reversed_entry_count"] == 0
+
+        await authed_client.post(f"{api}/billing/{entry['id']}/reverse", json={})
+
+        after = (await authed_client.get(f"{api}/reports/trial-balance")).json()
+        assert after["reversed_entry_count"] == 1
+        assert after["is_balanced"] is True
+
+    async def test_an_account_that_cancelled_out_stays_on_the_trial_balance(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The bug this fixes: the expense account vanished entirely.
+
+        Its ₹100 charge and the ₹100 reversal net to zero, and the report dropped every
+        zero-net row — so the only trace of the whole episode was in the journal.
+        """
+        options = (await authed_client.get(f"{api}/billing/options")).json()
+        category = next(
+            c for c in options["categories"] if c["direction"] == "out" and c["is_default"]
+        )
+
+        entry = await record(
+            authed_client,
+            api,
+            direction="out",
+            amount="100",
+            description="Wrong amount",
+            category_id=category["id"],
+        )
+        await authed_client.post(f"{api}/billing/{entry['id']}/reverse", json={})
+
+        report = (await authed_client.get(f"{api}/reports/trial-balance")).json()
+        row = next((r for r in report["rows"] if r["account_id"] == category["id"]), None)
+
+        assert row is not None, "the reversed account vanished from the trial balance"
+        # Nets to nothing...
+        assert D(row["debit"]) == 0
+        assert D(row["credit"]) == 0
+        # ...but the movement that cancelled is still reported.
+        assert D(row["gross_debit"]) == D("100")
+        assert D(row["gross_credit"]) == D("100")
+
+    async def test_an_untouched_account_still_stays_off_the_report(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Showing every zero account would bury the four rows that matter under a
+        hundred that do not. Only accounts with *activity* are kept."""
+        await record(authed_client, api, direction="in", amount="500", description="Sale")
+
+        report = (await authed_client.get(f"{api}/reports/trial-balance")).json()
+        names = {r["name"] for r in report["rows"]}
+        assert "Pet Care" not in names
+        assert len(report["rows"]) < 10

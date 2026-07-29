@@ -5,6 +5,7 @@
  * the Inventory ledger account is the one worth showing first.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { AlertTriangle, Plus, ScanLine } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -49,8 +50,26 @@ const MOVEMENT_TONES: Partial<Record<MovementKind, BadgeTone>> = {
   reversal: 'danger',
 };
 
+/** Narrows an untrusted search param to a known tab, so a hand-edited query
+ *  string falls back to the default instead of breaking the page. */
+const TAB_KEYS = ['stock', 'products', 'suppliers', 'movements', 'bills', 'payables'] as const;
+
+function isTab(value: unknown): value is Tab {
+  return typeof value === 'string' && (TAB_KEYS as readonly string[]).includes(value);
+}
+
 export function InventoryPage() {
-  const [tab, setTab] = useState<Tab>('stock');
+  // The tab lives in the URL, not in component state, so a reload returns to it and
+  // the view can be linked to. Read untyped and narrowed by `isTab`: that is safer
+  // than a typed `from`, because a hand-edited query string then falls back to the
+  // default rather than throwing.
+  const navigate = useNavigate();
+  const search = useSearch({ strict: false });
+  const tab: Tab = isTab(search.tab) ? search.tab : 'stock';
+  const setTab = (next: Tab) => {
+    // `replace` keeps tab switching out of the back stack.
+    void navigate({ to: '/inventory', search: { tab: next }, replace: true });
+  };
 
   return (
     <div>

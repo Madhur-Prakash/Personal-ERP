@@ -93,10 +93,21 @@ def _entry_response(entry: object) -> JournalEntryRead:
     from app.modules.accounting.models import JournalEntry
 
     assert isinstance(entry, JournalEntry)  # noqa: S101
+
+    # Net movement across every cash-equivalent line. Netting rather than taking the
+    # first one matters for a transfer between two of your own accounts: one is debited
+    # and the other credited, the net is zero, and reporting it as either "in" or "out"
+    # would double-count money that never left the business.
+    cash_lines = [line for line in entry.lines if line.account.subtype.is_cash_equivalent]
+    net = sum((line.debit - line.credit for line in cash_lines), start=ZERO)
+    direction = "in" if net > 0 else "out" if net < 0 else None
+
     return with_computed(
         JournalEntryRead,
         entry,
         journal_code=entry.journal.code,
+        cash_direction=direction,
+        cash_amount=abs(net),
         lines=[
             with_computed(
                 JournalEntryLineRead,

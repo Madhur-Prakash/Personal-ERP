@@ -101,6 +101,16 @@ export interface JournalEntryLine {
 }
 
 export interface JournalEntry {
+  /**
+   * Whether cash actually moved, and which way.
+   *
+   * An entry always has both a debit and a credit, so "debited or credited" has no
+   * single answer — the useful question is whether money came in or went out, decided
+   * by which side the cash account sits on. Null when no cash was involved, or when the
+   * entry only moved money between your own accounts.
+   */
+  cash_direction: 'in' | 'out' | null;
+  cash_amount: Money;
   id: string;
   journal_id: string;
   journal_code: string;
@@ -139,6 +149,10 @@ export interface JournalEntryCreate {
 // Accounting — reports
 // ---------------------------------------------------------------------------
 export interface TrialBalanceRow {
+  /** Movement through the account before netting. Non-zero with a nil net means the
+   *  activity cancelled out — usually a reversal. */
+  gross_debit: Money;
+  gross_credit: Money;
   account_id: string;
   code: string;
   name: string;
@@ -148,6 +162,9 @@ export interface TrialBalanceRow {
 }
 
 export interface TrialBalance {
+  /** Entries cancelled by a reversal in this window. A reversal leaves no trace in the
+   *  net figures, so without this the report cannot be reconciled against the journal. */
+  reversed_entry_count: number;
   as_of: string;
   rows: TrialBalanceRow[];
   total_debit: Money;

@@ -214,11 +214,35 @@ class TestAccountingApi:
         response = await authed_client.get(f"{api}/accounts")
         assert response.status_code == 200, response.text
         accounts = response.json()
-        assert len(accounts) == 53  # the seeded chart, including GRNI
+
+        # Asserted by shape rather than by an exact count. `len(accounts) == 53` was here
+        # and had to be edited every time the template gained a category — a maintenance
+        # tax that never caught a defect, because a wrong *number* of accounts is not a
+        # failure mode. Every system role being resolvable is.
+        keys = {a["system_key"] for a in accounts if a["system_key"]}
+        assert {
+            "cash",
+            "bank",
+            "accounts_receivable",
+            "accounts_payable",
+            "inventory",
+            "sales_revenue",
+            "cost_of_goods_sold",
+            "gst_input",
+            "gst_output",
+            "grni",
+            "retained_earnings",
+            "owner_capital",
+            "rounding",
+        } <= keys
 
         cash = next(a for a in accounts if a["system_key"] == "cash")
         assert cash["normal_balance"] == "debit"
         assert cash["is_postable"] is True
+
+        # Groups exist and are not postable; leaves are.
+        assert any(a["is_group"] for a in accounts)
+        assert all(not a["is_postable"] for a in accounts if a["is_group"])
 
     async def test_journal_entry_round_trip(
         self, authed_client: AsyncClient, api: str, ready_books: Organization

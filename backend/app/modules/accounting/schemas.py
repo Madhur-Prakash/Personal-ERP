@@ -12,11 +12,12 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from decimal import Decimal
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, StringConstraints, model_validator
 
 from app.core.schemas import BaseSchema, ResponseSchema, TimestampedSchema
+from app.db.types import ZERO
 from app.modules.accounting.models import (
     AccountSubtype,
     AccountType,
@@ -286,6 +287,21 @@ class JournalEntryRead(TimestampedSchema):
     source_id: uuid.UUID | None
     lines: list[JournalEntryLineRead] = Field(default_factory=list)
 
+    #: Whether cash actually moved, and which way.
+    #:
+    #: An entry always has both a debit and a credit — that is what double-entry means —
+    #: so "was this debited or credited" has no single answer. The question people are
+    #: really asking is whether money came in or went out, and that is decided by which
+    #: side the *cash* account sits on: cash debited means it arrived, credited means it
+    #: left.
+    #:
+    #: ``None`` when no cash account is involved (an invoice posting moves receivables
+    #: and revenue, not cash) or when the entry only shuffles money between two of your
+    #: own accounts, where the net change is genuinely zero.
+    cash_direction: Literal["in", "out"] | None = None
+    #: The size of that movement, unsigned. Zero when there was none.
+    cash_amount: Decimal = ZERO
+
 
 class ReverseEntryRequest(BaseSchema):
     """A reversal may be dated later than the original — you cannot post into a
@@ -303,8 +319,26 @@ class TrialBalanceRow(ResponseSchema):
     code: str
     name: str
     account_type: AccountType
+    #: The net balance, shown on whichever side it falls. Zero on both sides means the
+    #: account had activity that cancelled out — check `gross_debit`/`gross_credit`.
     debit: Decimal
     credit: Decimal
+    #: Total movement through the account before netting.
+    #:
+    #: Worth reporting separately because a net of nil and no activity at all look
+    #: identical otherwise, and they are very different facts: an account whose ₹100
+    #: charge was reversed has a story, an untouched account does not.
+    gross_debit: Decimal = ZERO
+    gross_credit: Decimal = ZERO
+
+    @property
+    def nets_to_nil(self) -> bool:
+        """Had movement, and it cancelled out — usually a reversal."""
+        return (
+            self.debit == 0
+            and self.credit == 0
+            and (self.gross_debit != 0 or self.gross_credit != 0)
+        )
 
 
 class TrialBalance(ResponseSchema):
@@ -313,6 +347,11 @@ class TrialBalance(ResponseSchema):
     rows: list[TrialBalanceRow]
     total_debit: Decimal
     total_credit: Decimal
+    #: Entries cancelled by a reversal in this window. Surfaced because a reversal
+    #: leaves no visible trace in the net figures — both entries remain in the ledger
+    #: and sum to zero — so without this the report cannot be reconciled against a
+    #: journal that plainly shows four entries.
+    reversed_entry_count: int = 0
     #: Must always be true. Surfaced rather than asserted so a corrupted ledger is
     #: visible in the UI instead of raising a 500 on an otherwise-useful report.
     is_balanced: bool
