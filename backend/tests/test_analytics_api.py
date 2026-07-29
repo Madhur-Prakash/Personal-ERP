@@ -571,3 +571,102 @@ class TestPermissions:
     ) -> None:
         response = await client.get(f"{api}/analytics/{endpoint}")
         assert response.status_code == 401
+
+
+class TestTrendAcceptsExplicitDates:
+    """A chart beside a report filtered to custom dates must cover the same window.
+
+    Without this the accounting screen's range filter could move every panel except the
+    trend, and two charts side by side would show different periods — a reliable way to
+    draw a wrong conclusion from correct numbers.
+    """
+
+    async def test_explicit_dates_override_the_preset(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        today = dt.date.today()
+        customer = await make_customer(authed_client, api, "Acme Buyer")
+        await post_invoice(authed_client, api, customer, amount="4000", on=today)
+
+        response = await authed_client.get(
+            f"{api}/analytics/trend",
+            params={
+                "period": "last_12_months",
+                "from_date": today.replace(day=1).isoformat(),
+                "to_date": today.isoformat(),
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        assert body["span"]["start"] == today.replace(day=1).isoformat()
+        assert body["span"]["end"] == today.isoformat()
+        assert D(body["total_income"]) == D("4000")
+
+    async def test_a_reversed_range_is_rejected(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        response = await authed_client.get(
+            f"{api}/analytics/trend",
+            params={"from_date": "2026-07-31", "to_date": "2026-07-01"},
+        )
+        assert response.status_code == 422
+
+    async def test_the_preset_still_works_without_dates(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        response = await authed_client.get(
+            f"{api}/analytics/trend", params={"period": "this_month"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["points"]
+
+
+class TestWaterfallSourceMatchesTheDashboard:
+    """The waterfall's closing bar is the P&L's `net_profit`, so the two must agree.
+
+    The chart uses the statement's own figures rather than re-adding the lines, and this
+    asserts the premise that makes that safe: for one window, the P&L and the dashboard
+    report the same profit.
+    """
+
+    async def test_profit_and_loss_matches_the_dashboard_for_the_same_window(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        today = dt.date.today()
+        customer = await make_customer(authed_client, api, "Acme Buyer")
+        await post_invoice(authed_client, api, customer, amount="9000", on=today)
+
+        dashboard = (
+            await authed_client.get(f"{api}/analytics/dashboard", params={"period": "this_month"})
+        ).json()
+        span = dashboard["span"]
+
+        report = (
+            await authed_client.get(
+                f"{api}/reports/profit-and-loss",
+                params={"from_date": span["start"], "to_date": span["end"]},
+            )
+        ).json()
+
+        assert D(report["net_profit"]) == D(dashboard["net_profit"]["current"])
+
+    async def test_the_expense_lines_sum_to_the_stated_total(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The waterfall steps down once per expense line, so the steps must add up to the
+        total it claims to decompose — otherwise the bars and the closing figure disagree."""
+        today = dt.date.today()
+        report = (
+            await authed_client.get(
+                f"{api}/reports/profit-and-loss",
+                params={
+                    "from_date": today.replace(day=1).isoformat(),
+                    "to_date": today.isoformat(),
+                },
+            )
+        ).json()
+
+        lines = sum((D(line["amount"]) for line in report["expenses"]), start=D("0"))
+        assert lines == D(report["total_expenses"])
+        assert D(report["total_income"]) - D(report["total_expenses"]) == D(report["net_profit"])

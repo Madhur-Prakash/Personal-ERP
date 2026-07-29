@@ -120,8 +120,9 @@ export const analyticsApi = {
   periods: () => api.get<PeriodOptions>('/analytics/periods'),
   dashboard: (period: Period = 'this_month') =>
     api.get<Dashboard>('/analytics/dashboard', { params: { period } }),
-  trend: (period: Period = 'last_12_months') =>
-    api.get<Trend>('/analytics/trend', { params: { period } }),
+  /** Explicit dates override the preset, so a chart can match a filtered report. */
+  trend: (period: Period = 'last_12_months', range?: { from_date: string; to_date: string }) =>
+    api.get<Trend>('/analytics/trend', { params: range ? { ...range } : { period } }),
   topCustomers: (period: Period = 'this_fiscal_year', limit = 5) =>
     api.get<Ranking>('/analytics/top-customers', { params: { period, limit } }),
   topProducts: (period: Period = 'this_fiscal_year', limit = 5) =>

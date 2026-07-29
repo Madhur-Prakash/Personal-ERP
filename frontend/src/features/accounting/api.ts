@@ -227,7 +227,8 @@ export interface AccountLedger {
 }
 
 export const accountingApi = {
-  accounts: (params?: { account_type?: AccountType; postable_only?: boolean }) =>
+  /** `as_of` reports balances at a past date, so a chart can match a filtered report. */
+  accounts: (params?: { account_type?: AccountType; postable_only?: boolean; as_of?: string }) =>
     api.get<Account[]>('/accounts', { params }),
 
   journals: () => api.get<Journal[]>('/journals'),

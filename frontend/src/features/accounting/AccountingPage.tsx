@@ -15,15 +15,22 @@ import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import type { Column } from '@/components/ui/DataTable';
 import { DataTable, PageHeader, Pagination } from '@/components/ui/DataTable';
+import { Skeleton } from '@/components/ui/Skeleton';
 import {
-  type Account,
-  type AccountType,
   type JournalEntry,
   type ReportLine,
   type TrialBalanceRow,
   accountingApi,
 } from '@/features/accounting/api';
+import {
+  AccountBalancesChart,
+  BalanceByTypeChart,
+  CashMovementChart,
+} from '@/features/accounting/AccountingCharts';
+import { SpendingMixChart, TrendChart } from '@/features/accounting/CompositionCharts';
+import { ProfitWaterfallChart } from '@/features/accounting/WaterfallChart';
 import { useReportRange } from '@/features/accounting/ReportRange';
+import { analyticsApi } from '@/features/analytics/api';
 import { cn } from '@/lib/cn';
 import { formatDate, formatMoney, isZeroMoney } from '@/lib/format';
 
@@ -36,14 +43,6 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'pnl', label: 'Profit & loss' },
   { key: 'balance-sheet', label: 'Balance sheet' },
 ];
-
-const TYPE_TONES: Record<AccountType, BadgeTone> = {
-  asset: 'info',
-  liability: 'warning',
-  equity: 'primary',
-  income: 'success',
-  expense: 'danger',
-};
 
 /** Narrows an untrusted search param to a known tab, so a hand-edited query
  *  string falls back to the default instead of breaking the page. */
@@ -110,69 +109,67 @@ export function AccountingPage() {
 // Chart of accounts
 // ---------------------------------------------------------------------------
 function ChartOfAccounts() {
+  // One range control drives every chart on this tab. Separate filters per chart would
+  // let two panels sit side by side showing different periods, which is a reliable way to
+  // draw a wrong conclusion from correct numbers.
+  const { range, control } = useReportRange();
+
   const { data, isLoading } = useQuery({
-    queryKey: ['accounts'],
-    queryFn: () => accountingApi.accounts(),
+    // Balances are point-in-time, so only the end of the range applies — "cash over
+    // March" is not a number.
+    queryKey: ['accounts', range.to_date],
+    queryFn: () => accountingApi.accounts({ as_of: range.to_date }),
   });
 
-  const columns: Column<Account>[] = [
-    {
-      header: 'Code',
-      cell: (row) => (
-        // Indented by depth so the hierarchy reads without a tree widget.
-        <span
-          className="text-content-muted font-mono text-[12px]"
-          style={{ paddingLeft: `${row.depth * 14}px` }}
-        >
-          {row.code}
-        </span>
-      ),
-    },
-    {
-      header: 'Account',
-      cell: (row) => (
-        <span className={cn(row.is_group && 'text-content font-semibold')}>
-          {row.name}
-          {row.system_key && (
-            <Badge tone="neutral" className="ml-2">
-              system
-            </Badge>
-          )}
-        </span>
-      ),
-    },
-    {
-      header: 'Type',
-      hideOnMobile: true,
-      cell: (row) => <Badge tone={TYPE_TONES[row.account_type]}>{row.account_type}</Badge>,
-    },
-    {
-      header: 'Balance',
-      numeric: true,
-      cell: (row) =>
-        row.is_group ? (
-          <span className="text-content-muted">-</span>
-        ) : (
-          <span className={cn(isZeroMoney(row.balance) && 'text-content-muted')}>
-            {formatMoney(row.balance)}
-          </span>
-        ),
-    },
-  ];
+  // The waterfall's closing bar must equal the dashboard's net profit, so it is built
+  // from the statement rather than recomputed.
+  const { data: report, isLoading: reportLoading } = useQuery({
+    queryKey: ['pnl', range],
+    queryFn: () => accountingApi.profitAndLoss(range),
+  });
 
+  const { data: trend } = useQuery({
+    queryKey: ['analytics-trend', range],
+    queryFn: () => analyticsApi.trend('last_12_months', range),
+  });
+
+  const accounts = data ?? [];
+
+  // The 114-row table is gone. It listed every account in the template, of which four
+  // hold a balance, so it was a hundred rows of ₹0.00 in front of the four figures
+  // anyone came here for. The charts show what has money; the trial balance is the
+  // place to read exact per-account figures.
   return (
-    <Card>
-      <DataTable
-        columns={columns}
-        rows={data ?? []}
-        rowKey={(row) => row.id}
-        isLoading={isLoading}
-        empty={{
-          title: 'No accounts yet',
-          description: 'A default chart is seeded when an organization is created.',
-        }}
-      />
-    </Card>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader
+          title="Period"
+          description={`Every chart below covers ${range.from_date} to ${range.to_date}.`}
+          action={control}
+        />
+      </Card>
+
+      <ProfitWaterfallChart report={report} isLoading={reportLoading} />
+
+      {isLoading ? (
+        <Card>
+          <CardBody className="pt-5">
+            <Skeleton className="h-64 w-full" />
+          </CardBody>
+        </Card>
+      ) : (
+        <>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <AccountBalancesChart accounts={accounts} />
+            <SpendingMixChart accounts={accounts} />
+          </div>
+
+          <TrendChart points={trend?.points} />
+
+          <BalanceByTypeChart accounts={accounts} />
+        </>
+      )}
+    </div>
   );
 }
 
@@ -260,26 +257,30 @@ function JournalEntries() {
   ];
 
   return (
-    <Card>
-      <DataTable
-        columns={columns}
-        rows={data?.items ?? []}
-        rowKey={(row) => row.id}
-        isLoading={isLoading}
-        empty={{
-          title: 'No journal entries',
-          description: 'Entries appear here as invoices, bills, and payments are posted.',
-        }}
-      />
-      {data && (
-        <Pagination
-          page={data.meta.page}
-          totalPages={data.meta.total_pages}
-          totalItems={data.meta.total_items}
-          onChange={setPage}
+    <div className="space-y-4">
+      <CashMovementChart entries={data?.items ?? []} />
+
+      <Card>
+        <DataTable
+          columns={columns}
+          rows={data?.items ?? []}
+          rowKey={(row) => row.id}
+          isLoading={isLoading}
+          empty={{
+            title: 'No journal entries',
+            description: 'Entries appear here as invoices, bills, and payments are posted.',
+          }}
         />
-      )}
-    </Card>
+        {data && (
+          <Pagination
+            page={data.meta.page}
+            totalPages={data.meta.total_pages}
+            totalItems={data.meta.total_items}
+            onChange={setPage}
+          />
+        )}
+      </Card>
+    </div>
   );
 }
 

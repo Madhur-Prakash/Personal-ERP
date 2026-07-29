@@ -63,11 +63,16 @@ export function InvoicesPage() {
   const navigate = useNavigate();
   const search = useSearch({ strict: false });
   const tab: Tab = isTab(search.tab) ? search.tab : 'invoices';
+  const [composing, setComposing] = useState(false);
+
   const setTab = (next: Tab) => {
+    // Close the composer on the way out. It belongs to the Invoices tab, and a
+    // half-written invoice hovering above the customer list is confusing — worse, the
+    // "New invoice" button is only on that tab, so there was no way to dismiss it.
+    setComposing(false);
     // `replace` keeps tab switching out of the back stack.
     void navigate({ to: '/invoices', search: { tab: next }, replace: true });
   };
-  const [composing, setComposing] = useState(false);
 
   return (
     <div>
@@ -110,7 +115,7 @@ export function InvoicesPage() {
         ))}
       </div>
 
-      {composing && <InvoiceComposer onClose={() => setComposing(false)} />}
+      {tab === 'invoices' && composing && <InvoiceComposer onClose={() => setComposing(false)} />}
 
       {tab === 'invoices' && <InvoiceList />}
       {tab === 'customers' && <CustomerList />}

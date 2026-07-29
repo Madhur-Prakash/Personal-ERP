@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.db.types import ZERO
 from app.modules.analytics.periods import (
     DateRange,
@@ -205,14 +205,27 @@ async def trend(
     calendar: CalendarDep,
     _: Annotated[None, Depends(require_permission(Permission.REPORT_READ))],
     period: Annotated[Period, Query()] = Period.LAST_12_MONTHS,
+    from_date: Annotated[dt.date | None, Query()] = None,
+    to_date: Annotated[dt.date | None, Query()] = None,
 ) -> TrendRead:
     """Income, expenses, and profit per calendar month.
 
     Months with no activity are returned with zeroes rather than omitted: a chart
     that silently skips an empty month draws a straight line across it and implies
     trading that did not happen.
+
+    Explicit dates override ``period``. Both exist because they answer different needs:
+    the presets keep a dashboard aligned with the organization's fiscal calendar, while a
+    custom range is what someone reconciling one particular fortnight wants — and a chart
+    sitting beside a report filtered to those dates has to cover the same window, or the
+    two quietly disagree.
     """
-    span = calendar.span(period)
+    if from_date is not None and to_date is not None:
+        if to_date < from_date:
+            raise ValidationError("to_date cannot be before from_date")
+        span = DateRange(from_date, to_date)
+    else:
+        span = calendar.span(period)
     points = await service.trend(organization_id, span=span)
 
     return TrendRead(
