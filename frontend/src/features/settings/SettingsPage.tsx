@@ -558,7 +558,7 @@ function OrganizationCard() {
             {organization?.timezone}
           </div>
           <div>
-            <span className="block font-medium">Fiscal year starts</span>
+            <span className="block font-medium">Financial year starts</span>
             {new Date(2000, (organization?.fiscal_year_start_month ?? 4) - 1).toLocaleString('en', {
               month: 'long',
             })}

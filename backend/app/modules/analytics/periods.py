@@ -14,7 +14,7 @@ days, so day 3 is compared against days 1-3 of the previous month.
 is no base to compare against. :func:`percent_change` returns ``None``, and the UI
 shows "no prior data" instead of a number that looks meaningful and is not.
 
-**Assuming the year starts in January.** India's fiscal year starts in April, and
+**Assuming the year starts in January.** India's financial year starts in April, and
 the organization stores its own start month. A "this year" figure computed on the
 calendar year is simply a different number from the one the business files.
 """
