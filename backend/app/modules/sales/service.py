@@ -42,6 +42,7 @@ from app.core.pagination import PageParams
 from app.modules.accounting.repository import SequenceRepository
 from app.modules.audit.models import AuditAction, AuditSeverity
 from app.modules.audit.service import AuditService
+from app.modules.organizations.clock import organization_today
 from app.modules.sales.models import (
     Customer,
     Lead,
@@ -443,6 +444,14 @@ class SalesDocumentService:
         self.sequences = SequenceRepository(session)
         self.audit = AuditService(session)
 
+    async def _today(self, organization_id: uuid.UUID) -> dt.date:
+        """Today by the organization's clock, not the server's.
+
+        See :mod:`app.modules.organizations.clock` for why those differ, and why it matters
+        for a date stamped on a record that someone will later reconcile.
+        """
+        return await organization_today(self.session, organization_id)
+
     async def _customer(self, organization_id: uuid.UUID, customer_id: uuid.UUID) -> Customer:
         customer = await self.customers.get_for_org(organization_id, customer_id)
         if customer is None:
@@ -468,7 +477,7 @@ class SalesDocumentService:
 
     async def _next_number(self, organization_id: uuid.UUID, *, scope: str, prefix: str) -> str:
         """Gap-free document number, reusing the ledger's sequence table."""
-        year = dt.date.today().year
+        year = (await self._today(organization_id)).year
         return await self.sequences.next_number(
             organization_id, scope=f"{scope}:{year}", prefix=f"{prefix}-{year}-"
         )
@@ -519,7 +528,7 @@ class QuotationService(SalesDocumentService):
             ),
             customer_id=customer.id,
             lead_id=data.lead_id,
-            quotation_date=data.quotation_date or dt.date.today(),
+            quotation_date=data.quotation_date or await self._today(organization_id),
             valid_until=data.valid_until,
             status=QuotationStatus.DRAFT,
             tax_treatment=treatment,
@@ -692,7 +701,7 @@ class SalesOrderService(SalesDocumentService):
             order_number=await self._next_number(organization_id, scope="sales_order", prefix="SO"),
             customer_id=customer.id,
             quotation_id=data.quotation_id,
-            order_date=data.order_date or dt.date.today(),
+            order_date=data.order_date or await self._today(organization_id),
             expected_delivery_date=data.expected_delivery_date,
             customer_reference=data.customer_reference,
             status=SalesOrderStatus.DRAFT,

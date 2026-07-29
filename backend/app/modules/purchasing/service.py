@@ -50,6 +50,7 @@ from app.modules.accounting.repository import JournalRepository, SequenceReposit
 from app.modules.accounting.service import ChartOfAccountsService, PostingService
 from app.modules.audit.models import AuditAction, AuditSeverity
 from app.modules.audit.service import AuditService
+from app.modules.organizations.clock import organization_today
 from app.modules.purchasing.models import (
     Product,
     ProductKind,
@@ -158,6 +159,14 @@ class PurchasingBase:
         self.stock = StockService(session)
         self.audit = AuditService(session)
 
+    async def _today(self, organization_id: uuid.UUID) -> dt.date:
+        """Today by the organization's clock, not the server's.
+
+        See :mod:`app.modules.organizations.clock` for why those differ, and why it matters
+        for a date stamped on a record that someone will later reconcile.
+        """
+        return await organization_today(self.session, organization_id)
+
     async def _supplier(self, organization_id: uuid.UUID, supplier_id: uuid.UUID) -> Supplier:
         supplier = (
             await self.session.execute(
@@ -207,7 +216,7 @@ class PurchasingBase:
         )
 
     async def _next_number(self, organization_id: uuid.UUID, *, scope: str, prefix: str) -> str:
-        year = dt.date.today().year
+        year = (await self._today(organization_id)).year
         return await self.sequences.next_number(
             organization_id, scope=f"{scope}:{year}", prefix=f"{prefix}-{year}-"
         )
@@ -643,7 +652,7 @@ class PurchaseOrderService(PurchasingBase):
             ),
             supplier_id=supplier.id,
             warehouse_id=data.warehouse_id,
-            order_date=data.order_date or dt.date.today(),
+            order_date=data.order_date or await self._today(organization_id),
             expected_date=data.expected_date,
             status=PurchaseOrderStatus.DRAFT,
             tax_treatment=treatment,

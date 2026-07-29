@@ -837,10 +837,10 @@ class Bill(
     def is_fully_paid(self) -> bool:
         return self.paid_amount >= self.grand_total
 
-    def is_overdue(self, on: dt.date | None = None) -> bool:
+    def is_overdue(self, on: dt.date) -> bool:
         if not self.status.is_posted or self.is_fully_paid:
             return False
-        return (on or dt.date.today()) > self.due_date
+        return on > self.due_date
 
 
 class BillLine(Base, UUIDPrimaryKeyMixin, PurchaseLineMixin, TimestampMixin):

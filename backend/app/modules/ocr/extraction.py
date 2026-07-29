@@ -244,15 +244,20 @@ def parse_amount(raw: str) -> Decimal | None:
     return value if value >= 0 else None
 
 
-def parse_date(text: str, *, today: dt.date | None = None) -> dt.date | None:
+def parse_date(text: str, *, today: dt.date) -> dt.date | None:
     """Parse the first plausible date in ``text``.
 
     **Day-first, not month-first.** ``03/04/2026`` is 3 April in India and 4 March
     in the US, and this product's locale is India. Getting it wrong silently files a
     document in the wrong month, so the ambiguity is resolved by locale rather than
     guessed per document.
+
+    ``today`` is required rather than defaulted. It decides which parsed dates are too far
+    in the future to be real, and the obvious default - the server's date - is the wrong
+    one for an organization in another timezone. Requiring it makes that a type error
+    instead of a silent difference of a day.
     """
-    reference = today or dt.date.today()
+    reference = today
 
     for pattern, order in DATE_PATTERNS:
         match = pattern.search(text)
@@ -402,7 +407,7 @@ def extract_supplier_name(text: str) -> ExtractedField[str] | None:
     return None
 
 
-def extract_document(text: str, *, today: dt.date | None = None) -> ExtractedDocument:
+def extract_document(text: str, *, today: dt.date) -> ExtractedDocument:
     """Extract every field from recognised text.
 
     Confidence is raised when ``subtotal + tax == total``, because that arithmetic

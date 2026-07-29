@@ -46,6 +46,7 @@ from app.modules.ocr.engines import UnsupportedDocumentError, recognise, sniff_f
 from app.modules.ocr.extraction import HIGH_CONFIDENCE, ExtractedDocument, extract_document
 from app.modules.ocr.models import Document, DocumentKind, DocumentStatus
 from app.modules.ocr.storage import DocumentStore, relative_path_for, sha256_of
+from app.modules.organizations.clock import organization_today
 from app.modules.purchasing.models import Bill, Supplier
 from app.modules.purchasing.receiving import BillService
 from app.modules.purchasing.schemas import BillCreate
@@ -322,7 +323,8 @@ class DocumentService:
         document.page_count = result.page_count
         document.recognised_text = result.text
 
-        self._apply_extraction(document, extract_document(result.text))
+        today = await organization_today(self.session, document.organization_id)
+        self._apply_extraction(document, extract_document(result.text, today=today))
         document.status = DocumentStatus.EXTRACTED
 
     @staticmethod
@@ -444,7 +446,8 @@ class DocumentService:
             "total_amount": str(document.extracted_total_amount),
         }
 
-        self._apply_extraction(document, extract_document(document.recognised_text))
+        today = await organization_today(self.session, organization_id)
+        self._apply_extraction(document, extract_document(document.recognised_text, today=today))
         document.status = DocumentStatus.EXTRACTED
         document.failure_code = None
         document.failure_message = None

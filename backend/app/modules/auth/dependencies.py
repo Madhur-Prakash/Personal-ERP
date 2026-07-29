@@ -32,7 +32,6 @@ from typing import Annotated, Any
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import RequestContext
@@ -47,11 +46,10 @@ from app.core.logging import get_logger, set_log_context
 from app.core.redis import RedisKey, get_redis
 from app.core.security import decode_access_token
 from app.db.session import get_db
-from app.modules.analytics.periods import local_date
 from app.modules.auth.models import UserSession
 from app.modules.auth.repository import SessionRepository
 from app.modules.auth.service import AuthService
-from app.modules.organizations.models import Organization
+from app.modules.organizations.clock import organization_today
 from app.modules.rbac.permissions import Permission
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
@@ -348,10 +346,7 @@ async def get_organization_today(
     The analytics module already resolved dates this way and documented why; this is the
     same rule made available to every other router rather than restated in each.
     """
-    timezone_name = await session.scalar(
-        select(Organization.timezone).where(Organization.id == organization_id)
-    )
-    return local_date(dt.datetime.now(dt.UTC), timezone_name or "UTC")
+    return await organization_today(session, organization_id)
 
 
 #: Today by the organization's clock. Use in place of ``dt.date.today()`` anywhere the

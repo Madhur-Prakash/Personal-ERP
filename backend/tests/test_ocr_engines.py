@@ -9,6 +9,7 @@ the engine would test the mock.
 
 from __future__ import annotations
 
+import datetime as dt
 import io
 from decimal import Decimal
 
@@ -239,7 +240,7 @@ class TestPdfTextLayerEngine:
         "better", it is exact.
         """
         result = engine.recognise(digital_pdf, DocumentFormat.PDF)
-        parsed = extract_document(result.text)
+        parsed = extract_document(result.text, today=dt.date(2026, 7, 30))
 
         assert parsed.supplier_gstin is not None
         assert parsed.supplier_gstin.value == "27AABCU9603R1ZM"
@@ -323,7 +324,7 @@ class TestTesseractEngine:
         got all 15 right - a single substituted character would fail the pattern.
         """
         result = tesseract.recognise(invoice_png, DocumentFormat.PNG)
-        parsed = extract_document(result.text)
+        parsed = extract_document(result.text, today=dt.date(2026, 7, 30))
 
         assert parsed.supplier_gstin is not None, result.text
         assert parsed.supplier_gstin.value == "27AABCU9603R1ZM"

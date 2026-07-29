@@ -17,6 +17,7 @@ from app.modules.auth.dependencies import (
     ActiveOrganizationId,
     CurrentUser,
     DbSession,
+    OrganizationToday,
     RequestCtx,
     require_permission,
 )
@@ -161,18 +162,21 @@ def _receipt_response(receipt: Any) -> GoodsReceiptRead:
     )
 
 
-def bill_response(bill: Any) -> BillRead:
+def bill_response(bill: Any, today: dt.date) -> BillRead:
     """Assemble a bill response.
 
     Public, unlike its siblings: the documents module creates bills too, and one
     shape for a bill across both routers beats a second assembly that drifts.
+
+    ``today`` is passed in because `is_overdue` otherwise falls back to the *server's*
+    date, which turns a bill overdue a day early for an organization ahead of it.
     """
     return with_computed(
         BillRead,
         bill,
         supplier_name=bill.supplier.name,
         outstanding=bill.outstanding,
-        is_overdue=bill.is_overdue(),
+        is_overdue=bill.is_overdue(today),
         lines=[PurchaseLineRead.model_validate(line) for line in bill.lines],
     )
 
@@ -519,6 +523,7 @@ async def stock_movements(
 )
 async def stock_valuation(
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     session: DbSession,
     _: Annotated[None, Depends(require_permission(Permission.REPORT_READ))],
     warehouse_id: Annotated[uuid.UUID | None, Query()] = None,
@@ -562,7 +567,7 @@ async def stock_valuation(
         for row in rows
     ]
     return StockValuationReport(
-        as_of=dt.date.today(),
+        as_of=today,
         warehouse_id=warehouse_id,
         rows=items,
         total_value=sum((r.total_value for r in items), ZERO),
@@ -580,6 +585,7 @@ async def stock_valuation(
 async def adjust_stock(
     data: StockAdjustRequest,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     products: ProductsDep,
     stock: StockDep,
@@ -592,7 +598,7 @@ async def adjust_stock(
         organization_id,
         product=product,
         quantity_delta=data.quantity_delta,
-        movement_date=data.movement_date or dt.date.today(),
+        movement_date=data.movement_date or today,
         reason=data.reason,
         actor=user,
         warehouse_id=data.warehouse_id,
@@ -614,6 +620,7 @@ async def adjust_stock(
 async def transfer_stock(
     data: StockTransferRequest,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     products: ProductsDep,
     stock: StockDep,
@@ -628,7 +635,7 @@ async def transfer_stock(
         quantity=data.quantity,
         from_warehouse_id=data.from_warehouse_id,
         to_warehouse_id=data.to_warehouse_id,
-        movement_date=data.movement_date or dt.date.today(),
+        movement_date=data.movement_date or today,
         actor=user,
         ctx=ctx,
     )
@@ -816,6 +823,7 @@ bills_router = APIRouter(prefix="/bills", tags=["Bills"])
 @bills_router.get("", response_model=Page[BillRead], summary="List bills")
 async def list_bills(
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     service: BillsDep,
     params: Annotated[PageParams, Depends()],
     _: Annotated[None, Depends(require_permission(Permission.PURCHASE_READ))],
@@ -830,7 +838,7 @@ async def list_bills(
         status=bill_status,
         overdue_only=overdue_only,
     )
-    return Page.create([bill_response(r) for r in rows], total=total, params=params)
+    return Page.create([bill_response(r, today) for r in rows], total=total, params=params)
 
 
 @bills_router.post(
@@ -839,6 +847,7 @@ async def list_bills(
 async def create_bill(
     data: BillCreate,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: BillsDep,
     ctx: RequestCtx,
@@ -847,18 +856,19 @@ async def create_bill(
     """A duplicate `supplier_invoice_number` for the same supplier is refused -
     entering the same invoice twice is the most expensive error in payables."""
     bill = await service.create(organization_id, data, user, ctx)
-    return bill_response(await service.get(organization_id, bill.id))
+    return bill_response(await service.get(organization_id, bill.id), today)
 
 
 @bills_router.get("/ageing", response_model=PayablesAgeing, summary="Payables ageing")
 async def payables_ageing(
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     session: DbSession,
     _: Annotated[None, Depends(require_permission(Permission.PURCHASE_READ))],
     as_of: Annotated[dt.date | None, Query()] = None,
 ) -> PayablesAgeing:
     """What is owed, bucketed by how overdue it is."""
-    effective = as_of or dt.date.today()
+    effective = as_of or today
     rows = (
         await session.execute(
             select(Bill.due_date, Bill.grand_total, Bill.paid_amount).where(
@@ -907,16 +917,18 @@ async def payables_ageing(
 async def get_bill(
     bill_id: uuid.UUID,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     service: BillsDep,
     _: Annotated[None, Depends(require_permission(Permission.PURCHASE_READ))],
 ) -> BillRead:
-    return bill_response(await service.get(organization_id, bill_id))
+    return bill_response(await service.get(organization_id, bill_id), today)
 
 
 @bills_router.post("/{bill_id}/post", response_model=BillRead, summary="Post a bill")
 async def post_bill(
     bill_id: uuid.UUID,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: BillsDep,
     ctx: RequestCtx,
@@ -925,7 +937,7 @@ async def post_bill(
     """Recognises the payable and claims input GST. Clears the GRNI accrual when the
     bill follows a goods receipt."""
     await service.post(organization_id, bill_id, user, ctx)
-    return bill_response(await service.get(organization_id, bill_id))
+    return bill_response(await service.get(organization_id, bill_id), today)
 
 
 @bills_router.post("/{bill_id}/cancel", response_model=BillRead, summary="Cancel a bill")
@@ -933,6 +945,7 @@ async def cancel_bill(
     bill_id: uuid.UUID,
     data: CancelBillRequest,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: BillsDep,
     ctx: RequestCtx,
@@ -946,7 +959,7 @@ async def cancel_bill(
         actor=user,
         ctx=ctx,
     )
-    return bill_response(await service.get(organization_id, bill_id))
+    return bill_response(await service.get(organization_id, bill_id), today)
 
 
 # =============================================================================

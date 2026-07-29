@@ -115,7 +115,7 @@ class InvoiceService(SalesDocumentService):
         treatment = await self._treatment(organization_id, customer)
         computed = LineBuilder.compute(data.lines, treatment=treatment)
 
-        invoice_date = data.invoice_date or dt.date.today()
+        invoice_date = data.invoice_date or await self._today(organization_id)
         invoice = Invoice(
             organization_id=organization_id,
             invoice_number=await self._next_number(organization_id, scope="invoice", prefix="INV"),
@@ -531,7 +531,7 @@ class PaymentService(SalesDocumentService):
             organization_id=organization_id,
             payment_number=await self._next_number(organization_id, scope="payment", prefix="RCP"),
             customer_id=customer.id,
-            payment_date=data.payment_date or dt.date.today(),
+            payment_date=data.payment_date or await self._today(organization_id),
             amount=data.amount,
             unallocated_amount=data.amount,
             method=data.method,

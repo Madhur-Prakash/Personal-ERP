@@ -14,6 +14,7 @@ from app.modules.auth.dependencies import (
     ActiveOrganizationId,
     CurrentUser,
     DbSession,
+    OrganizationToday,
     RequestCtx,
     require_permission,
 )
@@ -308,6 +309,7 @@ async def confirm_document(
     document_id: uuid.UUID,
     data: ConfirmDocumentRequest,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: DocumentsDep,
     ctx: RequestCtx,
@@ -333,7 +335,7 @@ async def confirm_document(
     # same function that serves `POST /bills` - one shape for a bill, not two.
     return ConfirmResult(
         document=_detail(document),
-        bill=bill_response(await service.bills.get(organization_id, bill.id)),
+        bill=bill_response(await service.bills.get(organization_id, bill.id), today),
     )
 
 

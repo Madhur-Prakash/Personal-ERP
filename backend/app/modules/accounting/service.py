@@ -69,6 +69,7 @@ from app.modules.accounting.schemas import (
 )
 from app.modules.audit.models import AuditAction, AuditSeverity
 from app.modules.audit.service import AuditService
+from app.modules.organizations.clock import organization_today
 from app.modules.users.models import User
 
 log = get_logger(__name__)
@@ -512,7 +513,7 @@ class FiscalCalendarService:
         (the Indian convention), a date in February 2026 belongs to the year
         beginning April 2025.
         """
-        today = on or dt.date.today()
+        today = on or await organization_today(self.session, organization_id)
 
         start_year = today.year if today.month >= fiscal_year_start_month else today.year - 1
         start = dt.date(start_year, fiscal_year_start_month, 1)

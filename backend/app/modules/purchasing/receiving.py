@@ -142,7 +142,7 @@ class GoodsReceiptService(PurchasingBase):
             supplier_id=supplier.id,
             purchase_order_id=data.purchase_order_id,
             warehouse_id=warehouse.id,
-            receipt_date=data.receipt_date or dt.date.today(),
+            receipt_date=data.receipt_date or await self._today(organization_id),
             supplier_reference=data.supplier_reference,
             status=GoodsReceiptStatus.DRAFT,
             notes=data.notes,
@@ -442,7 +442,7 @@ class BillService(PurchasingBase):
         if overdue_only:
             clauses.extend(
                 [
-                    Bill.due_date < dt.date.today(),
+                    Bill.due_date < await self._today(organization_id),
                     Bill.status.in_([BillStatus.POSTED, BillStatus.PARTIALLY_PAID]),
                     Bill.paid_amount < Bill.grand_total,
                 ]
@@ -500,7 +500,7 @@ class BillService(PurchasingBase):
 
         treatment = await self._treatment(organization_id, supplier)
         computed = PurchaseLineBuilder.compute(data.lines, treatment=treatment)
-        bill_date = data.bill_date or dt.date.today()
+        bill_date = data.bill_date or await self._today(organization_id)
 
         bill = Bill(
             organization_id=organization_id,
@@ -843,7 +843,7 @@ class SupplierPaymentService(PurchasingBase):
                 organization_id, scope="supplier_payment", prefix="PAY"
             ),
             supplier_id=supplier.id,
-            payment_date=data.payment_date or dt.date.today(),
+            payment_date=data.payment_date or await self._today(organization_id),
             amount=data.amount,
             unallocated_amount=data.amount,
             method=data.method,

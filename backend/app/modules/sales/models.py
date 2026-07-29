@@ -406,10 +406,10 @@ class Quotation(
         *_document_constraints("quotation"),
     )
 
-    def is_expired(self, on: dt.date | None = None) -> bool:
+    def is_expired(self, on: dt.date) -> bool:
         if self.valid_until is None:
             return False
-        return (on or dt.date.today()) > self.valid_until
+        return on > self.valid_until
 
 
 class QuotationLine(Base, UUIDPrimaryKeyMixin, SalesLineMixin, TimestampMixin):
@@ -584,15 +584,15 @@ class Invoice(
     def is_fully_paid(self) -> bool:
         return self.paid_amount >= self.grand_total
 
-    def is_overdue(self, on: dt.date | None = None) -> bool:
+    def is_overdue(self, on: dt.date) -> bool:
         if not self.status.is_posted or self.is_fully_paid:
             return False
-        return (on or dt.date.today()) > self.due_date
+        return on > self.due_date
 
-    def days_overdue(self, on: dt.date | None = None) -> int:
+    def days_overdue(self, on: dt.date) -> int:
         if not self.is_overdue(on):
             return 0
-        return ((on or dt.date.today()) - self.due_date).days
+        return (on - self.due_date).days
 
 
 class InvoiceLine(Base, UUIDPrimaryKeyMixin, SalesLineMixin, TimestampMixin):

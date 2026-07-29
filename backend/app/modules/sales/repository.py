@@ -273,7 +273,7 @@ class InvoiceRepository(BaseRepository[Invoice]):
         if overdue_only:
             clauses.extend(
                 [
-                    Invoice.due_date < (as_of or dt.date.today()),
+                    Invoice.due_date < as_of,
                     Invoice.status.in_([InvoiceStatus.POSTED, InvoiceStatus.PARTIALLY_PAID]),
                     Invoice.paid_amount < Invoice.grand_total,
                 ]

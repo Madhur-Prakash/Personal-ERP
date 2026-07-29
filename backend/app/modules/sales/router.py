@@ -15,6 +15,7 @@ from app.modules.auth.dependencies import (
     ActiveOrganizationId,
     CurrentUser,
     DbSession,
+    OrganizationToday,
     RequestCtx,
     require_permission,
 )
@@ -99,12 +100,14 @@ def _lines(document: Any) -> list[SalesLineRead]:
     return [SalesLineRead.model_validate(line) for line in document.lines]
 
 
-def _quotation_response(quotation: Any) -> QuotationRead:
+def _quotation_response(quotation: Any, today: dt.date) -> QuotationRead:
+    # `today` is passed in rather than defaulted inside `is_expired`, whose fallback is the
+    # *server's* date - a quotation would expire a day early for an organization ahead of it.
     return with_computed(
         QuotationRead,
         quotation,
         customer_name=quotation.customer.name,
-        is_expired=quotation.is_expired(),
+        is_expired=quotation.is_expired(today),
         lines=_lines(quotation),
     )
 
@@ -119,14 +122,14 @@ def _order_response(order: Any) -> SalesOrderRead:
     )
 
 
-def _invoice_response(invoice: Any) -> InvoiceRead:
+def _invoice_response(invoice: Any, today: dt.date) -> InvoiceRead:
     return with_computed(
         InvoiceRead,
         invoice,
         customer_name=invoice.customer.name,
         outstanding=invoice.outstanding,
-        is_overdue=invoice.is_overdue(),
-        days_overdue=invoice.days_overdue(),
+        is_overdue=invoice.is_overdue(today),
+        days_overdue=invoice.days_overdue(today),
         lines=_lines(invoice),
     )
 
@@ -236,11 +239,12 @@ async def delete_customer(
 async def customer_statement(
     customer_id: uuid.UUID,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     service: CustomersDep,
     _: Annotated[None, Depends(require_permission(Permission.CUSTOMER_READ))],
     as_of: Annotated[dt.date | None, Query()] = None,
 ) -> CustomerStatement:
-    effective = as_of or dt.date.today()
+    effective = as_of or today
     customer, count, invoiced, paid, overdue = await service.statement(
         organization_id, customer_id, as_of=effective
     )
@@ -356,6 +360,7 @@ quotations_router = APIRouter(prefix="/quotations", tags=["Quotations"])
 @quotations_router.get("", response_model=Page[QuotationRead], summary="List quotations")
 async def list_quotations(
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     service: QuotationsDep,
     params: Annotated[PageParams, Depends()],
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_READ))],
@@ -365,7 +370,9 @@ async def list_quotations(
     rows, total = await service.paginate(
         organization_id, params, customer_id=customer_id, status=quote_status
     )
-    return Page.create([_quotation_response(row) for row in rows], total=total, params=params)
+    return Page.create(
+        [_quotation_response(row, today) for row in rows], total=total, params=params
+    )
 
 
 @quotations_router.post(
@@ -377,6 +384,7 @@ async def list_quotations(
 async def create_quotation(
     data: QuotationCreate,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: QuotationsDep,
     ctx: RequestCtx,
@@ -384,17 +392,18 @@ async def create_quotation(
 ) -> QuotationRead:
     """Totals and the GST split are computed server-side from the lines."""
     quotation = await service.create(organization_id, data, user, ctx)
-    return _quotation_response(await service.get(organization_id, quotation.id))
+    return _quotation_response(await service.get(organization_id, quotation.id), today)
 
 
 @quotations_router.get("/{quotation_id}", response_model=QuotationRead, summary="Get a quotation")
 async def get_quotation(
     quotation_id: uuid.UUID,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     service: QuotationsDep,
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_READ))],
 ) -> QuotationRead:
-    return _quotation_response(await service.get(organization_id, quotation_id))
+    return _quotation_response(await service.get(organization_id, quotation_id), today)
 
 
 @quotations_router.patch(
@@ -404,13 +413,14 @@ async def update_quotation(
     quotation_id: uuid.UUID,
     data: QuotationUpdate,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: QuotationsDep,
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_WRITE))],
 ) -> QuotationRead:
     await service.update(organization_id, quotation_id, data, user, ctx)
-    return _quotation_response(await service.get(organization_id, quotation_id))
+    return _quotation_response(await service.get(organization_id, quotation_id), today)
 
 
 @quotations_router.post(
@@ -419,13 +429,14 @@ async def update_quotation(
 async def send_quotation(
     quotation_id: uuid.UUID,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: QuotationsDep,
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_WRITE))],
 ) -> QuotationRead:
     await service.mark_sent(organization_id, quotation_id, user, ctx)
-    return _quotation_response(await service.get(organization_id, quotation_id))
+    return _quotation_response(await service.get(organization_id, quotation_id), today)
 
 
 @quotations_router.post(
@@ -434,13 +445,14 @@ async def send_quotation(
 async def accept_quotation(
     quotation_id: uuid.UUID,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: QuotationsDep,
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_WRITE))],
 ) -> QuotationRead:
     await service.respond(organization_id, quotation_id, accepted=True, actor=user, ctx=ctx)
-    return _quotation_response(await service.get(organization_id, quotation_id))
+    return _quotation_response(await service.get(organization_id, quotation_id), today)
 
 
 @quotations_router.post(
@@ -449,13 +461,14 @@ async def accept_quotation(
 async def reject_quotation(
     quotation_id: uuid.UUID,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: QuotationsDep,
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_WRITE))],
 ) -> QuotationRead:
     await service.respond(organization_id, quotation_id, accepted=False, actor=user, ctx=ctx)
-    return _quotation_response(await service.get(organization_id, quotation_id))
+    return _quotation_response(await service.get(organization_id, quotation_id), today)
 
 
 # =============================================================================
@@ -562,6 +575,7 @@ invoices_router = APIRouter(prefix="/invoices", tags=["Invoices"])
 @invoices_router.get("", response_model=Page[InvoiceRead], summary="List invoices")
 async def list_invoices(
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     service: InvoicesDep,
     params: Annotated[PageParams, Depends()],
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_READ))],
@@ -580,7 +594,7 @@ async def list_invoices(
         to_date=to_date,
         overdue_only=overdue_only,
     )
-    return Page.create([_invoice_response(row) for row in rows], total=total, params=params)
+    return Page.create([_invoice_response(row, today) for row in rows], total=total, params=params)
 
 
 @invoices_router.post(
@@ -589,6 +603,7 @@ async def list_invoices(
 async def create_invoice(
     data: InvoiceCreate,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: InvoicesDep,
     ctx: RequestCtx,
@@ -600,18 +615,19 @@ async def create_invoice(
     revenue and tax.
     """
     invoice = await service.create(organization_id, data, user, ctx)
-    return _invoice_response(await service.get(organization_id, invoice.id))
+    return _invoice_response(await service.get(organization_id, invoice.id), today)
 
 
 @invoices_router.get("/ageing", response_model=ReceivablesAgeing, summary="Receivables ageing")
 async def receivables_ageing(
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     session: DbSession,
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_READ))],
     as_of: Annotated[dt.date | None, Query()] = None,
 ) -> ReceivablesAgeing:
     """Outstanding receivables in the standard 0/30/60/90+ buckets."""
-    effective = as_of or dt.date.today()
+    effective = as_of or today
     rows = await InvoiceRepository(session).ageing(organization_id, as_of=effective)
 
     buckets = [
@@ -662,10 +678,11 @@ async def sales_summary(
 async def get_invoice(
     invoice_id: uuid.UUID,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     service: InvoicesDep,
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_READ))],
 ) -> InvoiceRead:
-    return _invoice_response(await service.get(organization_id, invoice_id))
+    return _invoice_response(await service.get(organization_id, invoice_id), today)
 
 
 @invoices_router.patch(
@@ -675,6 +692,7 @@ async def update_invoice(
     invoice_id: uuid.UUID,
     data: InvoiceUpdate,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: InvoicesDep,
     ctx: RequestCtx,
@@ -682,7 +700,7 @@ async def update_invoice(
 ) -> InvoiceRead:
     """Drafts only. A posted invoice is a statutory record - cancel it instead."""
     await service.update(organization_id, invoice_id, data, user, ctx)
-    return _invoice_response(await service.get(organization_id, invoice_id))
+    return _invoice_response(await service.get(organization_id, invoice_id), today)
 
 
 @invoices_router.post(
@@ -691,6 +709,7 @@ async def update_invoice(
 async def post_invoice(
     invoice_id: uuid.UUID,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: InvoicesDep,
     ctx: RequestCtx,
@@ -698,7 +717,7 @@ async def post_invoice(
 ) -> InvoiceRead:
     """Debits receivables, credits revenue and each tax component separately."""
     await service.post(organization_id, invoice_id, user, ctx)
-    return _invoice_response(await service.get(organization_id, invoice_id))
+    return _invoice_response(await service.get(organization_id, invoice_id), today)
 
 
 @invoices_router.post(
@@ -708,6 +727,7 @@ async def cancel_invoice(
     invoice_id: uuid.UUID,
     data: CancelInvoiceRequest,
     organization_id: ActiveOrganizationId,
+    today: OrganizationToday,
     user: CurrentUser,
     service: InvoicesDep,
     ctx: RequestCtx,
@@ -722,7 +742,7 @@ async def cancel_invoice(
         actor=user,
         ctx=ctx,
     )
-    return _invoice_response(await service.get(organization_id, invoice_id))
+    return _invoice_response(await service.get(organization_id, invoice_id), today)
 
 
 @invoices_router.delete(

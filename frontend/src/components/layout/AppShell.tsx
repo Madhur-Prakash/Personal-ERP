@@ -124,16 +124,18 @@ export function AppShell() {
                   {visible.map((item) => (
                     <li key={item.to}>
                       {item.stage ? (
-                        // Not yet built. A disabled row with its stage number is
-                        // more honest than a link to a 404.
+                        // Not yet built. A disabled row is more honest than a link to a
+                        // 404 - but the badge has to say so in words. "S6" is an internal
+                        // build-order number that means nothing to whoever is using this,
+                        // and on a greyed-out row it read as an error code.
                         <span
                           className="text-content-muted flex cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] opacity-55"
-                          title={`Arrives in Stage ${item.stage}`}
+                          title={`${item.label} is not built yet. It arrives in a later update.`}
                         >
                           <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                           <span className="flex-1">{item.label}</span>
-                          <Badge tone="neutral" className="text-[9px]">
-                            S{item.stage}
+                          <Badge tone="neutral" className="text-[9px] whitespace-nowrap">
+                            Coming soon
                           </Badge>
                         </span>
                       ) : (
@@ -286,11 +288,14 @@ export function StagePlaceholder({
         >
           <Building2 className="h-5 w-5" />
         </div>
-        <h2 className="text-content text-[15px] font-semibold">Arriving in Stage {stage}</h2>
+        <h2 className="text-content text-[15px] font-semibold">Coming soon</h2>
         <p className="text-content-muted mt-1.5 max-w-md text-[13px] leading-relaxed">
-          This module is part of the staged delivery plan. Stage 1 ships the foundation -
-          authentication, organizations, roles, and the audit trail.
+          {title} is not built yet. Nothing else in the app is waiting on it - your books, reports
+          and records all work without it.
         </p>
+        {/* The stage number stays, quietly: useful to whoever is building this, meaningless
+            to whoever is using it, so it belongs in the small print and not the heading. */}
+        <p className="text-content-muted mt-3 text-[11px]">Planned for stage {stage}</p>
       </div>
     </div>
   );
