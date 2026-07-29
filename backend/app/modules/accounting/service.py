@@ -1068,10 +1068,41 @@ class PostingService:
         )
 
 
+async def provision_books(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    *,
+    fiscal_year_start_month: int = 4,
+) -> None:
+    """Give an organization books it can actually write to.
+
+    The default chart of accounts, the standard journals, and the fiscal year with its
+    monthly periods. **This is setup, not convenience**: without a chart there is
+    nothing to post against, and without a fiscal year every posting fails with "no
+    accounting period covers this date".
+
+    **It exists as one function because having it in two places went wrong.**
+    ``POST /organizations`` seeded the books; the registration path, written before
+    accounting existed, seeded only roles and was never updated. So every user who
+    signed up with an organization name got books they could not write to, and the first
+    thing they saw on the billing screen was "no income accounts exist yet". Two call
+    sites that must stay identical will eventually not be, so now there is one.
+
+    Idempotent on both halves — ``seed_defaults`` skips entirely if any account exists,
+    and ``ensure_year_for`` returns the existing year — so it is safe to call
+    defensively from anywhere that needs the books to be usable.
+    """
+    await ChartOfAccountsService(session).seed_defaults(organization_id)
+    await FiscalCalendarService(session).ensure_year_for(
+        organization_id, fiscal_year_start_month=fiscal_year_start_month
+    )
+
+
 __all__ = [
     "ChartOfAccountsService",
     "FiscalCalendarService",
     "JournalService",
     "PostingService",
     "SystemAccount",
+    "provision_books",
 ]

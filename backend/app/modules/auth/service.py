@@ -57,6 +57,7 @@ from app.core.security import (
     password_needs_rehash,
     verify_password,
 )
+from app.modules.accounting.service import provision_books
 from app.modules.audit.models import AuditAction, AuditSeverity
 from app.modules.audit.service import AuditService
 from app.modules.auth import totp
@@ -221,7 +222,14 @@ class AuthService:
         return user, organization_id
 
     async def _provision_organization(self, name: str, owner: User) -> Organization:
-        """Create an organization, seed its roles, and make the creator owner."""
+        """Create an organization, give it working books, and make the creator owner.
+
+        The books used to be missing here. This path predates accounting, and when the
+        chart of accounts arrived only `POST /organizations` was updated — so anyone who
+        signed up with an organization name got an organization with no chart and no
+        fiscal year, and the billing screen greeted them with "no income accounts exist
+        yet". Both paths now go through `provision_books`.
+        """
         organization = Organization(
             name=name.strip(),
             slug=await self.organizations.generate_unique_slug(name),
@@ -239,6 +247,12 @@ class AuthService:
                 status=MemberStatus.ACTIVE,
                 joined_at=dt.datetime.now(dt.UTC),
             )
+        )
+
+        await provision_books(
+            self.session,
+            organization.id,
+            fiscal_year_start_month=organization.fiscal_year_start_month,
         )
 
         owner.last_organization_id = organization.id

@@ -170,6 +170,7 @@ class BillingService:
         as a tree because this form has one dropdown, and a shopkeeper choosing
         "Rent" does not care that it sits under "Operating Expenses".
         """
+        await self.ensure_books(organization_id)
         rows = await self.accounts.list_for_org(organization_id, postable_only=True)
 
         categories: list[Category] = []
@@ -196,6 +197,7 @@ class BillingService:
 
     async def money_accounts(self, organization_id: uuid.UUID) -> list[MoneyAccount]:
         """Cash and bank accounts, for "where did it come from / go to"."""
+        await self.ensure_books(organization_id)
         rows = await self.accounts.list_for_org(organization_id, postable_only=True)
         cash = [a for a in rows if a.subtype.is_cash_equivalent]
 
@@ -239,13 +241,12 @@ class BillingService:
                 "original entry rather than recording a negative one."
             )
 
+        # First, because the resolvers below need a chart to resolve against and the
+        # posting needs an open period. Cheap and idempotent when both already exist.
+        await self.ensure_books(organization_id, entry_date)
+
         category = await self._resolve_category(organization_id, direction, category_id)
         money = await self._resolve_money_account(organization_id, money_account_id)
-
-        # Without a fiscal year the posting fails with "no open period", which means
-        # nothing to someone who never asked for a fiscal calendar. Create it on
-        # demand instead: the year is derivable from the organization's own settings.
-        await self._ensure_period(organization_id, entry_date)
 
         # Money out: the expense grows (debit), the cash shrinks (credit).
         # Money in: the cash grows (debit), the income grows (credit).
@@ -348,7 +349,20 @@ class BillingService:
             cash[0],
         )
 
-    async def _ensure_period(self, organization_id: uuid.UUID, on: dt.date) -> None:
+    async def ensure_books(self, organization_id: uuid.UUID, on: dt.date | None = None) -> None:
+        """Make sure this organization has a chart of accounts and a fiscal period.
+
+        Called before every read and every write on this screen, and it is a **repair
+        path**, not just a convenience. Organizations created through registration before
+        that path seeded the books have no chart at all, so the first thing their owner
+        saw here was "no income accounts exist yet" with two empty dropdowns and no way
+        forward. Seeding on demand fixes those accounts the moment someone opens the
+        screen, with no migration and nothing for the user to do.
+
+        Both halves are idempotent — ``seed_defaults`` skips entirely when any account
+        exists, ``ensure_year_for`` returns the existing year — so the common case costs
+        one cheap existence check.
+        """
         start_month = (
             await self.session.execute(
                 select(Organization.fiscal_year_start_month).where(
@@ -357,6 +371,7 @@ class BillingService:
             )
         ).scalar_one_or_none() or 4
 
+        await self.chart.seed_defaults(organization_id)
         await self.calendar.ensure_year_for(
             organization_id, fiscal_year_start_month=start_month, on=on
         )
