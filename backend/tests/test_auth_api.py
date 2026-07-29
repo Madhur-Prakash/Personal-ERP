@@ -350,6 +350,68 @@ class TestMe:
         assert response.status_code == 401
         assert response.headers.get("WWW-Authenticate") == "Bearer"
 
+
+class TestProfileEdit:
+    """`PATCH /users/me`, which the Settings profile card drives."""
+
+    async def test_the_profile_carries_the_phone_number(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        """`/auth/me` has no phone, so the form has to read this endpoint instead.
+
+        Worth pinning: the profile card showed an always-empty phone box because it read the
+        signed-in user object, which does not carry one.
+        """
+        saved = await authed_client.patch(
+            f"{api}/users/me", json={"full_name": "Madhur Prakash", "phone": "+91 98765 43210"}
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["phone"] == "+91 98765 43210"
+
+        again = await authed_client.get(f"{api}/users/me")
+        assert again.json()["phone"] == "+91 98765 43210"
+        assert again.json()["full_name"] == "Madhur Prakash"
+
+    async def test_an_empty_name_is_rejected(self, authed_client: AsyncClient, api: str) -> None:
+        """The form blocks this now, but the rule lives here.
+
+        The card used to send an empty name whenever the user object had not loaded before
+        the field initialised, so "Save changes" failed with nothing on screen explaining
+        why. The 422 is correct - the form was wrong.
+        """
+        response = await authed_client.patch(f"{api}/users/me", json={"full_name": "   "})
+        assert response.status_code == 422, response.text
+        assert "full_name" in response.text
+
+    async def test_clearing_the_phone_stores_nothing_rather_than_an_empty_string(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        """An emptied optional field means "remove this".
+
+        `null` cannot express it - the service drops nulls so a partial update never blanks a
+        field it omitted - so an empty string is how clearing arrives, and it has to land as
+        NULL. Left as "" the column is not null, escapes every `IS NULL` check, and still
+        renders blank on screen.
+        """
+        await authed_client.patch(f"{api}/users/me", json={"phone": "+91 98765 43210"})
+
+        cleared = await authed_client.patch(f"{api}/users/me", json={"phone": ""})
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["phone"] is None
+
+    async def test_omitting_a_field_leaves_it_alone(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        """Saving a name must not wipe the phone number beside it."""
+        await authed_client.patch(
+            f"{api}/users/me", json={"full_name": "First Name", "phone": "+91 98765 43210"}
+        )
+
+        renamed = await authed_client.patch(f"{api}/users/me", json={"full_name": "Second Name"})
+        assert renamed.status_code == 200, renamed.text
+        assert renamed.json()["full_name"] == "Second Name"
+        assert renamed.json()["phone"] == "+91 98765 43210"
+
     async def test_rejects_garbage_token(self, client: AsyncClient, api: str) -> None:
         client.headers["Authorization"] = "Bearer not-a-real-jwt"
         response = await client.get(f"{api}/auth/me")

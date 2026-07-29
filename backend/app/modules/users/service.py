@@ -31,6 +31,16 @@ class UserService:
         number and timezone.
         """
         changes = data.model_dump(exclude_unset=True, exclude_none=True)
+
+        # An emptied optional field means "remove this", so store nothing rather than an
+        # empty string. `exclude_none` above means a client cannot clear a field by sending
+        # null - deliberate, so a partial update never blanks what it omitted - which leaves
+        # an empty string as the only way to express clearing. Left as "" the column is not
+        # null, escapes every `IS NULL` check, and still renders blank on screen.
+        for field in ("phone", "avatar_url"):
+            if changes.get(field) == "":
+                changes[field] = None
+
         if not changes:
             return user
 

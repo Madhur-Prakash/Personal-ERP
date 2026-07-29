@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { authApi } from '@/features/auth/api';
 import {
@@ -63,23 +64,51 @@ export function SettingsPage() {
 // Profile
 // =============================================================================
 function ProfileCard() {
-  const { user, refresh } = useAuth();
-  const [fullName, setFullName] = useState(user?.full_name ?? '');
-  const [phone, setPhone] = useState('');
+  const { refresh } = useAuth();
+  const queryClient = useQueryClient();
+
+  // Fetched rather than read from `useAuth`: the signed-in user object carries no phone
+  // number, so the field could never show a saved one. `/users/me` is the profile itself.
+  const { data: profile } = useQuery({
+    queryKey: ['users', 'me'],
+    queryFn: usersApi.me,
+  });
+
+  // `undefined` until the field is touched, with the saved value read live underneath.
+  //
+  // These were `useState(user?.full_name ?? '')`, which copies the value on the first
+  // render only - and on that render the user has not loaded, so the field initialised to
+  // '' and stayed there. That is why the name box was empty while the email box beside it
+  // was filled: email is read straight off the user every render. Saving then sent
+  // `full_name: ''`, which the API rejects for being under one character, so nothing saved
+  // and the reason was a generic toast away from the actual cause.
+  const [fullNameEdit, setFullNameEdit] = useState<string>();
+  const [phoneEdit, setPhoneEdit] = useState<string>();
+
+  const fullName = fullNameEdit ?? profile?.full_name ?? '';
+  const phone = phoneEdit ?? profile?.phone ?? '';
 
   const save = useMutation({
     mutationFn: () =>
       usersApi.updateProfile({
         full_name: fullName.trim(),
-        ...(phone.trim() ? { phone: phone.trim() } : {}),
+        // Sent even when cleared, so a number can be removed rather than only changed.
+        phone: phone.trim(),
       }),
     onSuccess: async () => {
       toast.success('Profile updated');
+      // Both caches: this query holds the phone, and the auth user holds the name shown in
+      // the sidebar and on every avatar.
+      void queryClient.invalidateQueries({ queryKey: ['users', 'me'] });
       await refresh();
     },
     onError: (error) =>
       toast.error(error instanceof ApiError ? error.message : 'Could not save your profile'),
   });
+
+  // Blocked here rather than left to a 422. "Save changes" failing on a rule the form never
+  // mentioned is the worst version of this: nothing happens and nothing explains why.
+  const canSave = fullName.trim() !== '';
 
   return (
     <Card>
@@ -88,20 +117,22 @@ function ProfileCard() {
         <div className="grid gap-4 sm:grid-cols-2">
           <Input
             label="Full name"
+            required
             value={fullName}
-            onChange={(event) => setFullName(event.target.value)}
+            onChange={(event) => setFullNameEdit(event.target.value)}
+            error={canSave ? undefined : 'A name is required'}
           />
           <Input
             label="Phone"
             value={phone}
-            onChange={(event) => setPhone(event.target.value)}
+            onChange={(event) => setPhoneEdit(event.target.value)}
             placeholder="+91 98765 43210"
           />
         </div>
 
         <Input
           label="Email"
-          value={user?.email ?? ''}
+          value={profile?.email ?? ''}
           disabled
           // Changing an email requires re-verification, which is its own flow -
           // Stage 9. Disabling with an explanation beats a field that silently
@@ -110,10 +141,10 @@ function ProfileCard() {
         />
 
         <div className="flex items-center gap-3">
-          <Button loading={save.isPending} onClick={() => save.mutate()}>
+          <Button loading={save.isPending} disabled={!canSave} onClick={() => save.mutate()}>
             Save changes
           </Button>
-          {user?.is_email_verified ? (
+          {profile?.is_email_verified ? (
             <Badge tone="success" dot>
               Email verified
             </Badge>
@@ -487,6 +518,72 @@ function SessionsCard() {
   );
 }
 
+/**
+ * Currencies offered for an organization.
+ *
+ * A short list rather than all 180 ISO codes: this is self-hosted software for one small
+ * business, which deals in one currency and picks it once. The API still accepts any
+ * three-letter code, so this is what the dropdown offers, not what the system permits.
+ */
+const CURRENCY_OPTIONS = [
+  { value: 'INR', label: 'INR - Indian rupee' },
+  { value: 'USD', label: 'USD - US dollar' },
+  { value: 'EUR', label: 'EUR - Euro' },
+  { value: 'GBP', label: 'GBP - Pound sterling' },
+  { value: 'AED', label: 'AED - UAE dirham' },
+  { value: 'SGD', label: 'SGD - Singapore dollar' },
+  { value: 'AUD', label: 'AUD - Australian dollar' },
+  { value: 'CAD', label: 'CAD - Canadian dollar' },
+  { value: 'JPY', label: 'JPY - Japanese yen' },
+  { value: 'LKR', label: 'LKR - Sri Lankan rupee' },
+  { value: 'NPR', label: 'NPR - Nepalese rupee' },
+  { value: 'BDT', label: 'BDT - Bangladeshi taka' },
+];
+
+/**
+ * Timezones, from the browser's own IANA database where it exposes one.
+ *
+ * `Intl.supportedValuesOf` means there is no list to maintain and no chance of offering a
+ * zone the runtime cannot resolve. Older browsers lack it, hence the fallback - a handful
+ * of zones rather than an empty dropdown, which would make the field unusable.
+ */
+const TIMEZONE_OPTIONS = (() => {
+  let zones: string[] = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'UTC'];
+  try {
+    const supported = Intl.supportedValuesOf?.('timeZone');
+    if (supported && supported.length > 0) zones = [...supported];
+  } catch {
+    // Keep the fallback.
+  }
+  return zones.map((zone) => ({ value: zone, label: zone }));
+})();
+
+/** Month names for the financial-year start, from `Intl` so there is no list to translate. */
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
+  value: String(index + 1),
+  label: new Intl.DateTimeFormat('en', { month: 'long' }).format(new Date(2000, index, 1)),
+}));
+
+/**
+ * Guarantee the value already saved is offered.
+ *
+ * Without this, a stored value the list happens not to contain leaves the `<select>` with
+ * nothing matching - so the browser displays the *first* option, and pressing Save writes
+ * that instead. A settings form that silently changes a setting you never touched.
+ *
+ * Not hypothetical: organizations here are seeded `Asia/Kolkata`, while
+ * `Intl.supportedValuesOf` lists that same zone under its older canonical name
+ * `Asia/Calcutta` - 417 zones, and `Asia/Kolkata` is not among them. Identical zone,
+ * different string, and the field would have quietly rewritten it.
+ */
+function withCurrent(
+  options: { value: string; label: string }[],
+  current: string | undefined,
+): { value: string; label: string }[] {
+  if (!current || options.some((option) => option.value === current)) return options;
+  return [{ value: current, label: current }, ...options];
+}
+
 // =============================================================================
 // Organization
 // =============================================================================
@@ -499,6 +596,11 @@ function OrganizationCard() {
 
   const [name, setName] = useState('');
   const [gstin, setGstin] = useState('');
+  // Undefined until touched, so an untouched field is left out of the PATCH entirely rather
+  // than sent back as the value it already had.
+  const [currency, setCurrency] = useState<string>();
+  const [timezone, setTimezone] = useState<string>();
+  const [fiscalStart, setFiscalStart] = useState<string>();
   const [error, setError] = useState<string>();
 
   const save = useMutation({
@@ -506,6 +608,9 @@ function OrganizationCard() {
       organizationsApi.update({
         ...(name.trim() ? { name: name.trim() } : {}),
         ...(gstin.trim() ? { gstin: gstin.trim() } : {}),
+        ...(currency ? { currency } : {}),
+        ...(timezone ? { timezone } : {}),
+        ...(fiscalStart ? { fiscal_year_start_month: Number(fiscalStart) } : {}),
       }),
     onSuccess: () => {
       toast.success('Organization updated');
@@ -548,22 +653,47 @@ function OrganizationCard() {
           />
         </div>
 
-        <div className="text-content-muted grid gap-3 text-[12px] sm:grid-cols-3">
-          <div>
-            <span className="block font-medium">Currency</span>
-            {organization?.currency}
-          </div>
-          <div>
-            <span className="block font-medium">Timezone</span>
-            {organization?.timezone}
-          </div>
-          <div>
-            <span className="block font-medium">Financial year starts</span>
-            {new Date(2000, (organization?.fiscal_year_start_month ?? 4) - 1).toLocaleString('en', {
-              month: 'long',
-            })}
-          </div>
+        {/* These three were printed as plain text, which reads as "fixed, do not ask" - and
+            the API had accepted all three as editable the whole time.
+
+            `options`, not children: this Select renders the prop and drops children
+            silently, so option elements would have produced three empty dropdowns that the
+            type checker was perfectly happy with. */}
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Select
+            label="Currency"
+            value={currency ?? organization?.currency ?? 'INR'}
+            onChange={(event) => setCurrency(event.target.value)}
+            options={withCurrent(CURRENCY_OPTIONS, organization?.currency)}
+            hint="Used for every amount shown."
+          />
+
+          <Select
+            label="Timezone"
+            value={timezone ?? organization?.timezone ?? 'Asia/Kolkata'}
+            onChange={(event) => setTimezone(event.target.value)}
+            options={withCurrent(TIMEZONE_OPTIONS, organization?.timezone)}
+            hint="Decides what counts as today."
+          />
+
+          <Select
+            label="Financial year starts"
+            value={fiscalStart ?? String(organization?.fiscal_year_start_month ?? 4)}
+            onChange={(event) => setFiscalStart(event.target.value)}
+            options={MONTH_OPTIONS}
+            hint="April in India."
+          />
         </div>
+
+        {fiscalStart && Number(fiscalStart) !== organization?.fiscal_year_start_month && (
+          // Stated rather than silently accepted: the years already created keep their own
+          // dates, so a mid-year change leaves the report presets and the existing fiscal
+          // year describing different windows until the next one opens.
+          <p className="text-warning text-[12px]">
+            Changing this does not move the financial years already created. Entries already posted
+            keep the year they went into.
+          </p>
+        )}
 
         <Button loading={save.isPending} onClick={() => save.mutate()}>
           Save organization
