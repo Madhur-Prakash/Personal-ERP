@@ -214,8 +214,31 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
         system_key=SystemAccount.SALES_REVENUE,
     ),
     AccountSpec("4200", "Service Revenue", Type.INCOME, Sub.OPERATING_REVENUE, "4000"),
+    AccountSpec("4210", "Job Work & Labour Charges", Type.INCOME, Sub.OPERATING_REVENUE, "4000"),
+    AccountSpec("4220", "Commission Received", Type.INCOME, Sub.OPERATING_REVENUE, "4000"),
+    AccountSpec("4230", "Freight & Delivery Charged", Type.INCOME, Sub.OPERATING_REVENUE, "4000"),
+    AccountSpec("4240", "Scrap & Waste Sales", Type.INCOME, Sub.OPERATING_REVENUE, "4000"),
+    # A discount *given* reduces revenue, so it lives under income rather than among
+    # expenses. That way net sales is a single subtotal, which is how a P&L is read.
     AccountSpec("4300", "Discounts Given", Type.INCOME, Sub.OPERATING_REVENUE, "4000"),
-    AccountSpec("4900", "Other Income", Type.INCOME, Sub.OTHER_INCOME, "4000"),
+    # ---- Non-trading income ----
+    AccountSpec("4400", "Other Income", Type.INCOME, Sub.OTHER_INCOME, "4000", True),
+    AccountSpec("4410", "Interest Received", Type.INCOME, Sub.OTHER_INCOME, "4400"),
+    AccountSpec("4420", "Rental Income", Type.INCOME, Sub.OTHER_INCOME, "4400"),
+    AccountSpec("4430", "Discount Received", Type.INCOME, Sub.OTHER_INCOME, "4400"),
+    AccountSpec("4440", "Profit on Sale of Asset", Type.INCOME, Sub.OTHER_INCOME, "4400"),
+    AccountSpec("4450", "Foreign Exchange Gain", Type.INCOME, Sub.OTHER_INCOME, "4400"),
+    AccountSpec("4460", "Refunds & Reimbursements", Type.INCOME, Sub.OTHER_INCOME, "4400"),
+    # ---- Household income ----
+    # Grouped separately so a P&L still reads as a business statement: personal
+    # receipts subtotal on their own line instead of inflating trading revenue.
+    AccountSpec("4500", "Household Income", Type.INCOME, Sub.OTHER_INCOME, "4000", True),
+    AccountSpec("4510", "Salary", Type.INCOME, Sub.OTHER_INCOME, "4500"),
+    AccountSpec("4520", "Freelance & Side Work", Type.INCOME, Sub.OTHER_INCOME, "4500"),
+    AccountSpec("4530", "Gifts Received", Type.INCOME, Sub.OTHER_INCOME, "4500"),
+    AccountSpec("4540", "Dividends & Investment Returns", Type.INCOME, Sub.OTHER_INCOME, "4500"),
+    AccountSpec("4550", "Pension", Type.INCOME, Sub.OTHER_INCOME, "4500"),
+    AccountSpec("4900", "Miscellaneous Income", Type.INCOME, Sub.OTHER_INCOME, "4400"),
     # =========================================================================
     # 5xxx — Expenses
     # =========================================================================
@@ -228,6 +251,12 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
         "5000",
         system_key=SystemAccount.COST_OF_GOODS_SOLD,
     ),
+    # What a shopkeeper calls buying stock. Deliberately separate from Cost of Goods
+    # Sold, which the inventory module posts automatically when stock is *sold* — a
+    # business not tracking stock records the purchase here and never touches COGS.
+    AccountSpec("5150", "Purchases", Type.EXPENSE, Sub.COST_OF_GOODS_SOLD, "5000"),
+    AccountSpec("5160", "Freight & Cartage Inward", Type.EXPENSE, Sub.COST_OF_GOODS_SOLD, "5000"),
+    AccountSpec("5170", "Packing Materials", Type.EXPENSE, Sub.COST_OF_GOODS_SOLD, "5000"),
     AccountSpec("5200", "Operating Expenses", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5000", True),
     AccountSpec("5210", "Rent", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
     AccountSpec("5220", "Electricity & Water", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
@@ -235,14 +264,66 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
     AccountSpec("5240", "Repairs & Maintenance", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
     AccountSpec("5250", "Printing & Stationery", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
     AccountSpec("5260", "Travel & Conveyance", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
+    AccountSpec("5265", "Fuel & Vehicle Running", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
     AccountSpec("5270", "Professional Fees", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
+    AccountSpec("5275", "Audit Fees", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
     AccountSpec("5280", "Bank Charges", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
+    AccountSpec("5285", "Interest & Finance Charges", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
     AccountSpec("5290", "Marketing & Advertising", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
+    AccountSpec("5295", "Commission Paid", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
+    AccountSpec("5296", "Freight & Delivery Outward", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
+    AccountSpec("5297", "Courier & Postage", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
+    AccountSpec("5298", "Insurance", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
+    AccountSpec("5299", "Software & Subscriptions", Type.EXPENSE, Sub.OPERATING_EXPENSE, "5200"),
     AccountSpec("5300", "Payroll", Type.EXPENSE, Sub.PAYROLL_EXPENSE, "5000", True),
     AccountSpec("5310", "Salaries & Wages", Type.EXPENSE, Sub.PAYROLL_EXPENSE, "5300"),
     AccountSpec("5320", "Employee Benefits", Type.EXPENSE, Sub.PAYROLL_EXPENSE, "5300"),
+    AccountSpec("5330", "Staff Welfare", Type.EXPENSE, Sub.PAYROLL_EXPENSE, "5300"),
+    AccountSpec("5340", "Contract & Casual Labour", Type.EXPENSE, Sub.PAYROLL_EXPENSE, "5300"),
+    AccountSpec("5350", "Provident Fund & ESI", Type.EXPENSE, Sub.PAYROLL_EXPENSE, "5300"),
     AccountSpec("5400", "Depreciation", Type.EXPENSE, Sub.DEPRECIATION_EXPENSE, "5000"),
     AccountSpec("5500", "Rates & Taxes", Type.EXPENSE, Sub.TAX_EXPENSE, "5000"),
+    # ---- Household and personal ----
+    # Its own group so business and personal spending subtotal separately: a P&L that
+    # mixes groceries into operating expenses tells you nothing about the business.
+    #
+    # A note on the accounting. For a *registered* business, money the owner spends on
+    # themselves is **drawings** — a reduction of equity — not an expense, and treating
+    # it as one understates profit and therefore tax. These accounts are here because
+    # this product is also used to keep a household's books, where they genuinely are
+    # expenses. If both are being tracked in one set of books, reclassify personal
+    # spending to Owner's Drawings (3200) at year end, or keep a second organization.
+    AccountSpec("5700", "Household & Personal", Type.EXPENSE, Sub.OTHER_EXPENSE, "5000", True),
+    AccountSpec("5705", "Groceries & Provisions", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5710", "House Rent & Maintenance", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5715", "Home Utilities", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5720", "Mobile & Broadband", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5725", "Medical & Health", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5730", "Education & School Fees", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5735", "Childcare", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5740", "Clothing & Footwear", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5745", "Dining Out", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5750", "Entertainment & Subscriptions", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5755", "Personal Care & Grooming", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5760", "Household Help", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5765", "Transport & Commute", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5770", "Insurance Premiums", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5775", "Loan & EMI Payments", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5780", "Festivals & Gifts", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5785", "Travel & Holidays", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5790", "Pet Care", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    AccountSpec("5795", "Household Miscellaneous", Type.EXPENSE, Sub.OTHER_EXPENSE, "5700"),
+    # ---- Other business expenses ----
+    AccountSpec("5800", "Other Expenses", Type.EXPENSE, Sub.OTHER_EXPENSE, "5000", True),
+    AccountSpec("5810", "Office & General Expenses", Type.EXPENSE, Sub.OTHER_EXPENSE, "5800"),
+    AccountSpec("5820", "Housekeeping & Security", Type.EXPENSE, Sub.OTHER_EXPENSE, "5800"),
+    AccountSpec("5830", "Business Promotion", Type.EXPENSE, Sub.OTHER_EXPENSE, "5800"),
+    AccountSpec("5840", "Donations & Charity", Type.EXPENSE, Sub.OTHER_EXPENSE, "5800"),
+    AccountSpec("5850", "Bad Debts Written Off", Type.EXPENSE, Sub.OTHER_EXPENSE, "5800"),
+    AccountSpec("5860", "Loss on Sale of Asset", Type.EXPENSE, Sub.OTHER_EXPENSE, "5800"),
+    AccountSpec("5870", "Foreign Exchange Loss", Type.EXPENSE, Sub.OTHER_EXPENSE, "5800"),
+    AccountSpec("5880", "Penalties & Late Fees", Type.EXPENSE, Sub.OTHER_EXPENSE, "5800"),
+    AccountSpec("5890", "Miscellaneous Expenses", Type.EXPENSE, Sub.OTHER_EXPENSE, "5800"),
     # Absorbs sub-unit differences when an invoice total is rounded to the rupee.
     # Without a home for it, a one-paisa rounding leaves an entry unbalanced and
     # unpostable.
@@ -251,7 +332,7 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
         "Rounding Differences",
         Type.EXPENSE,
         Sub.OTHER_EXPENSE,
-        "5000",
+        "5800",
         system_key=SystemAccount.ROUNDING,
     ),
 )

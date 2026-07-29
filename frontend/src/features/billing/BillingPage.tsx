@@ -25,9 +25,11 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import type { Column } from '@/components/ui/DataTable';
 import { DataTable, PageHeader, Pagination } from '@/components/ui/DataTable';
 import { Input } from '@/components/ui/Input';
+import { Select, type SelectGroup } from '@/components/ui/Select';
 import {
   type BillingEntry,
   type BillingOptions,
+  type Category,
   type Direction,
   billingApi,
 } from '@/features/billing/api';
@@ -217,8 +219,22 @@ function EntryForm({
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [entryDate, setEntryDate] = useState(options.today);
+  const [party, setParty] = useState('');
+  const [reference, setReference] = useState('');
   const [categoryId, setCategoryId] = useState(defaultCategory?.id ?? '');
   const [accountId, setAccountId] = useState(defaultAccount?.id ?? '');
+  const [addingCategory, setAddingCategory] = useState(false);
+
+  // Grouped in template order rather than alphabetically: the chart is already
+  // ordered so that trading categories come before household ones, and reordering
+  // would separate accounts that belong together.
+  const categoryGroups: SelectGroup[] = [];
+  for (const category of relevant) {
+    const existing = categoryGroups.find((group) => group.label === category.group);
+    const option = { value: category.id, label: category.name };
+    if (existing) existing.options.push(option);
+    else categoryGroups.push({ label: category.group, options: [option] });
+  }
 
   const record = useMutation({
     mutationFn: () =>
@@ -227,6 +243,8 @@ function EntryForm({
         amount,
         description: description.trim(),
         entry_date: entryDate,
+        ...(party.trim() ? { party: party.trim() } : {}),
+        ...(reference.trim() ? { reference: reference.trim() } : {}),
         ...(categoryId ? { category_id: categoryId } : {}),
         ...(accountId ? { money_account_id: accountId } : {}),
       }),
@@ -249,6 +267,8 @@ function EntryForm({
       // catching up on a week of receipts enters several in a row on the same day.
       setAmount('');
       setDescription('');
+      setParty('');
+      setReference('');
       amountRef.current?.focus();
     },
     onError: (error) =>
@@ -307,40 +327,71 @@ function EntryForm({
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span className="text-content-secondary mb-1.5 block text-[13px] font-medium">
-                Category
-              </span>
-              <select
-                value={categoryId}
-                onChange={(event) => setCategoryId(event.target.value)}
-                className="border-border bg-surface text-content focus:border-primary w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
-              >
-                {relevant.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="text-content-secondary mb-1.5 block text-[13px] font-medium">
-                {direction === 'in' ? 'Received into' : 'Paid from'}
-              </span>
-              <select
-                value={accountId}
-                onChange={(event) => setAccountId(event.target.value)}
-                className="border-border bg-surface text-content focus:border-primary w-full rounded-lg border px-3 py-2 text-[13px] outline-none"
-              >
-                {options.money_accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Input
+              /* Free text on purpose. Most parties a small business deals with — the
+                 auto driver, the electricity board, a walk-in buyer — are never worth a
+                 customer record, and requiring one to note who paid you is the friction
+                 this screen exists to remove. */
+              label={direction === 'in' ? 'From' : 'To'}
+              placeholder={direction === 'in' ? 'Walk-in customer' : 'Airtel'}
+              value={party}
+              onChange={(event) => setParty(event.target.value)}
+              hint="Optional — who the money came from or went to."
+            />
+            <Input
+              label="Reference"
+              placeholder="Cheque or bill no."
+              value={reference}
+              onChange={(event) => setReference(event.target.value)}
+              hint="Optional — a cheque, UPI, or bill number."
+            />
           </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Select
+              label="Category"
+              value={categoryId}
+              onChange={(event) => setCategoryId(event.target.value)}
+              /* Grouped, because the list runs to nearly eighty entries once business
+                 and household categories are both present. "Household & Personal" as a
+                 heading is the difference between scanning and hunting. */
+              groups={categoryGroups}
+              action={
+                <button
+                  type="button"
+                  onClick={() => setAddingCategory(true)}
+                  className="text-primary text-[12px] font-medium hover:underline"
+                >
+                  + Add category
+                </button>
+              }
+              hint={
+                categoryGroups.length === 0 ? 'No categories yet — add one to continue.' : undefined
+              }
+              error={categoryGroups.length === 0 ? ' ' : undefined}
+            />
+
+            <Select
+              label={direction === 'in' ? 'Received into' : 'Paid from'}
+              value={accountId}
+              onChange={(event) => setAccountId(event.target.value)}
+              options={options.money_accounts.map((account) => ({
+                value: account.id,
+                label: account.name,
+              }))}
+            />
+          </div>
+
+          {addingCategory && (
+            <NewCategoryRow
+              direction={direction}
+              onCancel={() => setAddingCategory(false)}
+              onCreated={(category) => {
+                setCategoryId(category.id);
+                setAddingCategory(false);
+              }}
+            />
+          )}
 
           <div className="border-border flex items-center justify-between gap-3 border-t pt-3">
             <p className="text-content-muted text-[12px]">
@@ -357,6 +408,74 @@ function EntryForm({
         </form>
       </CardBody>
     </Card>
+  );
+}
+
+/**
+ * Add a category without leaving the form.
+ *
+ * A name and nothing else. The account code, parent group, and subtype are derived
+ * server-side, because requiring someone to pick "5265" and "operating_expense" in
+ * order to record a payment for tempo hire would defeat the point of this screen.
+ *
+ * Inline rather than a modal: the user is mid-entry with an amount already typed, and
+ * a dialog that covers the form loses that context.
+ */
+function NewCategoryRow({
+  direction,
+  onCancel,
+  onCreated,
+}: {
+  direction: Direction;
+  onCancel: () => void;
+  onCreated: (category: Category) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+
+  const create = useMutation({
+    mutationFn: () => billingApi.createCategory(name.trim(), direction),
+    onSuccess: (category) => {
+      // The options query is what feeds every dropdown on this screen, and the chart
+      // of accounts has genuinely changed.
+      void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      toast.success(`Added "${category.name}"`, { description: `Filed under ${category.group}` });
+      onCreated(category);
+    },
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : 'Could not add the category'),
+  });
+
+  const canSave = name.trim().length > 0;
+
+  return (
+    <div className="border-border bg-surface-sunken/50 flex flex-wrap items-end gap-2 rounded-lg border border-dashed p-3">
+      <div className="min-w-[12rem] flex-1">
+        <Input
+          label={direction === 'in' ? 'New income category' : 'New expense category'}
+          autoFocus
+          placeholder={direction === 'in' ? 'Workshop fees' : 'Tempo hire'}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            // Enter here must not submit the entry form it is nested inside.
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              if (canSave) create.mutate();
+            }
+            if (event.key === 'Escape') onCancel();
+          }}
+          hint="Filed alongside the other categories of this kind."
+        />
+      </div>
+      <Button type="button" onClick={() => create.mutate()} disabled={!canSave || create.isPending}>
+        {create.isPending ? 'Adding…' : 'Add'}
+      </Button>
+      <Button type="button" variant="ghost" onClick={onCancel} disabled={create.isPending}>
+        Cancel
+      </Button>
+    </div>
   );
 }
 
@@ -415,7 +534,16 @@ function EntryList({
             {row.description}
           </p>
           <p className="text-content-muted text-[11px]">
+            {row.party ? (
+              <>
+                <span className="text-content-secondary font-medium">
+                  {row.direction === 'in' ? 'from' : 'to'} {row.party}
+                </span>
+                {' · '}
+              </>
+            ) : null}
             {row.category_name} · {row.money_account_name}
+            {row.reference ? ` · ${row.reference}` : ''}
           </p>
         </div>
       ),

@@ -43,9 +43,9 @@ pytestmark = pytest.mark.integration
 async def count_accounts(db: AsyncSession, organization_id: uuid.UUID) -> int:
     return (
         await db.execute(
-            select(func.count()).select_from(Account).where(
-                Account.organization_id == organization_id
-            )
+            select(func.count())
+            .select_from(Account)
+            .where(Account.organization_id == organization_id)
         )
     ).scalar_one()
 
@@ -53,9 +53,9 @@ async def count_accounts(db: AsyncSession, organization_id: uuid.UUID) -> int:
 async def count_journals(db: AsyncSession, organization_id: uuid.UUID) -> int:
     return (
         await db.execute(
-            select(func.count()).select_from(Journal).where(
-                Journal.organization_id == organization_id
-            )
+            select(func.count())
+            .select_from(Journal)
+            .where(Journal.organization_id == organization_id)
         )
     ).scalar_one()
 
@@ -63,9 +63,9 @@ async def count_journals(db: AsyncSession, organization_id: uuid.UUID) -> int:
 async def count_years(db: AsyncSession, organization_id: uuid.UUID) -> int:
     return (
         await db.execute(
-            select(func.count()).select_from(FiscalYear).where(
-                FiscalYear.organization_id == organization_id
-            )
+            select(func.count())
+            .select_from(FiscalYear)
+            .where(FiscalYear.organization_id == organization_id)
         )
     ).scalar_one()
 
@@ -140,7 +140,7 @@ class TestRegistrationProvisionsBooks:
         assert any(account.subtype.is_cash_equivalent for account in accounts)
 
     async def test_a_registered_owner_can_record_money_immediately(
-        self, client: AsyncClient, api: str
+        self, client: AsyncClient, api: str, db: AsyncSession
     ) -> None:
         """The end-to-end version of the bug report.
 
@@ -158,6 +158,13 @@ class TestRegistrationProvisionsBooks:
             },
         )
         assert registered.status_code == 201, registered.text
+
+        # Verified directly rather than through the emailed link: login correctly
+        # refuses an unverified address, and that flow has its own tests. What is
+        # under test here is whether registration left behind usable books.
+        owner = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        owner.email_verified_at = dt.datetime.now(dt.UTC)
+        await db.flush()
 
         signed_in = await client.post(
             f"{api}/auth/login", json={"email": email, "password": TEST_PASSWORD}
@@ -201,9 +208,7 @@ class TestBillingRepairsExistingOrganizations:
     async def bookless_org(self, db: AsyncSession, user: User) -> Organization:
         """An organization with roles and a member but no chart — exactly the state the
         old registration path left behind."""
-        organization = Organization(
-            name="Bookless Shop", slug=f"bookless-{uuid.uuid4().hex[:6]}"
-        )
+        organization = Organization(name="Bookless Shop", slug=f"bookless-{uuid.uuid4().hex[:6]}")
         db.add(organization)
         await db.flush()
 
@@ -225,7 +230,12 @@ class TestBillingRepairsExistingOrganizations:
         return organization
 
     async def test_opening_the_form_seeds_the_chart(
-        self, client: AsyncClient, api: str, db: AsyncSession, user: User, bookless_org: Organization
+        self,
+        client: AsyncClient,
+        api: str,
+        db: AsyncSession,
+        user: User,
+        bookless_org: Organization,
     ) -> None:
         await db.commit()
 
@@ -244,7 +254,12 @@ class TestBillingRepairsExistingOrganizations:
         assert body["money_accounts"]
 
     async def test_and_then_money_can_be_recorded(
-        self, client: AsyncClient, api: str, db: AsyncSession, user: User, bookless_org: Organization
+        self,
+        client: AsyncClient,
+        api: str,
+        db: AsyncSession,
+        user: User,
+        bookless_org: Organization,
     ) -> None:
         await db.commit()
 
@@ -264,7 +279,12 @@ class TestBillingRepairsExistingOrganizations:
         assert dashboard.json()["expenses"]["current"] not in (None, "")
 
     async def test_seeding_is_idempotent(
-        self, client: AsyncClient, api: str, db: AsyncSession, user: User, bookless_org: Organization
+        self,
+        client: AsyncClient,
+        api: str,
+        db: AsyncSession,
+        user: User,
+        bookless_org: Organization,
     ) -> None:
         """Three calls, one chart. `seed_defaults` skips when any account exists, so
         repeated requests must not duplicate codes or half-rebuild it."""

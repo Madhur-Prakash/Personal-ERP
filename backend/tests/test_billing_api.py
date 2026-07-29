@@ -52,12 +52,15 @@ async def record(
     description: str,
     entry_date: dt.date | None = None,
     category_id: str | None = None,
+    party: str | None = None,
 ) -> dict:
     body: dict = {"direction": direction, "amount": amount, "description": description}
     if entry_date is not None:
         body["entry_date"] = entry_date.isoformat()
     if category_id is not None:
         body["category_id"] = category_id
+    if party is not None:
+        body["party"] = party
 
     response = await client.post(f"{api}/billing", json=body)
     assert response.status_code == 201, response.text
@@ -368,6 +371,90 @@ class TestReflectedAcrossTheApp:
 # ---------------------------------------------------------------------------
 # Reading back
 # ---------------------------------------------------------------------------
+class TestParty:
+    """Who the money came from or went to — free text, no master record."""
+
+    async def test_records_who_it_came_from(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(
+            authed_client,
+            api,
+            direction="in",
+            amount="500",
+            description="Counter sale",
+            party="Walk-in customer",
+        )
+        assert entry["party"] == "Walk-in customer"
+
+    async def test_records_who_it_went_to(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(
+            authed_client,
+            api,
+            direction="out",
+            amount="799",
+            description="Broadband",
+            party="Airtel",
+        )
+        assert entry["party"] == "Airtel"
+
+    async def test_is_optional(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The three-field entry has to keep working — that is the whole premise."""
+        entry = await record(authed_client, api, direction="out", amount="50", description="Chai")
+        assert entry["party"] is None
+
+    async def test_no_customer_or_supplier_record_is_created(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The point of free text. Naming a party must not create a master record."""
+        await record(
+            authed_client, api, direction="in", amount="500", description="Sale", party="Ramesh"
+        )
+
+        customers = (await authed_client.get(f"{api}/customers")).json()
+        suppliers = (await authed_client.get(f"{api}/suppliers")).json()
+        assert customers["meta"]["total_items"] == 0
+        assert suppliers["meta"]["total_items"] == 0
+
+    async def test_is_searchable(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """ "Everything I paid Airtel" is a question people ask."""
+        await record(
+            authed_client,
+            api,
+            direction="out",
+            amount="799",
+            description="Broadband",
+            party="Airtel",
+        )
+        await record(
+            authed_client,
+            api,
+            direction="out",
+            amount="120",
+            description="Chai",
+            party="Corner stall",
+        )
+
+        hit = (await authed_client.get(f"{api}/billing", params={"q": "airtel"})).json()
+        assert hit["meta"]["total_items"] == 1
+        assert hit["items"][0]["party"] == "Airtel"
+
+    async def test_blank_is_stored_as_null_not_an_empty_string(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """So "has a party" is a single check rather than two."""
+        entry = await record(
+            authed_client, api, direction="out", amount="50", description="Chai", party="   "
+        )
+        assert entry["party"] is None
+
+
 class TestListing:
     async def test_lists_newest_first(
         self, authed_client: AsyncClient, api: str, books: Organization

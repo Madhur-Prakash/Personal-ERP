@@ -206,6 +206,9 @@ class JournalEntryCreate(BaseSchema):
     entry_date: dt.date
     narration: Narration
     reference: str | None = Field(default=None, max_length=100)
+    #: Who the money came from or went to. Free text — see the model for why this is
+    #: not a foreign key.
+    counterparty: str | None = Field(default=None, max_length=200)
     lines: list[JournalEntryLineInput] = Field(min_length=2)
     #: Post immediately instead of saving as a draft.
     post: bool = False

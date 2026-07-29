@@ -23,6 +23,7 @@ from app.modules.billing.schemas import (
     BillingOptions,
     BillingSummary,
     CategoryRead,
+    CreateCategoryRequest,
     EntryRead,
     MoneyAccountRead,
     RecordEntryRequest,
@@ -71,6 +72,7 @@ def _entry(entry: Entry) -> EntryRead:
         amount=entry.amount,
         description=entry.description,
         reference=entry.reference,
+        party=entry.party,
         category_id=entry.category_id,
         category_name=entry.category_name,
         money_account_id=entry.money_account_id,
@@ -112,6 +114,7 @@ async def options(
                 code=c.code,
                 name=c.name,
                 direction=c.direction,
+                group=c.group,
                 is_default=c.is_default,
             )
             for c in categories
@@ -122,6 +125,44 @@ async def options(
         ],
         today=today,
         currency=currency,
+    )
+
+
+@router.post(
+    "/categories",
+    response_model=CategoryRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a category",
+)
+async def create_category(
+    data: CreateCategoryRequest,
+    organization_id: ActiveOrganizationId,
+    user: CurrentUser,
+    service: BillingDep,
+    ctx: RequestCtx,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> CategoryRead:
+    """Create an income or expense category from a name alone.
+
+    The built-in list covers a general small business and a household, but it cannot
+    anticipate every trade. This is the escape hatch, and deliberately the only
+    account-creating path on this screen: the account code, parent group, and subtype
+    are all derived, so nobody has to understand the chart of accounts to file a
+    payment under "Tempo Hire".
+
+    Guarded on `account:write` rather than `journal:write` — it does add to the chart of
+    accounts, and an organization may want that narrower than day-to-day recording.
+    """
+    category = await service.create_category(
+        organization_id, user, name=data.name, direction=data.direction, ctx=ctx
+    )
+    return CategoryRead(
+        id=category.id,
+        code=category.code,
+        name=category.name,
+        direction=category.direction,
+        group=category.group,
+        is_default=category.is_default,
     )
 
 
@@ -163,6 +204,7 @@ async def record_entry(
         category_id=data.category_id,
         money_account_id=data.money_account_id,
         reference=data.reference,
+        party=data.party,
         ctx=ctx,
     )
     return _entry(entry)

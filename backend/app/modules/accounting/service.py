@@ -174,6 +174,73 @@ class ChartOfAccountsService:
         )
         return len(by_code), journals_created
 
+    async def sync_template(self, organization_id: uuid.UUID) -> int:
+        """Add template accounts this organization is missing, by code.
+
+        ``seed_defaults`` skips entirely once any account exists, which is right for
+        seeding but means an organization set up against an older template never gains
+        anything added later. That is not hypothetical: the household and expanded
+        expense categories arrived after the first organizations were created, and
+        without this their owners would only see the original list.
+
+        Matching is by **code**, and existing rows are never touched — so an account
+        the user renamed keeps its name, and one they deactivated stays inactive.
+        Adding is the only operation. Nothing is renamed, re-parented, or deleted,
+        because a code already in use may have postings against it.
+
+        Returns the number of accounts created.
+        """
+        existing = {
+            account.code: account
+            for account in await self.accounts.list_for_org(organization_id, include_inactive=True)
+        }
+        if not existing:
+            # Nothing at all: this is a seed, not a top-up.
+            created, _ = await self.seed_defaults(organization_id)
+            return created
+
+        added = 0
+        for spec in DEFAULT_CHART:
+            if spec.code in existing:
+                continue
+
+            parent = existing.get(spec.parent) if spec.parent else None
+            if spec.parent and parent is None:
+                # The parent group is itself missing and comes later in the template;
+                # skipping keeps the tree consistent, and the next call picks it up
+                # once the parent exists. Ordering means this converges in one pass in
+                # practice, because parents always precede their children.
+                log.warning(
+                    "skipping template account with an unresolved parent",
+                    extra={"code": spec.code, "parent": spec.parent},
+                )
+                continue
+
+            account = Account(
+                organization_id=organization_id,
+                code=spec.code,
+                name=spec.name,
+                account_type=spec.account_type,
+                subtype=spec.subtype,
+                parent_id=parent.id if parent else None,
+                depth=(parent.depth + 1) if parent else 0,
+                is_group=spec.is_group,
+                is_system=True,
+                is_reconcilable=spec.reconcilable,
+                system_key=spec.system_key,
+            )
+            self.session.add(account)
+            await self.session.flush()
+            existing[spec.code] = account
+            added += 1
+
+        if added:
+            log.info(
+                "topped up chart of accounts from the template",
+                extra={"organization_id": str(organization_id), "added": added},
+            )
+        return added
+
     # -- Reads ---------------------------------------------------------------
     async def list_accounts(
         self,
@@ -707,6 +774,7 @@ class PostingService:
             entry_date=data.entry_date,
             narration=data.narration,
             reference=data.reference,
+            counterparty=data.counterparty,
             status=EntryStatus.DRAFT,
             created_by_id=actor.id,
             source_type=source_type,

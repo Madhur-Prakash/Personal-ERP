@@ -15,6 +15,9 @@ export interface Category {
   name: string;
   /** Income categories cannot take money out, and vice versa. */
   direction: Direction;
+  /** The parent group's name, used for `optgroup` — nearly eighty flat options is
+   *  a list nobody reads to the end of. */
+  group: string;
   is_default: boolean;
 }
 
@@ -42,6 +45,8 @@ export interface BillingEntry {
   amount: Money;
   description: string;
   reference: string | null;
+  /** Who it came from (money in) or went to (money out). Free text, not a record. */
+  party: string | null;
 
   category_id: string;
   category_name: string;
@@ -70,6 +75,7 @@ export interface RecordEntryBody {
   category_id?: string;
   money_account_id?: string;
   reference?: string;
+  party?: string;
 }
 
 export const billingApi = {
@@ -88,6 +94,14 @@ export const billingApi = {
     api.get<BillingSummary>('/billing/summary', { params }),
 
   record: (body: RecordEntryBody) => api.post<BillingEntry>('/billing', body),
+
+  /**
+   * Add a category from a name alone. The account code, parent group, and subtype are
+   * derived server-side — nobody should need to understand the chart of accounts to
+   * file a payment under a name the built-in list does not have.
+   */
+  createCategory: (name: string, direction: Direction) =>
+    api.post<Category>('/billing/categories', { name, direction }),
 
   /**
    * Cancel an entry by posting its mirror image. There is no delete and no edit —

@@ -40,6 +40,9 @@ class RecordEntryRequest(BaseSchema):
     category_id: uuid.UUID | None = None
     money_account_id: uuid.UUID | None = None
     reference: str | None = Field(default=None, max_length=100)
+    #: Who it came from, or who it went to. Optional and free text: most parties in a
+    #: small business are never worth a master record.
+    party: str | None = Field(default=None, max_length=200)
 
 
 class ReverseEntryRequest(BaseSchema):
@@ -52,7 +55,22 @@ class CategoryRead(ResponseSchema):
     name: str
     #: Which way this category applies. Income categories cannot take money out.
     direction: Direction
+    #: The parent group's name, so the dropdown can use `optgroup`. A flat list of
+    #: nearly eighty categories is one nobody reads to the end of.
+    group: str
     is_default: bool
+
+
+class CreateCategoryRequest(BaseSchema):
+    """Add a category of your own.
+
+    Only a name and a direction. The code, parent group, and subtype are derived —
+    asking someone to pick an account code and a subtype in order to record a payment
+    would defeat the purpose of this screen.
+    """
+
+    name: Annotated[str, Field(min_length=1, max_length=150)]
+    direction: Direction
 
 
 class MoneyAccountRead(ResponseSchema):
@@ -86,6 +104,7 @@ class EntryRead(ResponseSchema):
     amount: Decimal
     description: str
     reference: str | None
+    party: str | None
 
     category_id: uuid.UUID
     category_name: str

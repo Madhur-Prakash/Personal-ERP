@@ -30,17 +30,23 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 from typing import Final
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.context import RequestContext
-from app.core.exceptions import BusinessRuleError, NotFoundError, ValidationError
+from app.core.exceptions import (
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from app.core.logging import get_logger
 from app.core.pagination import PageParams
 from app.db.types import ZERO
@@ -54,6 +60,7 @@ from app.modules.accounting.models import (
     JournalType,
 )
 from app.modules.accounting.repository import POSTED_STATUSES, AccountRepository
+from app.modules.accounting.schemas import AccountCreate
 from app.modules.accounting.service import (
     ChartOfAccountsService,
     FiscalCalendarService,
@@ -95,6 +102,9 @@ class Category:
     code: str
     name: str
     direction: Direction
+    #: The parent group's name, so the dropdown can be grouped. A flat list of nearly
+    #: eighty categories is a list nobody reads to the end of.
+    group: str
     #: Pre-selected in the form, so the common case needs no choice at all.
     is_default: bool = False
 
@@ -120,6 +130,8 @@ class Entry:
     amount: Decimal
     description: str
     reference: str | None
+    #: Who it came from (money in) or went to (money out). Free text.
+    party: str | None
 
     category_id: uuid.UUID
     category_name: str
@@ -171,7 +183,11 @@ class BillingService:
         "Rent" does not care that it sits under "Operating Expenses".
         """
         await self.ensure_books(organization_id)
-        rows = await self.accounts.list_for_org(organization_id, postable_only=True)
+        # Every account, groups included: the groups are not selectable but their names
+        # are what the dropdown is organised by.
+        every = await self.accounts.list_for_org(organization_id, include_inactive=False)
+        group_names = {account.id: account.name for account in every if account.is_group}
+        rows = [account for account in every if not account.is_group]
 
         categories: list[Category] = []
         for account in rows:
@@ -190,10 +206,112 @@ class BillingService:
                     code=account.code,
                     name=account.name,
                     direction=direction,
+                    group=group_names.get(account.parent_id or uuid.UUID(int=0))
+                    or ("Income" if direction is Direction.IN else "Expenses"),
                     is_default=account.code == default_code,
                 )
             )
         return categories
+
+    async def create_category(
+        self,
+        organization_id: uuid.UUID,
+        actor: User,
+        *,
+        name: str,
+        direction: Direction,
+        ctx: RequestContext | None = None,
+    ) -> Category:
+        """Add a category of the user's own.
+
+        The template cannot anticipate every business, so this is the escape hatch —
+        and it is deliberately the *only* account-creation path exposed on this screen.
+        The user supplies a name and a direction; the code, the parent group, the
+        subtype, and the depth are all derived. Asking a shopkeeper to choose an account
+        code and a subtype to record a payment would defeat the point of the screen.
+
+        The new account is filed under the same group the direction's own defaults live
+        in, so it appears alongside the categories it belongs with rather than at the
+        top level.
+        """
+        await self.ensure_books(organization_id)
+
+        cleaned = name.strip()
+        if not cleaned:
+            raise ValidationError("Give the category a name.")
+
+        every = await self.accounts.list_for_org(organization_id, include_inactive=True)
+
+        if any(a.name.casefold() == cleaned.casefold() for a in every):
+            raise ConflictError(
+                f'A category called "{cleaned}" already exists.',
+                code="category_exists",
+            )
+
+        wanted = direction.category_type
+        anchor_code = DEFAULT_INCOME_CODE if direction is Direction.IN else DEFAULT_EXPENSE_CODE
+        anchor = next((a for a in every if a.code == anchor_code), None)
+        parent = next(
+            (a for a in every if anchor is not None and a.id == anchor.parent_id),
+            None,
+        ) or next((a for a in every if a.is_group and a.account_type is wanted), None)
+
+        if parent is None:  # pragma: no cover — ensure_books guarantees a group exists
+            raise BusinessRuleError(
+                "The chart of accounts has no group to file this under.",
+                code="no_parent_group",
+            )
+
+        account = await self.chart.create_account(
+            organization_id,
+            AccountCreate(
+                code=self._next_code(every, parent.code),
+                name=cleaned,
+                account_type=wanted,
+                subtype=anchor.subtype if anchor is not None else parent.subtype,
+                parent_id=parent.id,
+                is_group=False,
+            ),
+            actor,
+            ctx,
+        )
+
+        log.info(
+            "billing category created",
+            extra={"name": cleaned, "code": account.code, "direction": direction.value},
+        )
+        return Category(
+            id=account.id,
+            code=account.code,
+            name=account.name,
+            direction=direction,
+            group=parent.name,
+            is_default=False,
+        )
+
+    @staticmethod
+    def _next_code(existing: Sequence[Account], parent_code: str) -> str:
+        """The next free code inside a parent's block.
+
+        Codes are hierarchical (``5200`` owns ``5201``-``5299``), so a new child is
+        numbered inside its parent's range. Walking upward from the parent finds the
+        first gap, which keeps user-added categories sorted next to their siblings
+        rather than appended at the end of the chart.
+        """
+        taken = {account.code for account in existing}
+        base = int(parent_code)
+        for offset in range(1, 100):
+            candidate = str(base + offset)
+            if candidate not in taken:
+                return candidate
+        # The parent's block is full; fall back to a free code anywhere above it.
+        for candidate_int in range(base + 100, base + 1000):
+            candidate = str(candidate_int)
+            if candidate not in taken:
+                return candidate
+        raise BusinessRuleError(  # pragma: no cover — 1000 codes exhausted
+            "No account code is free near this group.", code="no_free_code"
+        )
 
     async def money_accounts(self, organization_id: uuid.UUID) -> list[MoneyAccount]:
         """Cash and bank accounts, for "where did it come from / go to"."""
@@ -227,6 +345,7 @@ class BillingService:
         category_id: uuid.UUID | None = None,
         money_account_id: uuid.UUID | None = None,
         reference: str | None = None,
+        party: str | None = None,
         ctx: RequestContext | None = None,
     ) -> Entry:
         """Record one movement and post it to the ledger.
@@ -274,6 +393,7 @@ class BillingService:
                 entry_date=entry_date,
                 narration=description.strip(),
                 reference=reference,
+                counterparty=(party or "").strip() or None,
                 lines=[
                     JournalEntryLineInput(account_id=debit_account, debit=amount, credit=ZERO),
                     JournalEntryLineInput(account_id=credit_account, debit=ZERO, credit=amount),
@@ -371,7 +491,11 @@ class BillingService:
             )
         ).scalar_one_or_none() or 4
 
-        await self.chart.seed_defaults(organization_id)
+        # `sync_template` rather than `seed_defaults`: it seeds when there is nothing,
+        # and tops up by code when there is. Organizations created against an earlier
+        # template would otherwise never see categories added since — which is exactly
+        # what happened when the household and expanded expense lists landed.
+        await self.chart.sync_template(organization_id)
         await self.calendar.ensure_year_for(
             organization_id, fiscal_year_start_month=start_month, on=on
         )
@@ -430,7 +554,15 @@ class BillingService:
         if to_date is not None:
             query = query.where(JournalEntry.entry_date <= to_date)
         if q:
-            query = query.where(JournalEntry.narration.ilike(f"%{q.strip()}%"))
+            # The party is searched alongside the description: "Airtel" is at least as
+            # likely a search as the note someone typed next to it.
+            pattern = f"%{q.strip()}%"
+            query = query.where(
+                or_(
+                    JournalEntry.narration.ilike(pattern),
+                    JournalEntry.counterparty.ilike(pattern),
+                )
+            )
 
         counted = query.options().order_by(None).subquery()
         total = (await self.session.execute(select(func.count()).select_from(counted))).scalar_one()
@@ -501,6 +633,7 @@ class BillingService:
             amount=money_line.credit if direction is Direction.OUT else money_line.debit,
             description=row.narration,
             reference=row.reference,
+            party=row.counterparty,
             category_id=category_line.account_id,
             category_name=category_line.account.name,
             money_account_id=money_line.account_id,

@@ -482,6 +482,19 @@ class JournalEntry(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
     #: External document reference — cheque number, supplier invoice number.
     reference: Mapped[str | None] = mapped_column(String(100), index=True)
 
+    #: Who the money came from, or went to. Free text, and deliberately not a foreign
+    #: key to a customer or supplier.
+    #:
+    #: This is the "particulars" column of a traditional day book. Most entries in a
+    #: small business name a party that will never be a master record — the auto driver,
+    #: the electricity board, a walk-in buyer — and forcing a customer row into existence
+    #: to write down who paid you is exactly the friction the billing screen exists to
+    #: remove. Indexed because "everything I paid Airtel" is a question people ask.
+    #:
+    #: Invoices and bills leave this empty: they already have a real party on the
+    #: document itself, and duplicating it here would give two answers to one question.
+    counterparty: Mapped[str | None] = mapped_column(String(200), index=True)
+
     status: Mapped[EntryStatus] = mapped_column(
         enum_column(EntryStatus, length=20),
         nullable=False,
