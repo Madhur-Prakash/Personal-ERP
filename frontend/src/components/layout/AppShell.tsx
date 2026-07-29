@@ -1,83 +1,16 @@
 import { Link, Outlet } from '@tanstack/react-router';
-import {
-  Bell,
-  Boxes,
-  Building2,
-  ChevronDown,
-  FileText,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  BarChart3,
-  IndianRupee,
-  ScanLine,
-  Search,
-  Settings,
-  ShieldCheck,
-  Sparkles,
-  Users,
-  Wallet,
-  X,
-} from 'lucide-react';
+import { Bell, Building2, ChevronDown, LogOut, Menu, Search, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { CommandPalette } from '@/components/layout/CommandPalette';
 import { Footer } from '@/components/layout/Footer';
+import { NAV_SECTIONS } from '@/components/layout/nav';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { cn } from '@/lib/cn';
-
-interface NavItem {
-  label: string;
-  to: string;
-  icon: typeof LayoutDashboard;
-  /** Rendered but disabled until the owning stage lands. */
-  stage?: number;
-  /** Hidden entirely unless the caller holds this permission. */
-  permission?: string;
-}
-
-/**
- * Navigation.
- *
- * Later-stage modules are listed but visibly disabled rather than omitted. It
- * sets the expectation of what this product is, and prevents the sidebar
- * lurching as stages ship. Each carries the stage that unlocks it.
- */
-const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
-  {
-    title: 'Overview',
-    items: [{ label: 'Dashboard', to: '/', icon: LayoutDashboard }],
-  },
-  {
-    title: 'Finance',
-    items: [
-      // First: for most users this is the only screen they open.
-      { label: 'Billing', to: '/billing', icon: IndianRupee, permission: 'journal:read' },
-      { label: 'Accounting', to: '/accounting', icon: Wallet, permission: 'account:read' },
-      { label: 'Sales', to: '/invoices', icon: FileText, permission: 'invoice:read' },
-      { label: 'Inventory', to: '/inventory', icon: Boxes, permission: 'inventory:read' },
-      { label: 'Documents', to: '/documents', icon: ScanLine, permission: 'document:read' },
-      { label: 'Analytics', to: '/analytics', icon: BarChart3, permission: 'report:read' },
-    ],
-  },
-  {
-    title: 'Intelligence',
-    items: [{ label: 'AI Assistant', to: '/assistant', icon: Sparkles, stage: 6 }],
-  },
-  {
-    title: 'Organization',
-    items: [
-      { label: 'Members', to: '/members', icon: Users, permission: 'member:read' },
-      { label: 'Roles', to: '/roles', icon: ShieldCheck, permission: 'role:read' },
-      { label: 'Audit log', to: '/audit', icon: FileText, permission: 'audit:read' },
-      { label: 'Settings', to: '/settings', icon: Settings },
-    ],
-  },
-];
 
 export function AppShell() {
   const { user, signOut, can } = useAuth();
