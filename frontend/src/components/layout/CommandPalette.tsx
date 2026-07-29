@@ -13,7 +13,7 @@ import {
   Sun,
   Users,
 } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useTheme } from '@/features/theme/ThemeProvider';
@@ -30,6 +30,9 @@ import { useTheme } from '@/features/theme/ThemeProvider';
  *
  * Permission-gated entries are filtered out, not disabled - offering a command
  * that will 403 is worse than not offering it.
+ *
+ * Mounted only while open, so every invocation starts with an empty query rather than
+ * whatever was typed last time.
  */
 export function CommandPalette({
   open,
@@ -38,19 +41,34 @@ export function CommandPalette({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  if (!open) return null;
+  return <Palette onOpenChange={onOpenChange} />;
+}
+
+function Palette({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate();
   const { user, signOut, switchOrganization, can } = useAuth();
   const { setTheme } = useTheme();
+  const dialog = useRef<HTMLDialogElement>(null);
 
-  // Lock body scroll while open, or the page scrolls behind the dialog.
+  // `showModal` on mount, which is what makes Escape work, traps focus inside the
+  // palette, and makes the page behind it inert to both pointer and screen reader. The
+  // hand-rolled overlay this replaces got none of those - and the `ESC` hint beside the
+  // search box had been promising one of them since the palette was written.
   useEffect(() => {
-    if (!open) return;
+    dialog.current?.showModal();
+  }, []);
+
+  // Belt and braces on the scroll lock: the dialog is in the top layer and the page
+  // behind it cannot be interacted with, but browsers still differ on whether it can be
+  // scrolled.
+  useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = previous;
     };
-  }, [open]);
+  }, []);
 
   function run(action: () => void) {
     onOpenChange(false);
@@ -59,23 +77,43 @@ export function CommandPalette({
     requestAnimationFrame(action);
   }
 
-  if (!open) return null;
-
   const otherOrganizations = (user?.organizations ?? []).filter(
     (organization) => organization.id !== user?.active_organization?.id,
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh]">
-      <div
-        className="animate-fade-in absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={() => onOpenChange(false)}
-        aria-hidden
-      />
-
+    <dialog
+      ref={dialog}
+      aria-label="Command palette"
+      // `cancel` fires for Escape. Prevented and routed through `onOpenChange` so the
+      // parent's state always agrees with whether the dialog is really open - letting the
+      // browser close it directly would leave `open` true and the palette unopenable.
+      onCancel={(event) => {
+        event.preventDefault();
+        onOpenChange(false);
+      }}
+      onClick={(event) => {
+        // A backdrop click lands on the dialog element itself, because ::backdrop is not
+        // a child. Compare against the box to tell the two apart.
+        if (event.target !== event.currentTarget) return;
+        const box = event.currentTarget.getBoundingClientRect();
+        const inside =
+          event.clientX >= box.left &&
+          event.clientX <= box.right &&
+          event.clientY >= box.top &&
+          event.clientY <= box.bottom;
+        if (!inside) onOpenChange(false);
+      }}
+      className={
+        // Pinned near the top rather than centred: the list grows downwards as you type,
+        // and a centred dialog would shift under the cursor while being read.
+        'animate-slide-up mx-auto mt-[12vh] mb-auto w-[min(92vw,32rem)] rounded-xl border-0 bg-transparent p-0 ' +
+        'backdrop:bg-black/50 backdrop:backdrop-blur-sm'
+      }
+    >
       <Command
         label="Command palette"
-        className="bg-surface-raised border-border animate-slide-up relative w-full max-w-lg overflow-hidden rounded-xl border shadow-xl"
+        className="bg-surface-raised border-border w-full overflow-hidden rounded-xl border shadow-xl"
         loop
       >
         <div className="border-border flex items-center gap-2.5 border-b px-4">
@@ -158,7 +196,7 @@ export function CommandPalette({
           </Group>
         </Command.List>
       </Command>
-    </div>
+    </dialog>
   );
 }
 
