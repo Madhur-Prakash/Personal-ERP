@@ -51,9 +51,17 @@ export default defineConfig({
             return 'router';
           if (id.includes('@tanstack/react-query') || id.includes('@tanstack/query-core'))
             return 'query';
-          // Recharts pulls in d3-* as separate packages; keeping them together
-          // means the chart code loads as one unit or not at all.
-          if (id.includes('recharts') || /[\\/]node_modules[\\/]d3-/.test(id)) return 'charts';
+          // Recharts reaches d3 through `victory-vendor`, which re-exports the d3-*
+          // packages. All three have to land in the same chunk: with only recharts and
+          // d3-* here, `victory-vendor` fell through to `vendor`, and vendor importing
+          // d3 while charts imported vendor made the two chunks mutually dependent -
+          // Rollup warns, and a browser has no order in which it can load them.
+          if (
+            id.includes('recharts') ||
+            id.includes('victory-vendor') ||
+            /[\\/]node_modules[\\/]d3-/.test(id)
+          )
+            return 'charts';
           if (id.includes('zod') || id.includes('react-hook-form')) return 'forms';
 
           return 'vendor';

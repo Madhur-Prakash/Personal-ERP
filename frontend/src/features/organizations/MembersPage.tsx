@@ -115,7 +115,7 @@ export function MembersPage() {
   const pendingInvitations = (invitations ?? []).filter((i) => i.status === 'pending');
 
   return (
-    <div className="p-6 lg:p-8">
+    <div>
       <PageHeader
         title="Members"
         description="Manage who has access to this organization and what they can do."

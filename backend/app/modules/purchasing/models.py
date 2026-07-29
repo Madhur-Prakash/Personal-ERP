@@ -89,7 +89,13 @@ class MovementKind(StrEnum):
 
     RECEIPT = "receipt"
     ISSUE = "issue"
-    #: Stock-take correction, in either direction.
+    #: Stock found: a stock-take surplus, or opening stock entered by hand.
+    #:
+    #: Only ever an *increase*. A stock-take shortfall is an ``ISSUE`` - it consumes
+    #: stock and costs money exactly as a sale does, and giving it its own inbound-looking
+    #: kind is how a positive adjustment silently became a write-off. What separates a
+    #: shortfall from a sale is ``source_type="stock_adjustment"`` on the movement, not
+    #: the kind.
     ADJUSTMENT = "adjustment"
     TRANSFER_OUT = "transfer_out"
     TRANSFER_IN = "transfer_in"
@@ -104,6 +110,7 @@ class MovementKind(StrEnum):
     def increases_stock(self) -> bool:
         return self in (
             MovementKind.RECEIPT,
+            MovementKind.ADJUSTMENT,
             MovementKind.TRANSFER_IN,
             MovementKind.RETURN_IN,
         )

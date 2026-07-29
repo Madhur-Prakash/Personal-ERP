@@ -571,7 +571,11 @@ async def stock_valuation(
 
 
 @inventory_router.post(
-    "/adjust", response_model=StockMovementRead, summary="Adjust stock (stock take)"
+    "/adjust",
+    response_model=StockMovementRead,
+    # A movement is a new, immutable record, like every other 201 in this router.
+    status_code=status.HTTP_201_CREATED,
+    summary="Adjust stock (stock take)",
 )
 async def adjust_stock(
     data: StockAdjustRequest,
@@ -602,7 +606,10 @@ async def adjust_stock(
 
 
 @inventory_router.post(
-    "/transfer", response_model=list[StockMovementRead], summary="Transfer between warehouses"
+    "/transfer",
+    response_model=list[StockMovementRead],
+    status_code=status.HTTP_201_CREATED,
+    summary="Transfer between warehouses",
 )
 async def transfer_stock(
     data: StockTransferRequest,

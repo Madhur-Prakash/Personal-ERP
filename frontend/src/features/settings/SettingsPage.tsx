@@ -38,7 +38,7 @@ export function SettingsPage() {
   const { user, refresh, can } = useAuth();
 
   return (
-    <div className="p-6 lg:p-8">
+    <div>
       <PageHeader title="Settings" description="Your profile, security, and organization." />
 
       <div className="grid gap-4 xl:grid-cols-3">

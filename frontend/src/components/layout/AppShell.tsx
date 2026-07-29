@@ -22,6 +22,7 @@ import {
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { CommandPalette } from '@/components/layout/CommandPalette';
+import { Footer } from '@/components/layout/Footer';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
@@ -291,9 +292,19 @@ export function AppShell() {
           <ThemeToggle />
         </header>
 
-        <main id="main-content" className="animate-fade-in">
+        {/* Padding lives here, once, rather than in each page.
+            Half the routes set `p-6 lg:p-8` themselves and half set nothing, so pages
+            were inset inconsistently — and none of them had bottom padding, which is why
+            the last row of a long table sat flush against the viewport edge with nothing
+            below it and looked cut off. `pb-16` guarantees breathing room after the final
+            element on every screen. */}
+        <main id="main-content" className="animate-fade-in p-6 pb-10 lg:p-8 lg:pb-12">
           <Outlet />
         </main>
+
+        {/* The footer supplies the closing whitespace now, so `main` no longer needs the
+            extra-large bottom padding that was standing in for it. */}
+        <Footer />
       </div>
     </div>
   );

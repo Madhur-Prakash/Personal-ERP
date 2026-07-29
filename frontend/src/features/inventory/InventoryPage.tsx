@@ -6,7 +6,16 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { AlertTriangle, Plus, ScanLine } from 'lucide-react';
+import {
+  AlertTriangle,
+  Archive,
+  ArchiveRestore,
+  ArrowLeftRight,
+  Pencil,
+  Plus,
+  ScanLine,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -16,6 +25,13 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import type { Column } from '@/components/ui/DataTable';
 import { DataTable, PageHeader, Pagination } from '@/components/ui/DataTable';
 import { Input } from '@/components/ui/Input';
+import {
+  ProductFormModal,
+  StockAdjustModal,
+  StockTransferModal,
+  WarehouseFormModal,
+} from '@/features/inventory/InventoryForms';
+import { useArchiveProduct } from '@/features/inventory/hooks';
 import { PartyFormModal } from '@/features/sales/PartyForm';
 import {
   type Bill,
@@ -121,6 +137,10 @@ export function InventoryPage() {
 // Stock
 // ---------------------------------------------------------------------------
 function StockView() {
+  const [adjusting, setAdjusting] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [addingLocation, setAddingLocation] = useState(false);
+
   const { data: valuation } = useQuery({
     queryKey: ['stock-valuation'],
     queryFn: () => inventoryApi.valuation(),
@@ -233,8 +253,30 @@ function StockView() {
         </Card>
       )}
 
+      <StockAdjustModal open={adjusting} onClose={() => setAdjusting(false)} />
+      <StockTransferModal open={moving} onClose={() => setMoving(false)} />
+      <WarehouseFormModal open={addingLocation} onClose={() => setAddingLocation(false)} />
+
       <Card>
-        <CardHeader title="Stock on hand" />
+        <CardHeader
+          title="Stock on hand"
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setMoving(true)}>
+                <ArrowLeftRight className="h-3.5 w-3.5" aria-hidden />
+                Move stock
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setAdjusting(true)}>
+                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
+                Adjust
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setAddingLocation(true)}>
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                Location
+              </Button>
+            </div>
+          }
+        />
         <DataTable
           columns={columns}
           rows={levels ?? []}
@@ -254,6 +296,11 @@ function StockView() {
 // Products
 // ---------------------------------------------------------------------------
 function ProductList() {
+  // The product being edited. `undefined` means closed; a value both opens the form
+  // and supplies what to edit, so the two cannot disagree.
+  const [editing, setEditing] = useState<Product | undefined>(undefined);
+  const [adjusting, setAdjusting] = useState<Product | undefined>(undefined);
+  const archive = useArchiveProduct();
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState('');
   const [scan, setScan] = useState('');
@@ -311,11 +358,86 @@ function ProductList() {
           <span className="text-content-muted">-</span>
         ),
     },
+    {
+      header: '',
+      cell: (row) => (
+        <span className="flex items-center justify-end gap-1">
+          <button
+            type="button"
+            title="Edit"
+            onClick={() => setEditing(row)}
+            className="text-content-muted hover:text-content p-1"
+          >
+            <Pencil className="h-3.5 w-3.5" aria-hidden />
+            <span className="sr-only">Edit {row.name}</span>
+          </button>
+          {row.tracks_stock && (
+            <button
+              type="button"
+              title="Adjust stock"
+              onClick={() => setAdjusting(row)}
+              className="text-content-muted hover:text-content p-1"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
+              <span className="sr-only">Adjust stock for {row.name}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            title={row.is_active ? 'Archive' : 'Restore'}
+            disabled={archive.isPending}
+            onClick={() => {
+              // Archive, never delete: a product named on a posted bill cannot be removed
+              // without leaving that entry pointing at nothing. Fully reversible.
+              if (
+                row.is_active &&
+                !window.confirm(
+                  `Archive ${row.name}? It disappears from pickers but its history and stock stay. You can restore it later.`,
+                )
+              ) {
+                return;
+              }
+              archive.mutate({ product: row, archive: row.is_active });
+            }}
+            className="text-content-muted hover:text-danger p-1 disabled:opacity-40"
+          >
+            {row.is_active ? (
+              <Archive className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <ArchiveRestore className="h-3.5 w-3.5" aria-hidden />
+            )}
+            <span className="sr-only">
+              {row.is_active ? 'Archive' : 'Restore'} {row.name}
+            </span>
+          </button>
+        </span>
+      ),
+    },
   ];
 
   return (
     <div className="space-y-4">
-      {creating && <ProductComposer onClose={() => setCreating(false)} />}
+      {/* One form for both. The inline composer that used to live here only created,
+          so editing would have meant a second form drifting from the first. */}
+      {creating && <ProductFormModal open onClose={() => setCreating(false)} />}
+      {editing && (
+        <ProductFormModal
+          open
+          // Keyed on the product so switching rows re-initialises the fields rather than
+          // showing the previous product's values.
+          key={editing.id}
+          product={editing}
+          onClose={() => setEditing(undefined)}
+        />
+      )}
+      {adjusting && (
+        <StockAdjustModal
+          open
+          key={adjusting.id}
+          product={adjusting}
+          onClose={() => setAdjusting(undefined)}
+        />
+      )}
 
       <Card>
         <CardHeader
@@ -365,99 +487,6 @@ function ProductList() {
         )}
       </Card>
     </div>
-  );
-}
-
-function ProductComposer({ onClose }: { onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const [form, setForm] = useState({
-    name: '',
-    sku: '',
-    barcode: '',
-    unit: 'NOS',
-    tax_rate: '18',
-    sale_price: '',
-    purchase_price: '',
-    reorder_level: '',
-  });
-
-  const create = useMutation({
-    mutationFn: () =>
-      inventoryApi.createProduct({
-        name: form.name,
-        sku: form.sku || undefined,
-        barcode: form.barcode || undefined,
-        unit: form.unit,
-        tax_rate: form.tax_rate || '0',
-        sale_price: form.sale_price || '0',
-        purchase_price: form.purchase_price || '0',
-        reorder_level: form.reorder_level || '0',
-      }),
-    onSuccess: (product) => {
-      toast.success(`${product.sku} created`);
-      void queryClient.invalidateQueries({ queryKey: ['products'] });
-      onClose();
-    },
-    onError: (error) =>
-      toast.error(error instanceof ApiError ? error.message : 'Could not create the product'),
-  });
-
-  const set = (key: keyof typeof form) => (event: { target: { value: string } }) =>
-    setForm((current) => ({ ...current, [key]: event.target.value }));
-
-  return (
-    <Card>
-      <CardHeader title="New product" description="SKU is generated if left blank." />
-      <CardBody className="space-y-3">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Input label="Name" value={form.name} onChange={set('name')} autoFocus />
-          <Input label="SKU" placeholder="auto" value={form.sku} onChange={set('sku')} />
-          <Input
-            label="Barcode"
-            placeholder="EAN / UPC"
-            value={form.barcode}
-            onChange={set('barcode')}
-          />
-          <Input label="Unit" value={form.unit} onChange={set('unit')} />
-          <Input
-            label="GST %"
-            inputMode="decimal"
-            value={form.tax_rate}
-            onChange={set('tax_rate')}
-          />
-          <Input
-            label="Reorder level"
-            inputMode="decimal"
-            value={form.reorder_level}
-            onChange={set('reorder_level')}
-          />
-          <Input
-            label="Purchase price"
-            inputMode="decimal"
-            value={form.purchase_price}
-            onChange={set('purchase_price')}
-          />
-          <Input
-            label="Sale price"
-            inputMode="decimal"
-            value={form.sale_price}
-            onChange={set('sale_price')}
-          />
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            disabled={form.name.trim() === ''}
-            loading={create.isPending}
-            onClick={() => create.mutate()}
-          >
-            Create product
-          </Button>
-        </div>
-      </CardBody>
-    </Card>
   );
 }
 

@@ -249,8 +249,27 @@ export const inventoryApi = {
     purchase_price?: Money;
     reorder_level?: Money;
   }) => api.post<Product>('/products', body),
-  updateProduct: (id: string, body: Partial<Product>) =>
-    api.patch<Product>(`/products/${id}`, body),
+  /**
+   * Mirrors `ProductUpdate`, which is `extra="forbid"` — `Partial<Product>` was wrong
+   * here, because it let read-only fields like `sku` and `quantity_on_hand` type-check
+   * and then 422 at runtime. `sku` is genuinely not updatable: it may already be printed
+   * on a label or quoted on a bill.
+   */
+  updateProduct: (
+    id: string,
+    body: {
+      name?: string;
+      description?: string | null;
+      barcode?: string;
+      hsn_code?: string;
+      unit?: string;
+      tax_rate?: Money;
+      sale_price?: Money;
+      purchase_price?: Money;
+      reorder_level?: Money;
+      is_active?: boolean;
+    },
+  ) => api.patch<Product>(`/products/${id}`, body),
   byBarcode: (barcode: string) =>
     api.get<Product>(`/products/by-barcode/${encodeURIComponent(barcode)}`),
   reorderReport: () => api.get<ReorderRow[]>('/products/reorder'),

@@ -94,7 +94,7 @@ export function RolesPage() {
   }
 
   return (
-    <div className="p-6 lg:p-8">
+    <div>
       <PageHeader
         title="Roles and permissions"
         description="Roles bundle permissions. Built-in roles cannot be renamed or deleted, but their permissions can be adjusted."

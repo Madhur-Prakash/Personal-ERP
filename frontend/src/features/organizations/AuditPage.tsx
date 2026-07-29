@@ -68,7 +68,7 @@ export function AuditPage() {
   const entries = data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
-    <div className="p-6 lg:p-8">
+    <div>
       <PageHeader
         title="Audit log"
         description="An append-only record of every action taken in this organization."

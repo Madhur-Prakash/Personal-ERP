@@ -255,7 +255,7 @@ class TestInventoryEndpoints:
                 "reason": "Breakage during handling",
             },
         )
-        assert response.status_code == 200, response.text
+        assert response.status_code == 201, response.text
         assert money(response.json()["balance_after"]) == D("90.0000")
 
         tb = await authed_client.get(f"{api}/reports/trial-balance")
@@ -305,7 +305,7 @@ class TestInventoryEndpoints:
                 "quantity": "20",
             },
         )
-        assert response.status_code == 200, response.text
+        assert response.status_code == 201, response.text
         movements = response.json()
         assert len(movements) == 2
         # A transfer is not an economic event.
@@ -396,3 +396,164 @@ class TestPermissions:
         second = await authed_client.post(f"{api}/bills", json=payload)
         assert second.status_code == 409
         assert "already entered" in second.json()["error"]["message"]
+
+
+class TestInventoryWritesFromTheUi:
+    """The payloads the new inventory forms send, executed against the real endpoints.
+
+    Worth pinning because the update schema is `extra="forbid"` and the frontend type was
+    `Partial<Product>` — which let read-only fields like `sku` and `quantity_on_hand`
+    type-check and then 422 at runtime, the same class of bug as the customer city field.
+    """
+
+    async def test_edits_a_product(
+        self, authed_client: AsyncClient, api: str, ready_books: Organization
+    ) -> None:
+        created = await authed_client.post(
+            f"{api}/products", json={"name": "Widget", "sale_price": "100"}
+        )
+        assert created.status_code == 201, created.text
+        product = created.json()
+
+        response = await authed_client.patch(
+            f"{api}/products/{product['id']}",
+            json={
+                "name": "Widget Mk II",
+                "unit": "box",
+                "tax_rate": "12",
+                "sale_price": "150",
+                "purchase_price": "90",
+                "reorder_level": "5",
+                "hsn_code": "8483",
+            },
+        )
+        assert response.status_code == 200, response.text
+        updated = response.json()
+
+        assert updated["name"] == "Widget Mk II"
+        assert money(updated["sale_price"]) == D("150.0000")
+        # The SKU is untouched, which is why the form does not send it.
+        assert updated["sku"] == product["sku"]
+
+    async def test_refuses_to_change_the_sku(
+        self, authed_client: AsyncClient, api: str, ready_books: Organization
+    ) -> None:
+        """A code may already be printed on a label or quoted on a bill."""
+        product = (await authed_client.post(f"{api}/products", json={"name": "Widget"})).json()
+
+        response = await authed_client.patch(
+            f"{api}/products/{product['id']}", json={"sku": "HIJACKED"}
+        )
+        assert response.status_code == 422
+
+    async def test_archiving_hides_it_and_is_reversible(
+        self, authed_client: AsyncClient, api: str, ready_books: Organization
+    ) -> None:
+        """There is no delete. A product on a posted bill cannot be removed without
+        leaving that entry pointing at nothing, so archiving is the safe equivalent."""
+        product = (await authed_client.post(f"{api}/products", json={"name": "Widget"})).json()
+
+        archived = await authed_client.patch(
+            f"{api}/products/{product['id']}", json={"is_active": False}
+        )
+        assert archived.status_code == 200, archived.text
+        assert archived.json()["is_active"] is False
+
+        listing = await authed_client.get(f"{api}/products")
+        assert product["id"] not in [row["id"] for row in listing.json()["items"]]
+
+        restored = await authed_client.patch(
+            f"{api}/products/{product['id']}", json={"is_active": True}
+        )
+        assert restored.json()["is_active"] is True
+        again = await authed_client.get(f"{api}/products")
+        assert product["id"] in [row["id"] for row in again.json()["items"]]
+
+    async def test_adds_a_location(
+        self, authed_client: AsyncClient, api: str, ready_books: Organization
+    ) -> None:
+        response = await authed_client.post(
+            f"{api}/inventory/warehouses",
+            json={"code": "GODOWN", "name": "Back godown", "is_default": False},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["code"] == "GODOWN"
+
+        listing = await authed_client.get(f"{api}/inventory/warehouses")
+        assert "Back godown" in [row["name"] for row in listing.json()]
+
+    async def test_adjusts_stock_down_with_a_reason(
+        self, authed_client: AsyncClient, api: str, ready_books: Organization
+    ) -> None:
+        """The form sends a signed delta built from a direction and a positive number."""
+        product = (
+            await authed_client.post(
+                f"{api}/products", json={"name": "Widget", "purchase_price": "50"}
+            )
+        ).json()
+        opening = await authed_client.post(
+            f"{api}/inventory/adjust",
+            json={"product_id": product["id"], "quantity_delta": "10", "reason": "Opening stock"},
+        )
+        # Asserted, not assumed. This call failing silently is what hid a positive
+        # adjustment being posted as a write-off: the test then reported "cannot issue 2,
+        # 0 on hand" and read as a problem with the second call.
+        assert opening.status_code == 201, opening.text
+        assert money(opening.json()["balance_after"]) == D("10.0000")
+        # Valued at the purchase price, having no prior average to go on.
+        assert money(opening.json()["total_cost"]) == D("500.0000")
+
+        response = await authed_client.post(
+            f"{api}/inventory/adjust",
+            json={
+                "product_id": product["id"],
+                "quantity_delta": "-2",
+                "reason": "Stock take 29 July - two damaged",
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert money(response.json()["balance_after"]) == D("8.0000")
+
+        report = (await authed_client.get(f"{api}/reports/trial-balance")).json()
+        assert report["is_balanced"] is True
+
+    async def test_a_transfer_moves_stock_without_changing_its_value(
+        self, authed_client: AsyncClient, api: str, ready_books: Organization
+    ) -> None:
+        """Nothing was bought, sold, or lost — only the location changed."""
+        product = (
+            await authed_client.post(
+                f"{api}/products", json={"name": "Widget", "purchase_price": "50"}
+            )
+        ).json()
+        opening = await authed_client.post(
+            f"{api}/inventory/adjust",
+            json={"product_id": product["id"], "quantity_delta": "10", "reason": "Opening"},
+        )
+        assert opening.status_code == 201, opening.text
+
+        warehouses = (await authed_client.get(f"{api}/inventory/warehouses")).json()
+        source = warehouses[0]
+        destination = (
+            await authed_client.post(
+                f"{api}/inventory/warehouses", json={"code": "GODOWN", "name": "Back godown"}
+            )
+        ).json()
+
+        before = (await authed_client.get(f"{api}/inventory/valuation")).json()
+
+        response = await authed_client.post(
+            f"{api}/inventory/transfer",
+            json={
+                "product_id": product["id"],
+                "from_warehouse_id": source["id"],
+                "to_warehouse_id": destination["id"],
+                "quantity": "4",
+            },
+        )
+        assert response.status_code == 201, response.text
+        # Two movements: out of one location, into the other.
+        assert len(response.json()) == 2
+
+        after = (await authed_client.get(f"{api}/inventory/valuation")).json()
+        assert money(after["total_value"]) == money(before["total_value"])

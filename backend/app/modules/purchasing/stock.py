@@ -223,7 +223,16 @@ class StockService:
 
         try:
             if kind.increases_stock:
+                # Stated cost, else the running average, else what the product is
+                # bought for. Without that last fallback the first stock to enter a
+                # new product arrives at zero cost: the stock report shows the units
+                # and the balance sheet shows no asset, and because both the ledger
+                # and the sub-ledger are zero the control check agrees and never
+                # flags it. Opening stock is the common case, so this is the path a
+                # first-time user takes.
                 cost = unit_cost if unit_cost is not None else current.average_cost
+                if not cost:
+                    cost = product.purchase_price
                 outcome = apply_receipt(current, quantity=quantity, unit_cost=cost)
                 new_state = outcome.state
                 movement_cost = cost

@@ -107,7 +107,7 @@ export function DashboardPage() {
   // No organization yet: onboarding, not a dashboard.
   if (!user?.active_organization) {
     return (
-      <div className="p-6 lg:p-8">
+      <div>
         <PageHeader title={`Welcome, ${firstName}`} />
         <Card>
           <EmptyState
@@ -129,7 +129,7 @@ export function DashboardPage() {
   const currency = dashboard?.currency ?? 'INR';
 
   return (
-    <div className="p-6 lg:p-8">
+    <div>
       <PageHeader
         title={`Good ${greeting()}, ${firstName}`}
         description={

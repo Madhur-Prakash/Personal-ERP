@@ -69,6 +69,24 @@ class Base(DeclarativeBase):
     # Map Python UUIDs onto native ``uuid`` columns rather than char(32).
     type_annotation_map: ClassVar[dict[Any, Any]] = {uuid.UUID: PgUUID(as_uuid=True)}
 
+    # Fetch database-generated values in the same statement that writes them, via
+    # ``RETURNING``.
+    #
+    # Without this, a column the server computes - ``updated_at``, every
+    # ``server_default`` - is left *expired* after a flush, and the next attribute read
+    # emits a lazy SELECT. Under asyncio that read happens outside greenlet context and
+    # raises ``MissingGreenlet``, which surfaces as a 503, so serialising an object the
+    # request just updated would fail on any endpoint whose response carries a timestamp.
+    # PostgreSQL supports RETURNING on both INSERT and UPDATE, so this costs no extra
+    # round trip - it removes one.
+    # A directive rather than a plain dict: a mutable class attribute would be shared
+    # by every mapper, and annotating it ``ClassVar`` to say otherwise contradicts the
+    # instance-variable declaration on ``DeclarativeBase``. This gives each subclass its
+    # own, and matches how ``__tablename__`` is derived below.
+    @declared_attr.directive
+    def __mapper_args__(cls) -> dict[str, Any]:
+        return {"eager_defaults": True}
+
     @declared_attr.directive
     def __tablename__(cls) -> str:
         """Derive ``snake_case`` plural-ish table names from the class name.
