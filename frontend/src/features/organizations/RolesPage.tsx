@@ -11,15 +11,84 @@ import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { organizationsApi } from '@/features/organizations/api';
+import { summariseRole } from '@/features/organizations/permissionSummary';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import type { PermissionGroup } from '@/types/api';
+
+/**
+ * What a role can do, as tags.
+ *
+ * Falls back to the raw slugs while the catalogue is loading rather than rendering nothing:
+ * a card that shows its permissions a beat late is fine, a card that appears to have none
+ * is alarming.
+ */
+function RoleCapabilities({
+  permissions,
+  groups,
+}: {
+  permissions: string[];
+  groups: PermissionGroup[] | undefined;
+}) {
+  if (!groups) {
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {permissions.slice(0, 4).map((permission) => (
+          <Badge key={permission} tone="neutral" className="font-mono">
+            {permission}
+          </Badge>
+        ))}
+      </div>
+    );
+  }
+
+  const summary = summariseRole(permissions, groups);
+
+  if (summary.everything) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone="primary">Everything</Badge>
+        <span className="text-content-muted text-[12px]">
+          all {summary.total} permissions, including ones added in future updates
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5">
+        {summary.capabilities.map((capability) => (
+          <Badge
+            key={capability.label}
+            // Full access to an area reads as a stronger grant than a partial one, so it
+            // is toned differently rather than being distinguishable only by the suffix.
+            tone={capability.complete ? 'primary' : 'neutral'}
+            // The slugs are still here for anyone who wants them - moved out of the way
+            // rather than removed.
+            title={capability.slugs.join('\n')}
+          >
+            {capability.label}
+            {capability.detail && (
+              <span className="ml-1 font-normal opacity-70">· {capability.detail}</span>
+            )}
+          </Badge>
+        ))}
+      </div>
+      <p className="text-content-muted mt-2 text-[12px]">
+        {summary.held} of {summary.total} permissions
+      </p>
+    </div>
+  );
+}
 
 /**
  * Role editor.
  *
- * The permission picker is built from the server's catalogue
- * (`/roles/permissions`) rather than a hard-coded list, so it can never offer a
- * permission the backend does not enforce, or omit one it does.
+ * The permission picker is built from the server's catalogue (`/roles/permissions`) rather
+ * than a hard-coded list, so it can never offer a permission the backend does not enforce,
+ * or omit one it does. The cards above read from the same catalogue, which is what lets
+ * them name capabilities instead of printing slugs.
  */
 export function RolesPage() {
   const { can } = useAuth();
@@ -227,20 +296,7 @@ export function RolesPage() {
                 description={role.description ?? undefined}
               />
               <CardBody className="flex-1">
-                <div className="flex flex-wrap gap-1.5">
-                  {role.permissions.slice(0, 6).map((permission) => (
-                    <Badge
-                      key={permission}
-                      tone={permission === '*:*' ? 'primary' : 'neutral'}
-                      className="font-mono"
-                    >
-                      {permission}
-                    </Badge>
-                  ))}
-                  {role.permissions.length > 6 && (
-                    <Badge tone="neutral">+{role.permissions.length - 6} more</Badge>
-                  )}
-                </div>
+                <RoleCapabilities permissions={role.permissions} groups={catalogue?.groups} />
 
                 <div className="border-border mt-4 flex items-center justify-between border-t pt-3">
                   <span className="text-content-muted text-[12px]">
