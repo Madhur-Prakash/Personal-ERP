@@ -19,6 +19,9 @@ from app.modules.billing.service import Direction, MoneyKind
 Amount = Annotated[Decimal, Field(gt=0, max_digits=18, decimal_places=2)]
 
 Description = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+#: Who the money was with. Stripped, so a field holding only spaces is rejected rather
+#: than stored as whitespace that looks filled in on screen.
+Party = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class RecordEntryRequest(BaseSchema):
@@ -40,9 +43,17 @@ class RecordEntryRequest(BaseSchema):
     category_id: uuid.UUID | None = None
     money_account_id: uuid.UUID | None = None
     reference: str | None = Field(default=None, max_length=100)
-    #: Who it came from, or who it went to. Optional and free text: most parties in a
-    #: small business are never worth a master record.
-    party: str | None = Field(default=None, max_length=200)
+    #: Who it came from, or who it went to. **Required.**
+    #:
+    #: Free text, not a foreign key: most parties in a small business are never worth a
+    #: master record, and forcing one is the friction this screen exists to remove. But
+    #: an amount with no counterparty is nearly as unidentifiable a month later as one
+    #: with no description, so it is asked for rather than offered.
+    #:
+    #: Enforced here and not only in the form, because a rule the browser keeps and the
+    #: API does not is not a rule. The form is the only thing that creates these entries,
+    #: so there is no import or scanning path that this locks out.
+    party: Party
 
 
 class ReverseEntryRequest(BaseSchema):

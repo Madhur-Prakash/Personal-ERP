@@ -52,15 +52,20 @@ async def record(
     description: str,
     entry_date: dt.date | None = None,
     category_id: str | None = None,
-    party: str | None = None,
+    # Required by the API, so the helper supplies one. Tests that care about the party
+    # pass their own; the rest would otherwise all fail on a field they are not testing.
+    party: str = "Someone",
 ) -> dict:
-    body: dict = {"direction": direction, "amount": amount, "description": description}
+    body: dict = {
+        "direction": direction,
+        "amount": amount,
+        "description": description,
+        "party": party,
+    }
     if entry_date is not None:
         body["entry_date"] = entry_date.isoformat()
     if category_id is not None:
         body["category_id"] = category_id
-    if party is not None:
-        body["party"] = party
 
     response = await client.post(f"{api}/billing", json=body)
     assert response.status_code == 201, response.text
@@ -532,12 +537,30 @@ class TestParty:
         )
         assert entry["party"] == "Airtel"
 
-    async def test_is_optional(
+    async def test_is_required(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        """The three-field entry has to keep working - that is the whole premise."""
-        entry = await record(authed_client, api, direction="out", amount="50", description="Chai")
-        assert entry["party"] is None
+        """Rejected server-side, not merely marked required in the form.
+
+        A rule the browser keeps and the API does not is not a rule - and the form is the
+        only thing that creates these entries, so nothing legitimate is locked out.
+        """
+        response = await authed_client.post(
+            f"{api}/billing",
+            json={"direction": "out", "amount": "50", "description": "Chai"},
+        )
+        assert response.status_code == 422, response.text
+        assert "party" in response.text
+
+    async def test_whitespace_does_not_count_as_filled_in(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Spaces would satisfy a naive length check and look blank on screen."""
+        response = await authed_client.post(
+            f"{api}/billing",
+            json={"direction": "out", "amount": "50", "description": "Chai", "party": "   "},
+        )
+        assert response.status_code == 422, response.text
 
     async def test_no_customer_or_supplier_record_is_created(
         self, authed_client: AsyncClient, api: str, books: Organization

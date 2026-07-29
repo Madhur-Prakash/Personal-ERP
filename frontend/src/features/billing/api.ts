@@ -78,7 +78,8 @@ export interface RecordEntryBody {
   category_id?: string;
   money_account_id?: string;
   reference?: string;
-  party?: string;
+  /** Who the money came from or went to. Required — the API rejects a blank. */
+  party: string;
 }
 
 export const billingApi = {

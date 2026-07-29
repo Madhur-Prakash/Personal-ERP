@@ -433,14 +433,18 @@ class BillingService:
         category_id: uuid.UUID | None = None,
         money_account_id: uuid.UUID | None = None,
         reference: str | None = None,
-        party: str | None = None,
+        party: str,
         ctx: RequestContext | None = None,
     ) -> Entry:
         """Record one movement and post it to the ledger.
 
         ``category_id`` and ``money_account_id`` are optional: omitted, they fall back
-        to the defaults, so the minimum viable entry really is a date, an amount, and
-        a note - which is what was asked for.
+        to the defaults, so an entry needs no understanding of the chart of accounts.
+
+        ``party`` is required - who the money was with is part of what makes an entry
+        identifiable later, not an embellishment on it. Typed as ``str`` rather than
+        defaulted, so a caller that forgets it fails at the call site instead of quietly
+        writing an entry with no counterparty.
         """
         if amount <= 0:
             raise ValidationError(
@@ -481,7 +485,7 @@ class BillingService:
                 entry_date=entry_date,
                 narration=description.strip(),
                 reference=reference,
-                counterparty=(party or "").strip() or None,
+                counterparty=party.strip(),
                 lines=[
                     JournalEntryLineInput(account_id=debit_account, debit=amount, credit=ZERO),
                     JournalEntryLineInput(account_id=credit_account, debit=ZERO, credit=amount),

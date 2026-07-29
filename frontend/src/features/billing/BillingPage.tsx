@@ -254,7 +254,7 @@ function EntryForm({
         amount,
         description: description.trim(),
         entry_date: entryDate,
-        ...(party.trim() ? { party: party.trim() } : {}),
+        party: party.trim(),
         ...(reference.trim() ? { reference: reference.trim() } : {}),
         ...(categoryId ? { category_id: categoryId } : {}),
         ...(accountId ? { money_account_id: accountId } : {}),
@@ -288,7 +288,11 @@ function EntryForm({
 
   const parsed = Number(amount);
   const canSave =
-    amount !== '' && Number.isFinite(parsed) && parsed > 0 && description.trim() !== '';
+    amount !== '' &&
+    Number.isFinite(parsed) &&
+    parsed > 0 &&
+    description.trim() !== '' &&
+    party.trim() !== '';
 
   return (
     <Card className="mb-4">
@@ -338,15 +342,19 @@ function EntryForm({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Input
-              /* Free text on purpose. Most parties a small business deals with - the
-                 auto driver, the electricity board, a walk-in buyer - are never worth a
-                 customer record, and requiring one to note who paid you is the friction
-                 this screen exists to remove. */
+              /* Required, but still free text. Most parties a small business deals with -
+                 the auto driver, the electricity board, a walk-in buyer - are never worth
+                 a customer record, so this asks who rather than which record. Naming them
+                 is not optional: an amount whose counterparty is blank is nearly as
+                 unidentifiable a month later as one with no description. */
               label={direction === 'in' ? 'From' : 'To'}
+              required
               placeholder={direction === 'in' ? 'Walk-in customer' : 'Airtel'}
               value={party}
               onChange={(event) => setParty(event.target.value)}
-              hint="Optional - who the money came from or went to."
+              hint={
+                direction === 'in' ? 'Who the money came from.' : 'Who the money went to.'
+              }
             />
             <Input
               label="Reference"
