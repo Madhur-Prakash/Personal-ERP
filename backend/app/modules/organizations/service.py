@@ -27,6 +27,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.core.security import generate_token, hash_token
+from app.modules.accounting.service import ChartOfAccountsService, FiscalCalendarService
 from app.modules.audit.models import AuditAction
 from app.modules.audit.service import AuditService, diff
 from app.modules.auth.token_store import token_epochs
@@ -110,6 +111,19 @@ class OrganizationService:
                 status=MemberStatus.ACTIVE,
                 joined_at=dt.datetime.now(dt.UTC),
             )
+        )
+
+        # Stage 2: a new organization gets working books immediately — the default
+        # chart, the standard journals, and the current fiscal year with its
+        # monthly periods. Without the fiscal year no entry can be posted at all,
+        # so this is setup, not convenience.
+        chart = ChartOfAccountsService(self.session)
+        await chart.seed_defaults(organization.id)
+
+        calendar = FiscalCalendarService(self.session)
+        await calendar.ensure_year_for(
+            organization.id,
+            fiscal_year_start_month=organization.fiscal_year_start_month,
         )
 
         owner.last_organization_id = organization.id

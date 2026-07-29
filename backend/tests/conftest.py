@@ -45,15 +45,17 @@ os.environ.update(
 
 import uuid
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncSession,
     create_async_engine,
 )
+from sqlalchemy.util.concurrency import in_greenlet
 
 from app.core.config import settings
 from app.core.redis import close_redis, get_redis
@@ -79,9 +81,33 @@ TEST_DOMAIN = "example.com"
 
 
 # =============================================================================
+# Infrastructure gating
+# =============================================================================
+#: Requesting any of these means the test talks to Postgres or Redis.
+#:
+#: Much of this codebase is deliberately pure — the password policy, inventory
+#: valuation, GST resolution, OCR extraction — and those tests should run with
+#: nothing installed but Python. When the database and Redis fixtures were
+#: `autouse`, a stopped container failed all 56 pure tests with a connection
+#: error, which hides real failures behind an environment problem.
+INFRA_FIXTURES: frozenset[str] = frozenset(
+    {"engine", "connection", "db", "client", "_create_test_database"}
+)
+
+
+def _uses_infra(request: pytest.FixtureRequest) -> bool:
+    """Whether this test's fixture closure reaches Postgres or Redis.
+
+    ``fixturenames`` is the full transitive closure, so a test requesting
+    ``client`` is correctly detected through ``db`` → ``connection`` → ``engine``.
+    """
+    return not INFRA_FIXTURES.isdisjoint(request.fixturenames)
+
+
+# =============================================================================
 # Database lifecycle
 # =============================================================================
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 async def _create_test_database() -> AsyncGenerator[None]:
     """Create the test database and schema once per session.
 
@@ -89,6 +115,9 @@ async def _create_test_database() -> AsyncGenerator[None]:
     should be the one the models describe, so a stale migration cannot make the
     suite pass against a schema the code no longer matches. Migration
     correctness is verified separately by ``alembic check`` in CI.
+
+    Not ``autouse``: :func:`engine` depends on it, so it runs for exactly the
+    tests that need a database and no others. See :data:`INFRA_FIXTURES`.
     """
     admin_dsn = settings.sqlalchemy_dsn.rsplit("/", 1)[0] + "/postgres"
     admin_engine = create_async_engine(admin_dsn, isolation_level="AUTOCOMMIT")
@@ -113,7 +142,7 @@ async def _create_test_database() -> AsyncGenerator[None]:
 
 
 @pytest.fixture(scope="session")
-async def engine() -> AsyncGenerator:
+async def engine(_create_test_database: None) -> AsyncGenerator:
     """Session-scoped engine for the test database."""
     test_engine = create_async_engine(settings.sqlalchemy_dsn, poolclass=None)
     yield test_engine
@@ -129,12 +158,71 @@ async def connection(engine) -> AsyncGenerator[AsyncConnection]:
         await transaction.rollback()
 
 
+class LazyLoadDetected(AssertionError):
+    """Raised when ORM code triggers an implicit lazy load.
+
+    Async SQLAlchemy **cannot** lazy-load: emitting IO from an attribute access
+    outside a greenlet context fails with ``MissingGreenlet``, whose message says
+    nothing about which relationship was at fault. That error has already cost real
+    debugging time in this codebase — traversing ``payment.customer`` and
+    ``payment.allocations`` on freshly-constructed rows.
+
+    This turns that class of bug into an immediate, named failure at the exact
+    attribute access, so the fix (an eager ``selectinload``, or passing the object
+    you already have) is obvious.
+    """
+
+
+def _fail_on_lazy_load(orm_execute_state: Any) -> None:
+    """``do_orm_execute`` hook that rejects *unsafe* lazy loads.
+
+    Two filters, and the second one matters:
+
+    ``lazy_loaded_from`` is set only when a statement is emitted on behalf of a
+    lazy loader, so eager strategies (``selectinload``, ``joinedload``) pass
+    through untouched.
+
+    ``in_greenlet()`` distinguishes a bug from a legitimate load. Some async ORM
+    operations are coroutines *precisely so* they can lazy-load safely —
+    ``await session.delete(obj)`` has to load the relationship collections to
+    apply cascade rules, and it runs inside greenlet context where that works.
+    Flagging those was the first version of this hook and it produced seven false
+    positives.
+
+    Outside greenlet context the same load raises ``MissingGreenlet``, whose
+    message names no relationship and no attribute. That is the case worth
+    intercepting: same failure, but pointing at the cause.
+    """
+    # `lazy_loaded_from` is only meaningful for a SELECT. Reading it on an
+    # INSERT/UPDATE/DELETE raises InvalidRequestError ("no load options"), which is
+    # how the first version of this hook broke six unrelated tests.
+    if not orm_execute_state.is_select:
+        return
+    if orm_execute_state.lazy_loaded_from is None:
+        return
+    if in_greenlet():
+        # Inside an awaited ORM operation — the load will complete normally.
+        return
+
+    state = orm_execute_state.lazy_loaded_from
+    raise LazyLoadDetected(
+        f"Implicit lazy load on {state.class_.__name__} outside greenlet context — "
+        f"this raises MissingGreenlet in production.\n"
+        f"Fix it by eager-loading the relationship (selectinload) in the "
+        f"repository, or by using an object you already hold rather than "
+        f"traversing the relationship."
+    )
+
+
 @pytest.fixture
 async def db(connection: AsyncConnection) -> AsyncGenerator[AsyncSession]:
     """A session enrolled in the test's outer transaction.
 
     ``create_savepoint`` is what lets production code commit normally while the
     outer rollback still discards everything.
+
+    A ``do_orm_execute`` listener makes any accidental lazy load fail loudly — see
+    :class:`LazyLoadDetected`.
     """
     session = AsyncSession(
         bind=connection,
@@ -142,18 +230,30 @@ async def db(connection: AsyncConnection) -> AsyncGenerator[AsyncSession]:
         expire_on_commit=False,
         autoflush=False,
     )
-    yield session
-    await session.close()
+    event.listen(session.sync_session, "do_orm_execute", _fail_on_lazy_load)
+    try:
+        yield session
+    finally:
+        event.remove(session.sync_session, "do_orm_execute", _fail_on_lazy_load)
+        await session.close()
 
 
 @pytest.fixture(autouse=True)
-async def _clean_redis() -> AsyncGenerator[None]:
-    """Flush the test Redis index around every test.
+async def _clean_redis(request: pytest.FixtureRequest) -> AsyncGenerator[None]:
+    """Flush the test Redis index around every test that touches infrastructure.
 
     Auth state (lockout counters, one-time tokens, token epochs) lives in Redis,
     so leakage between tests would make them order-dependent — the worst kind of
     flake to debug.
+
+    Skipped for pure tests. That is a gate on the *fixture closure*, not on
+    whether a connection happens to succeed: silently swallowing a Redis error
+    would let state leak between the tests that do depend on it.
     """
+    if not _uses_infra(request):
+        yield
+        return
+
     redis = get_redis()
     await redis.flushdb()
     yield

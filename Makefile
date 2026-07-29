@@ -8,10 +8,50 @@
 # =============================================================================
 
 .DEFAULT_GOAL := help
+
+# -----------------------------------------------------------------------------
+# Shell
+# -----------------------------------------------------------------------------
 # Every recipe runs in one shell with strict flags, so a failing line aborts the
 # target instead of the next line running against a broken state.
 .SHELLFLAGS := -eu -o pipefail -c
 SHELL := bash
+
+# On Windows, `SHELL := bash` is silently ignored. Native GNU Make cannot find a
+# bare `bash` (Git Bash is not on PATH — only `git` is), falls back to `cmd.exe`,
+# and every recipe dies with "'grep' is not recognized as an internal or external
+# command". So the shell is resolved explicitly here.
+#
+# **Not via `where bash`.** On a machine with WSL that returns
+# `C:\Windows\System32\bash.exe`, and recipes would then run inside the WSL
+# filesystem namespace — wrong working directory, and `uv`/`npm`/`docker` either
+# missing or pointing at a different install. Silently running in the wrong place
+# is far worse than failing loudly.
+#
+# Git Bash ships beside `git`, which *is* on PATH, so it is derived from there.
+# `PROGRA~1` is the 8.3 short name for `Program Files`: make splits its SHELL
+# value on spaces, so the long form resolves to `C:/Program` and fails.
+ifeq ($(OS),Windows_NT)
+  GIT_BASH := C:/PROGRA~1/Git/bin/bash.exe
+  ifeq ($(wildcard $(GIT_BASH)),)
+    $(error Git Bash not found at $(GIT_BASH). Install Git for Windows, \
+      or override it: make SHELL=/path/to/bash <target>)
+  endif
+  SHELL := $(GIT_BASH)
+
+  # Stop MSYS from rewriting environment values that look like Unix paths when it
+  # spawns a native Windows process.
+  #
+  # Without this, `API_V1_PREFIX=/api/v1` reaches Python as
+  # `C:/Program Files/Git/api/v1`, and the app dies at import with
+  # "A path prefix must start with '/'". The translation is correct for real paths
+  # and wrong for everything else — and every value this project puts in the
+  # environment is a config string, not a path the MSYS layer should touch.
+  #
+  # `PATH` is special-cased by MSYS and still translated, so recipes continue to
+  # find `uv`, `npm`, and `docker` normally. Verified, not assumed.
+  export MSYS2_ENV_CONV_EXCL := *
+endif
 
 COMPOSE      := docker compose
 COMPOSE_PROD := docker compose -f docker-compose.prod.yml

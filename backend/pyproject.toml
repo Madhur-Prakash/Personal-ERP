@@ -44,6 +44,20 @@ dependencies = [
 [project.optional-dependencies]
 kafka = ["logifyx[kafka]>=1.1.2"]
 
+# OCR is an optional extra, not a core dependency.
+#
+# The heavyweight engines are deliberately excluded: PaddleOCR pulls PaddlePaddle
+# (~500 MB) and EasyOCR pulls torch (~2 GB), which contradicts "one person can
+# operate this on a small VPS". Tesseract is a 30 MB system binary and reads a
+# GST invoice perfectly well.
+#
+# `pytesseract` also needs the `tesseract` binary on PATH — a pip install alone is
+# not enough, which is why the engine is probed at runtime rather than assumed.
+ocr = [
+    "pytesseract>=0.3.13",
+    "pypdf>=6.0.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",
@@ -68,6 +82,7 @@ select = [
     "E", "W",    # pycodestyle
     "F",         # pyflakes
     "I",         # isort
+    "A",         # flake8-builtins — see the note below
     "B",         # flake8-bugbear
     "C4",        # comprehensions
     "UP",        # pyupgrade
@@ -77,6 +92,12 @@ select = [
     "SIM",       # simplify
     "RUF",       # ruff-specific
 ]
+
+# `A` is enabled because of a real bug: a service method named `list` shadows the
+# builtin inside its own class body, so the annotation `list[Invoice]` on a sibling
+# method resolves to the *method* rather than to `builtins.list`. mypy reports it as
+# the baffling "Function ... is not valid as a type". Ruff catches the cause
+# directly, at the definition.
 ignore = [
     "B008",  # FastAPI's Depends() in defaults is the documented idiom
     "S105",  # token-shaped string constants (we name token *types*, not secrets)
@@ -101,7 +122,8 @@ disallow_untyped_decorators = false  # FastAPI/SQLAlchemy decorators are untyped
 exclude = ["migrations/", "tests/"]
 
 [[tool.mypy.overrides]]
-module = ["logifyx.*", "qrcode.*"]
+# pytesseract is a thin subprocess wrapper that ships no stubs and never will.
+module = ["logifyx.*", "qrcode.*", "pytesseract.*"]
 ignore_missing_imports = true
 
 # =============================================================================

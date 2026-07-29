@@ -121,7 +121,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
 
         # Interactive docs need to load their own JS/CSS, so exempt those paths.
-        if not request.url.path.startswith(("/docs", "/redoc", "/openapi.json")):
+        #
+        # A route that already set its own policy keeps it. The document-download
+        # endpoint returns bytes a stranger uploaded and adds `sandbox`, which the
+        # blanket policy below does not carry — overwriting it here would silently
+        # remove a deliberate hardening measure, which is exactly the kind of
+        # regression a middleware that clobbers headers causes.
+        if (
+            not request.url.path.startswith(("/docs", "/redoc", "/openapi.json"))
+            and "Content-Security-Policy" not in response.headers
+        ):
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
             )

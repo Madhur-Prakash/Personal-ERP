@@ -53,3 +53,8 @@ infra/certbot/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Uploaded documents. Never committed: they are customer data, and they are the
+# supporting evidence for ledger entries, so they belong in the backup story
+# (rsync the directory) rather than in version control.
+backend/var/

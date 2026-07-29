@@ -1,0 +1,564 @@
+"""Billing — record money in and out, and prove it reaches every screen.
+
+The requirement was "manually add the money that came in and goes out, and it should
+be reflected on the dashboard and the whole UI". The second half is the part worth
+testing: it is easy to write a form that stores something and quietly fails to affect
+any report.
+
+So these tests post through the real endpoint and then assert the figure appears in
+the dashboard, the P&L, the trial balance, the cash flow statement, and the analytics
+trend — without any of those being told about billing. That works because a billing
+entry *is* a journal entry, which is the whole reason there is no billing table.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from decimal import Decimal
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.accounting.service import ChartOfAccountsService, FiscalCalendarService
+from app.modules.organizations.models import Organization
+
+pytestmark = pytest.mark.integration
+
+D = Decimal
+
+
+@pytest.fixture
+async def books(db: AsyncSession, organization: Organization) -> Organization:
+    """A chart of accounts and nothing else.
+
+    Deliberately **no fiscal year**: the service creates it on demand, and that is the
+    behaviour worth exercising. A user who never asked for a fiscal calendar should not
+    meet "no open period for this date" on their first entry.
+    """
+    await ChartOfAccountsService(db).seed_defaults(organization.id)
+    organization.fiscal_year_start_month = 4
+    organization.timezone = "Asia/Kolkata"
+    await db.flush()
+    return organization
+
+
+async def record(
+    client: AsyncClient,
+    api: str,
+    *,
+    direction: str,
+    amount: str,
+    description: str,
+    entry_date: dt.date | None = None,
+    category_id: str | None = None,
+) -> dict:
+    body: dict = {"direction": direction, "amount": amount, "description": description}
+    if entry_date is not None:
+        body["entry_date"] = entry_date.isoformat()
+    if category_id is not None:
+        body["category_id"] = category_id
+
+    response = await client.post(f"{api}/billing", json=body)
+    assert response.status_code == 201, response.text
+    return dict(response.json())
+
+
+# ---------------------------------------------------------------------------
+# Options
+# ---------------------------------------------------------------------------
+class TestOptions:
+    async def test_serves_categories_money_accounts_and_today(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        response = await authed_client.get(f"{api}/billing/options")
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        assert body["categories"]
+        assert body["money_accounts"]
+        assert body["today"]
+        assert body["currency"] == "INR"
+
+    async def test_each_direction_has_exactly_one_default(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """So the form opens on a sensible answer and the common case needs no choice."""
+        body = (await authed_client.get(f"{api}/billing/options")).json()
+
+        for direction in ("in", "out"):
+            defaults = [
+                c for c in body["categories"] if c["direction"] == direction and c["is_default"]
+            ]
+            assert len(defaults) == 1, f"{direction}: {defaults}"
+
+        assert sum(1 for a in body["money_accounts"] if a["is_default"]) == 1
+
+    async def test_offers_no_group_headings(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """You cannot post to "Operating Expenses" — only to a leaf under it."""
+        body = (await authed_client.get(f"{api}/billing/options")).json()
+        names = {c["name"] for c in body["categories"]}
+        assert "Expenses" not in names
+        assert "Income" not in names
+
+    async def test_money_accounts_are_only_cash_and_bank(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        body = (await authed_client.get(f"{api}/billing/options")).json()
+        names = {a["name"] for a in body["money_accounts"]}
+        assert "Accounts Receivable" not in names
+        assert "Inventory" not in names
+
+
+# ---------------------------------------------------------------------------
+# Recording
+# ---------------------------------------------------------------------------
+class TestRecording:
+    async def test_money_out_needs_only_amount_and_description(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The minimum viable entry, which is what was actually asked for."""
+        entry = await record(
+            authed_client, api, direction="out", amount="5000", description="Stationery"
+        )
+
+        assert entry["direction"] == "out"
+        assert D(entry["amount"]) == D("5000")
+        assert entry["description"] == "Stationery"
+        # Filed and dated without the user choosing anything.
+        assert entry["category_name"]
+        assert entry["money_account_name"]
+        assert entry["date"]
+        # It is a real posted ledger entry, so it has the journal's own number.
+        assert entry["entry_number"]
+
+    async def test_money_in_needs_only_amount_and_description(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(
+            authed_client, api, direction="in", amount="12000", description="Counter sale"
+        )
+        assert entry["direction"] == "in"
+        assert D(entry["amount"]) == D("12000")
+
+    async def test_creates_the_fiscal_year_on_demand(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """No fiscal year exists in this fixture.
+
+        Without on-demand creation the first entry fails with "no open period", which
+        is meaningless to someone who never asked for a fiscal calendar.
+        """
+        entry = await record(
+            authed_client, api, direction="out", amount="100", description="First ever entry"
+        )
+        assert entry["entry_number"]
+
+        years = await authed_client.get(f"{api}/fiscal-years")
+        assert years.status_code == 200
+        assert years.json()
+
+    async def test_accepts_a_backdated_entry(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Recording last week's expense is the normal case for a hand-kept book."""
+        last_week = dt.date.today() - dt.timedelta(days=7)
+        entry = await record(
+            authed_client,
+            api,
+            direction="out",
+            amount="750",
+            description="Auto fare",
+            entry_date=last_week,
+        )
+        assert entry["date"] == last_week.isoformat()
+
+    async def test_accepts_paise(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(
+            authed_client, api, direction="out", amount="123.45", description="Odd amount"
+        )
+        assert D(entry["amount"]) == D("123.45")
+
+    async def test_money_crosses_the_wire_as_a_string(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(
+            authed_client, api, direction="out", amount="5000", description="Stationery"
+        )
+        assert isinstance(entry["amount"], str)
+
+    @pytest.mark.parametrize("amount", ["0", "-500", "-0.01"])
+    async def test_refuses_a_non_positive_amount(
+        self, authed_client: AsyncClient, api: str, books: Organization, amount: str
+    ) -> None:
+        """A correction is a reversal, not a negative entry. A ledger records what
+        happened, not the net of it."""
+        response = await authed_client.post(
+            f"{api}/billing",
+            json={"direction": "out", "amount": amount, "description": "Nope"},
+        )
+        assert response.status_code == 422
+
+    async def test_requires_a_description(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """An amount with no note is unidentifiable a month later."""
+        response = await authed_client.post(
+            f"{api}/billing", json={"direction": "out", "amount": "500", "description": "  "}
+        )
+        assert response.status_code == 422
+
+    async def test_refuses_an_income_category_for_money_out(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Filing an expense against a revenue account would inflate income and
+        understate costs — the books would still balance, and be wrong."""
+        options = (await authed_client.get(f"{api}/billing/options")).json()
+        income = next(c for c in options["categories"] if c["direction"] == "in")
+
+        response = await authed_client.post(
+            f"{api}/billing",
+            json={
+                "direction": "out",
+                "amount": "500",
+                "description": "Miscategorised",
+                "category_id": income["id"],
+            },
+        )
+        assert response.status_code == 422
+        assert "income" in response.json()["error"]["message"].lower()
+
+    async def test_refuses_a_non_cash_money_account(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Money cannot move through Inventory."""
+        accounts = (await authed_client.get(f"{api}/accounts", params={"page_size": 200})).json()
+        rows = accounts["items"] if isinstance(accounts, dict) else accounts
+        inventory = next(row for row in rows if row["code"] == "1140")
+
+        response = await authed_client.post(
+            f"{api}/billing",
+            json={
+                "direction": "out",
+                "amount": "500",
+                "description": "Wrong pocket",
+                "money_account_id": inventory["id"],
+            },
+        )
+        assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# It has to show up everywhere
+# ---------------------------------------------------------------------------
+class TestReflectedAcrossTheApp:
+    """The half of the requirement that is easy to get wrong.
+
+    None of these reports know billing exists. They pick the entries up because a
+    billing entry is a journal entry — which is the entire justification for not
+    having a billing table.
+    """
+
+    async def test_appears_on_the_dashboard(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        await record(authed_client, api, direction="in", amount="20000", description="Sales")
+        await record(authed_client, api, direction="out", amount="8000", description="Rent")
+
+        dashboard = (await authed_client.get(f"{api}/analytics/dashboard")).json()
+
+        assert D(dashboard["revenue"]["current"]) == D("20000")
+        assert D(dashboard["expenses"]["current"]) == D("8000")
+        assert D(dashboard["net_profit"]["current"]) == D("12000")
+        # Cash actually moved, so the position figure moved with it.
+        assert D(dashboard["cash"]) == D("12000")
+
+    async def test_appears_in_the_profit_and_loss(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        await record(authed_client, api, direction="in", amount="20000", description="Sales")
+        await record(authed_client, api, direction="out", amount="8000", description="Rent")
+
+        today = dt.date.today()
+        statement = (
+            await authed_client.get(
+                f"{api}/reports/profit-and-loss",
+                params={
+                    "from_date": today.replace(day=1).isoformat(),
+                    "to_date": today.isoformat(),
+                },
+            )
+        ).json()
+
+        assert D(statement["total_income"]) == D("20000")
+        assert D(statement["total_expenses"]) == D("8000")
+        assert D(statement["net_profit"]) == D("12000")
+
+    async def test_keeps_the_trial_balance_balanced(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The property that matters after any sequence of real operations."""
+        await record(authed_client, api, direction="in", amount="20000", description="Sales")
+        await record(authed_client, api, direction="out", amount="8000", description="Rent")
+        await record(authed_client, api, direction="out", amount="1234.56", description="Sundry")
+
+        report = (await authed_client.get(f"{api}/reports/trial-balance")).json()
+        assert report["is_balanced"] is True
+        assert D(report["total_debit"]) == D(report["total_credit"])
+        assert D(report["total_debit"]) > 0
+
+    async def test_appears_in_the_cash_flow_statement(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        await record(authed_client, api, direction="in", amount="20000", description="Sales")
+        await record(authed_client, api, direction="out", amount="8000", description="Rent")
+
+        today = dt.date.today()
+        flow = (
+            await authed_client.get(
+                f"{api}/reports/cash-flow",
+                params={
+                    "from_date": today.replace(day=1).isoformat(),
+                    "to_date": today.isoformat(),
+                },
+            )
+        ).json()
+
+        assert flow["reconciles"] is True
+        assert D(flow["closing_cash"]) == D("12000")
+
+    async def test_appears_in_the_analytics_trend(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        await record(authed_client, api, direction="in", amount="20000", description="Sales")
+
+        trend = (
+            await authed_client.get(f"{api}/analytics/trend", params={"period": "this_month"})
+        ).json()
+        assert D(trend["total_income"]) == D("20000")
+
+    async def test_does_not_disturb_control_account_reconciliation(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Billing touches neither receivables nor payables, so the sub-ledger checks
+        must stay clean. If they broke, the dashboard would show a scary warning for a
+        perfectly ordinary cash entry."""
+        await record(authed_client, api, direction="in", amount="20000", description="Sales")
+        await record(authed_client, api, direction="out", amount="8000", description="Rent")
+
+        checks = (await authed_client.get(f"{api}/analytics/control-checks")).json()
+        assert checks["all_agree"] is True, checks["checks"]
+
+    async def test_shows_in_the_journal_so_an_accountant_can_trace_it(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(
+            authed_client, api, direction="out", amount="5000", description="Stationery"
+        )
+
+        entries = (await authed_client.get(f"{api}/journal-entries")).json()
+        numbers = [row["entry_number"] for row in entries["items"]]
+        assert entry["entry_number"] in numbers
+
+
+# ---------------------------------------------------------------------------
+# Reading back
+# ---------------------------------------------------------------------------
+class TestListing:
+    async def test_lists_newest_first(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """A day book is read backwards from today."""
+        today = dt.date.today()
+        await record(
+            authed_client,
+            api,
+            direction="out",
+            amount="100",
+            description="Older",
+            entry_date=today - dt.timedelta(days=3),
+        )
+        await record(
+            authed_client, api, direction="out", amount="200", description="Newer", entry_date=today
+        )
+
+        body = (await authed_client.get(f"{api}/billing")).json()
+        assert [row["description"] for row in body["items"]] == ["Newer", "Older"]
+
+    async def test_filters_by_direction(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        await record(authed_client, api, direction="in", amount="500", description="Sale")
+        await record(authed_client, api, direction="out", amount="300", description="Expense")
+
+        money_in = (await authed_client.get(f"{api}/billing", params={"direction": "in"})).json()
+        assert [row["description"] for row in money_in["items"]] == ["Sale"]
+        assert money_in["meta"]["total_items"] == 1
+
+    async def test_searches_the_description(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        await record(
+            authed_client, api, direction="out", amount="500", description="Chai for staff"
+        )
+        await record(authed_client, api, direction="out", amount="300", description="Bus tickets")
+
+        hit = (await authed_client.get(f"{api}/billing", params={"q": "chai"})).json()
+        assert hit["meta"]["total_items"] == 1
+
+    async def test_summary_reports_in_out_and_net(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        await record(authed_client, api, direction="in", amount="20000", description="Sales")
+        await record(authed_client, api, direction="out", amount="8000", description="Rent")
+
+        summary = (await authed_client.get(f"{api}/billing/summary")).json()
+        assert D(summary["money_in"]) == D("20000")
+        assert D(summary["money_out"]) == D("8000")
+        assert D(summary["net"]) == D("12000")
+        assert summary["entry_count"] == 2
+
+    async def test_an_empty_book_summarises_to_zero(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        summary = (await authed_client.get(f"{api}/billing/summary")).json()
+        assert D(summary["money_in"]) == 0
+        assert D(summary["money_out"]) == 0
+        assert summary["entry_count"] == 0
+
+    async def test_ignores_entries_from_other_modules(
+        self, authed_client: AsyncClient, api: str, books: Organization, db: AsyncSession
+    ) -> None:
+        """A manual journal entry is not a billing entry.
+
+        The list is tagged by source, so an accountant's adjusting entry does not
+        appear in the shopkeeper's day book — and cannot break the two-line
+        reconstruction.
+        """
+        # `POST /journal-entries` does not create the fiscal year on demand; only
+        # billing does, which is the whole point of that convenience.
+        await FiscalCalendarService(db).ensure_year_for(books.id, fiscal_year_start_month=4)
+        await db.flush()
+
+        journals = (await authed_client.get(f"{api}/journals")).json()
+        general = next(j for j in journals if j["journal_type"] == "general")
+        accounts = (await authed_client.get(f"{api}/accounts", params={"page_size": 200})).json()
+        rows = accounts["items"] if isinstance(accounts, dict) else accounts
+        cash = next(r for r in rows if r["code"] == "1110")
+        rent = next(r for r in rows if r["code"] == "5210")
+
+        manual = await authed_client.post(
+            f"{api}/journal-entries",
+            json={
+                "journal_id": general["id"],
+                "entry_date": dt.date.today().isoformat(),
+                "narration": "Accountant adjustment",
+                "lines": [
+                    {"account_id": rent["id"], "debit": "999", "credit": "0"},
+                    {"account_id": cash["id"], "debit": "0", "credit": "999"},
+                ],
+                "post": True,
+            },
+        )
+        assert manual.status_code == 201, manual.text
+
+        body = (await authed_client.get(f"{api}/billing")).json()
+        assert body["meta"]["total_items"] == 0
+
+    async def test_entries_do_not_leak_across_organizations(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        await record(authed_client, api, direction="in", amount="20000", description="Sales")
+
+        created = await authed_client.post(f"{api}/organizations", json={"name": "Second Co"})
+        assert created.status_code == 201, created.text
+        switched = await authed_client.post(
+            f"{api}/auth/switch-organization/{created.json()['id']}"
+        )
+        authed_client.headers["Authorization"] = f"Bearer {switched.json()['access_token']}"
+
+        body = (await authed_client.get(f"{api}/billing")).json()
+        assert body["meta"]["total_items"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Undo
+# ---------------------------------------------------------------------------
+class TestReversal:
+    async def test_reversing_cancels_the_ledger_effect(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The only honest undo of a posted entry.
+
+        Not a delete and not an edit — an opposite entry that nets it to zero, which
+        is what an auditor expects to find.
+        """
+        entry = await record(
+            authed_client, api, direction="out", amount="5000", description="Wrong amount"
+        )
+
+        response = await authed_client.post(
+            f"{api}/billing/{entry['id']}/reverse", json={"reason": "Typed the wrong figure"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["is_reversed"] is True
+
+        dashboard = (await authed_client.get(f"{api}/analytics/dashboard")).json()
+        assert D(dashboard["expenses"]["current"]) == 0
+        assert D(dashboard["cash"]) == 0
+
+        report = (await authed_client.get(f"{api}/reports/trial-balance")).json()
+        assert report["is_balanced"] is True
+
+    async def test_the_original_stays_in_the_list(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Both rows survive. The cancellation is part of the record, not a deletion
+        of it."""
+        entry = await record(
+            authed_client, api, direction="out", amount="5000", description="Wrong amount"
+        )
+        await authed_client.post(f"{api}/billing/{entry['id']}/reverse", json={})
+
+        body = (await authed_client.get(f"{api}/billing")).json()
+        found = next(row for row in body["items"] if row["id"] == entry["id"])
+        assert found["is_reversed"] is True
+
+    async def test_a_reversed_entry_leaves_the_totals(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(authed_client, api, direction="out", amount="5000", description="Oops")
+        await record(authed_client, api, direction="out", amount="300", description="Real expense")
+        await authed_client.post(f"{api}/billing/{entry['id']}/reverse", json={})
+
+        summary = (await authed_client.get(f"{api}/billing/summary")).json()
+        assert D(summary["money_out"]) == D("300")
+        assert summary["entry_count"] == 1
+
+    async def test_cannot_reverse_twice(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        entry = await record(authed_client, api, direction="out", amount="5000", description="Oops")
+        first = await authed_client.post(f"{api}/billing/{entry['id']}/reverse", json={})
+        assert first.status_code == 200
+
+        second = await authed_client.post(f"{api}/billing/{entry['id']}/reverse", json={})
+        assert second.status_code == 422
+        assert second.json()["error"]["code"] == "already_reversed"
+
+
+class TestPermissions:
+    async def test_unauthenticated_requests_are_refused(
+        self, client: AsyncClient, api: str
+    ) -> None:
+        for path in ("", "/options", "/summary"):
+            assert (await client.get(f"{api}/billing{path}")).status_code == 401
+
+        response = await client.post(
+            f"{api}/billing", json={"direction": "out", "amount": "1", "description": "x"}
+        )
+        assert response.status_code == 401

@@ -16,7 +16,8 @@ component — more workers, a read replica, a separate object store — that pie
 be scaled or swapped without rewriting the rest. Scale when the business demands
 it, not on day one.
 
-Built in stages. **Stage 1 — Foundation — is complete**; see
+Built in stages. **Stages 1 to 5 and 8 are complete** — foundation, accounting,
+sales, purchasing and inventory, document intelligence, and analytics; see
 [Delivery status](#delivery-status).
 
 ---
@@ -31,11 +32,18 @@ Built in stages. **Stage 1 — Foundation — is complete**; see
 | Authentication — password, email verification, magic link, email OTP, password reset, TOTP 2FA with recovery codes | Done |
 | Sessions — refresh-token rotation with reuse detection, device history, remote revocation | Done |
 | Multi-tenancy — organizations, members, invitations | Done |
-| RBAC — 36 permissions, 5 seeded roles, custom roles, per-member overrides | Done |
+| RBAC — 42 permissions, 5 seeded roles, custom roles, per-member overrides | Done |
 | Immutable audit trail with field-level diffs | Done |
+| **Billing** — record money in and out with just a date, an amount, and a note. No customer or supplier needed; posts real double-entry, so the dashboard and every report update immediately | Done |
+| Double-entry accounting — chart of accounts, journals, period locks, trial balance, P&L, balance sheet, cash flow | Done |
+| Sales — customers, leads, quotations, orders, invoices with GST, payment allocation, receivables ageing | Done |
+| Purchasing & inventory — suppliers, POs, goods receipt, weighted-average valuation, bills, input GST, payables ageing | Done |
+| Document intelligence — invoice upload, field extraction with per-field confidence, GSTIN supplier matching, duplicate-invoice warnings, confirm-into-bill | Done |
+| Analytics — real dashboard figures with like-for-like period comparison, twelve-month trend, rankings, control-account reconciliation | Done |
 | Design system, light/dark/system theming, command palette | Done |
 | Alembic migrations (reversible, drift-checked) | Done |
-| 199 backend tests against real PostgreSQL + Redis | Done |
+| 177 API operations across 136 paths | Done |
+| 714 backend tests against real PostgreSQL + Redis | Done |
 | CI/CD, Nginx, TLS, backups, zero-downtime deploy | Done |
 
 There is **no OAuth**. Sign-in is email/password plus the passwordless options
@@ -71,6 +79,64 @@ backend's SMTP at Mailpit, so no real mail provider is needed.
 
 `make help` lists every task.
 
+### The simple path: just record money
+
+Most small businesses do not need invoices, customers, or suppliers. They need to note
+what came in and what went out. **Billing** is that screen, and it is first in the
+navigation:
+
+- Two buttons — *Money in* and *Money out*.
+- Type an amount and a note. The date defaults to today, the category and the cash
+  account default to sensible choices, and the form stays open so a week of receipts
+  can be entered in a row.
+- Nothing else is required. No customer, no supplier, no invoice.
+
+**A bill with nobody's name on it is an expense, not a payable** — and that is the
+correct treatment, not a shortcut. A payable exists because you owe a specific party;
+once the money has left your hand there is nothing owed and nobody to owe it to. So
+money out is *debit expense, credit cash*, money in is *debit cash, credit income*, and
+the accounting equation holds without inventing a party.
+
+Because each entry is a real ledger posting, it shows up in the trial balance, the P&L,
+the cash flow statement, the dashboard, and the analytics trend without anything else
+being configured. There is no billing table — a parallel store of "the user's simple
+view" would be a cache that can disagree with the ledger.
+
+To correct a mistake, **reverse** the entry. There is no delete and no edit: a posted
+entry is immutable here, so the honest undo is an opposite entry that nets it to zero,
+which is also what an auditor expects to find. The original stays on the record.
+
+Customers, GST invoices, suppliers, and scanned-document capture all still exist for
+when they are genuinely needed. Nothing forces you through them.
+
+### Optional: reading scanned invoices
+
+Document upload works without this — the file is stored and can be attached to a
+bill entered by hand. What the extra adds is *reading* it.
+
+```bash
+cd backend && uv sync --extra ocr
+```
+
+Digital PDFs work immediately: `pypdf` reads their text layer, which is exact and
+needs nothing else installed. **Images additionally need the Tesseract binary**,
+which is a system package `pip` cannot install:
+
+| Platform | Install |
+| --- | --- |
+| Windows | [UB-Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) |
+| Debian/Ubuntu | `apt install tesseract-ocr` |
+| macOS | `brew install tesseract` |
+
+The Windows installer does not add itself to `PATH`, so set `TESSERACT_CMD` in
+`.env` if the app cannot find it. `GET /api/v1/documents/capabilities` reports what
+the server can actually read, and the Documents screen says so plainly rather than
+offering an upload button that fails.
+
+The heavyweight engines are deliberately not used: PaddleOCR pulls PaddlePaddle
+(~500 MB) and EasyOCR pulls torch (~2 GB), which contradicts "one person can run
+this on a small VPS". Tesseract is ~30 MB and reads a GST invoice well.
+
 ---
 
 ## Everyday commands
@@ -91,8 +157,8 @@ CI runs `ruff check .` over the whole project and `ruff format --check .` (the
 non-mutating form — it reports rather than rewrites). Narrowing to `app tests`
 locally is faster and covers everything you actually edit.
 
-[`ruff`](https://docs.astral.sh/ruff/) is linter and formatter in one (~180 ms for
-66 files). Beyond style it enforces two things that matter here: `T20` bans
+[`ruff`](https://docs.astral.sh/ruff/) is linter and formatter in one — well under
+a second across the whole backend. Beyond style it enforces two things that matter here: `T20` bans
 `print()`, so logging cannot bypass logifyx and lose its credential masking; and
 `ASYNC` catches blocking calls inside `async def`, which stall the whole event
 loop rather than one request.
@@ -105,7 +171,7 @@ call site to handle that before reaching Argon2.
 ### Tests
 
 ```bash
-uv run pytest                   # 210 tests, needs postgres + redis
+uv run pytest                   # 714 tests, needs postgres + redis
 uv run pytest -q -k auth        # just the auth suite
 uv run pytest --cov             # with coverage
 ```
@@ -137,10 +203,17 @@ npm run build         # tsc -b && vite build
 `npm run lint:fix` and `npm run format:check` are also defined — the latter is the
 non-mutating form, which is what CI uses.
 
-> **On Windows, run these from PowerShell, not Git Bash.** Git Bash's MSYS layer
-> rewrites environment values that look like Unix paths, so `API_V1_PREFIX=/api/v1`
-> arrives as `C:/Program Files/Git/api/v1` and the app refuses to start. Not a bug
-> in the app — but it makes every backend command fail confusingly.
+> **On Windows, run the raw commands above from PowerShell, not Git Bash.** Git
+> Bash's MSYS layer rewrites environment values that look like Unix paths when it
+> spawns a native Windows process, so `API_V1_PREFIX=/api/v1` reaches Python as
+> `C:/Program Files/Git/api/v1` and the app dies at import with "A path prefix must
+> start with '/'". Not a bug in the app, but it makes every backend command fail
+> confusingly.
+>
+> **`make` targets are safe from either shell.** The [Makefile](Makefile) needs a
+> POSIX shell for its recipes, so it resolves Git Bash explicitly and sets
+> `MSYS2_ENV_CONV_EXCL=*` to switch that translation off. `make test` and
+> `make check` work from PowerShell, cmd, and Git Bash alike.
 
 ---
 
@@ -155,7 +228,7 @@ non-mutating form, which is what CI uses.
 │   │   ├── modules/         One vertical slice per bounded context
 │   │   └── api/v1/          Router aggregation
 │   ├── migrations/          Alembic
-│   └── tests/               pytest — 199 tests
+│   └── tests/               pytest — 714 tests
 ├── frontend/                React 19 · TypeScript · Vite · Tailwind v4
 │   └── src/
 │       ├── components/      Design-system primitives and layout
@@ -262,7 +335,7 @@ Motion.
 Everything below was run against real infrastructure, not mocks:
 
 ```
-backend    199 tests passing (PostgreSQL 17 + Redis 7)
+backend    714 tests passing (PostgreSQL 17 + Redis 7)
 backend    ruff: all checks passed
 backend    alembic: applies, reverses, and reports zero drift
 frontend   tsc -b: 0 errors
@@ -288,7 +361,7 @@ prevention, and secret redaction in the audit trail.
 | [docs/architecture.md](docs/architecture.md) | Layering, request lifecycle, module structure, diagrams |
 | [docs/security.md](docs/security.md) | Threat model and every control, with rationale |
 | [docs/database.md](docs/database.md) | Schema, ER diagram, indexes, migration workflow |
-| [docs/api.md](docs/api.md) | All 47 endpoints, error contract, auth flows |
+| [docs/api.md](docs/api.md) | Auth flows, error contract, pagination, and the platform + documents endpoints; `/docs` is authoritative for the rest |
 | [docs/deployment.md](docs/deployment.md) | VPS setup, TLS, backups, zero-downtime deploys |
 | [docs/development.md](docs/development.md) | Local workflow, conventions, testing, adding a module |
 
@@ -296,26 +369,56 @@ prevention, and secret redaction in the audit trail.
 
 ## Delivery status
 
-Built in stages; each is completed, tested, and documented before the next
-begins. Later-stage modules appear in the navigation as visibly disabled entries
-rather than links to nothing.
+The delivery model is **parallel build-out**: modules are developed concurrently
+rather than gated on the previous one signing off. The quality bar is unchanged —
+strict mypy, real tests against real PostgreSQL and Redis, and a documented
+rationale per module — but a module ships as soon as *it* is green, not when its
+predecessor is.
+
+The one thing that stays sequenced is the **dependency graph**, because it is
+arithmetic rather than process: sales and inventory post into the ledger, so the
+ledger's posting contract has to exist before anything can call it. That contract
+is [`PostingService.post_simple`](backend/app/modules/accounting/service.py) and
+it is stable, so everything downstream of it can now proceed in parallel.
+
+Modules not yet built appear in the navigation as visibly disabled entries rather
+than links to nothing.
 
 - [x] **Stage 1 — Foundation.** Monorepo, Docker, auth, users/organizations,
       RBAC, audit, CI/CD, design system, dashboard, deployment.
-- [ ] **Stage 2 — Accounting core.** Chart of accounts, journals, ledgers,
+- [x] **Stage 2 — Accounting core.** Chart of accounts, journals, ledgers,
       double-entry bookkeeping, trial balance, P&L, balance sheet, cash flow.
-- [ ] **Stage 3 — Customers & sales.** CRM, leads, quotations, sales orders,
-      invoices, payments, PDF generation.
-- [ ] **Stage 4 — Purchases & inventory.** Suppliers, purchase orders, goods
-      receipt, warehouses, stock movements, barcodes.
-- [ ] **Stage 5 — OCR & document intelligence.** Invoice and receipt extraction,
-      confidence scoring, manual review.
+      Posted entries are immutable and corrected only by reversal; periods lock;
+      entry numbering is gap-free under concurrency. Frontend screens built.
+- [x] **Stage 3 — Customers & sales.** CRM, leads, quotations, sales orders,
+      invoices, payments. Invoices post real double-entry to the ledger, GST splits
+      CGST/SGST vs IGST by place of supply, payments allocate many-to-many across
+      invoices. Frontend screens built. *PDF generation is not yet built.*
+- [x] **Stage 4 — Purchases & inventory.** Suppliers, purchase orders, goods
+      receipt, warehouses, stock movements, barcodes. Weighted-average valuation
+      that reconciles exactly to the Inventory account, goods receipt accruing
+      Goods Received Not Invoiced, bills claiming input GST, COGS on sale.
+      Frontend screens built.
+- [x] **Stage 5 — OCR & document intelligence.** Upload a supplier invoice; the
+      GSTIN, invoice number, date, and amounts are read out of it with per-field
+      confidence, the supplier is matched by GSTIN, and likely duplicate invoices
+      are flagged. **OCR never posts to the ledger** — it pre-fills a form, and
+      confirming goes through the same `BillService` as a hand-entered bill.
+      A digital PDF is read from its text layer (exact); images go to Tesseract.
+      Requires `uv sync --extra ocr` plus the Tesseract binary; without them the
+      app runs normally and reports document reading as unavailable.
 - [ ] **Stage 6 — AI assistant.** Conversational interface, RAG over business
       data, natural-language queries, forecasting.
 - [ ] **Stage 7 — Automation platform.** Visual workflow builder, triggers,
       scheduled jobs, approval flows, messaging integrations.
-- [ ] **Stage 8 — Analytics & reporting.** Interactive dashboards, custom
-      reports, scheduled exports, KPI tracking.
+- [x] **Stage 8 — Analytics & reporting.** A real dashboard: revenue, expenses,
+      profit, cash, receivables, payables, and stock, each with a like-for-like
+      period comparison, plus a twelve-month trend and customer/product rankings.
+      Every figure is computed by the same `ReportingService` that renders the P&L,
+      so a tile cannot disagree with the statement behind it. Also ships
+      **control-account reconciliation** — receivables, payables, and stock derived
+      twice, from the ledger and from the documents, and compared. *Custom report
+      builder and scheduled exports are not yet built.*
 - [ ] **Stage 9 — Enterprise.** Advanced multi-tenancy, API keys, webhooks, SSO,
       compliance, passkeys.
 - [ ] **Stage 10 — Production hardening.** Security review, monitoring, load
@@ -323,12 +426,22 @@ rather than links to nothing.
 
 ### A note on the dashboard
 
-The revenue, expense, and profit figures on the dashboard are **labelled "Sample"
-in the interface** and are illustrative placeholders. There is no ledger until
-Stage 2, so there is nothing real to aggregate. They exist so the chart and tile
-design can be evaluated, and they are marked because an unlabelled fake number in
-an accounting product is the most damaging thing that page could do. Member
-counts, the organization list, and the activity feed are live.
+Earlier revisions of this README warned that the dashboard's revenue, expense, and
+profit figures were illustrative placeholders labelled "Sample". **They are not any
+more** — as of Stage 8 every figure is derived from posted ledger entries, and the
+fabricated series has been deleted rather than left behind a flag.
+
+Two rules the dashboard now follows, both about not overclaiming:
+
+- **A month-to-date figure is compared against the same number of days**, not
+  against the whole previous month. On the 3rd of the month the naive comparison
+  reports revenue "down 90%", and a dashboard that does that is misleading for most
+  of every month.
+- **A percentage change with no basis is not shown as a number.** Going from ₹0 to
+  ₹50,000 is not "+100%" — it is undefined, so the tile says "no prior data".
+
+If the ledger ever disagrees with the documents behind it, the dashboard leads with
+that rather than quietly rendering figures derived from a broken ledger.
 
 ---
 

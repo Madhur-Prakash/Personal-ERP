@@ -25,13 +25,11 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy import (
-    Enum as SAEnum,
-)
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, UUIDPrimaryKeyMixin
+from app.db.types import enum_column
 
 if TYPE_CHECKING:
     from app.modules.organizations.models import Organization
@@ -97,6 +95,99 @@ class AuditAction(StrEnum):
     # --- Settings ---
     SETTINGS_UPDATED = "settings.updated"
 
+    # --- Chart of accounts (Stage 2) ---
+    ACCOUNT_CREATED = "account.created"
+    ACCOUNT_UPDATED = "account.updated"
+    ACCOUNT_DELETED = "account.deleted"
+
+    # --- Fiscal calendar ---
+    FISCAL_YEAR_CREATED = "fiscal_year.created"
+    PERIOD_CLOSED = "period.closed"
+    PERIOD_REOPENED = "period.reopened"
+
+    # --- Sales: CRM ---
+    CUSTOMER_CREATED = "customer.created"
+    CUSTOMER_UPDATED = "customer.updated"
+    CUSTOMER_DELETED = "customer.deleted"
+    LEAD_CREATED = "lead.created"
+    LEAD_UPDATED = "lead.updated"
+    LEAD_CONVERTED = "lead.converted"
+
+    # --- Sales: documents ---
+    QUOTATION_CREATED = "quotation.created"
+    QUOTATION_UPDATED = "quotation.updated"
+    QUOTATION_SENT = "quotation.sent"
+    QUOTATION_ACCEPTED = "quotation.accepted"
+    QUOTATION_REJECTED = "quotation.rejected"
+    QUOTATION_CONVERTED = "quotation.converted"
+    SALES_ORDER_CREATED = "sales_order.created"
+    SALES_ORDER_CONFIRMED = "sales_order.confirmed"
+    SALES_ORDER_CANCELLED = "sales_order.cancelled"
+
+    # --- Sales: invoices and payments ---
+    #: Posting is recorded separately from creation: a draft invoice is a working
+    #: document, but a posted one is a statutory record with a ledger effect.
+    INVOICE_CREATED = "invoice.created"
+    INVOICE_UPDATED = "invoice.updated"
+    INVOICE_POSTED = "invoice.posted"
+    INVOICE_CANCELLED = "invoice.cancelled"
+    INVOICE_DELETED = "invoice.deleted"
+    PAYMENT_RECEIVED = "payment.received"
+    PAYMENT_ALLOCATED = "payment.allocated"
+    PAYMENT_CANCELLED = "payment.cancelled"
+
+    # --- Purchasing ---
+    SUPPLIER_CREATED = "supplier.created"
+    SUPPLIER_UPDATED = "supplier.updated"
+    SUPPLIER_DELETED = "supplier.deleted"
+    PRODUCT_CREATED = "product.created"
+    PRODUCT_UPDATED = "product.updated"
+    PRODUCT_DELETED = "product.deleted"
+    WAREHOUSE_CREATED = "warehouse.created"
+    WAREHOUSE_UPDATED = "warehouse.updated"
+
+    PURCHASE_ORDER_CREATED = "purchase_order.created"
+    PURCHASE_ORDER_APPROVED = "purchase_order.approved"
+    PURCHASE_ORDER_CANCELLED = "purchase_order.cancelled"
+
+    GOODS_RECEIPT_CREATED = "goods_receipt.created"
+    GOODS_RECEIPT_POSTED = "goods_receipt.posted"
+    GOODS_RECEIPT_CANCELLED = "goods_receipt.cancelled"
+
+    BILL_CREATED = "bill.created"
+    BILL_POSTED = "bill.posted"
+    BILL_CANCELLED = "bill.cancelled"
+    SUPPLIER_PAYMENT_MADE = "supplier_payment.made"
+    SUPPLIER_PAYMENT_ALLOCATED = "supplier_payment.allocated"
+
+    # --- Inventory ---
+    #: A stock-take correction. Warning severity: it writes off value without a
+    #: commercial document behind it, which is exactly what a reviewer looks for.
+    STOCK_ADJUSTED = "stock.adjusted"
+    STOCK_TRANSFERRED = "stock.transferred"
+
+    # --- Scanned documents ---
+    DOCUMENT_UPLOADED = "document.uploaded"
+    #: Extraction re-run against text already on file, after a parser change.
+    #: Recorded because it rewrites the candidate values a reviewer may already
+    #: have been looking at.
+    DOCUMENT_REEXTRACTED = "document.reextracted"
+    #: A human accepted machine-read values and a bill was created from them.
+    #: Warning severity: this is the moment an OCR result becomes money owed, and
+    #: it is the entry an auditor traces back when a payment is questioned.
+    DOCUMENT_CONFIRMED = "document.confirmed"
+    DOCUMENT_REJECTED = "document.rejected"
+    DOCUMENT_DELETED = "document.deleted"
+
+    # --- Journal entries ---
+    #: Posting and reversal are recorded separately from creation: a draft is
+    #: bookkeeping in progress, but a posted entry is a statutory record and its
+    #: reversal is the only trace that a correction happened.
+    JOURNAL_ENTRY_CREATED = "journal_entry.created"
+    JOURNAL_ENTRY_POSTED = "journal_entry.posted"
+    JOURNAL_ENTRY_REVERSED = "journal_entry.reversed"
+    JOURNAL_ENTRY_DELETED = "journal_entry.deleted"
+
 
 class AuditSeverity(StrEnum):
     """Triage hint. ``WARNING``/``CRITICAL`` are what a security dashboard
@@ -120,12 +211,12 @@ class AuditLog(Base, UUIDPrimaryKeyMixin):
 
     # --- What ---
     action: Mapped[AuditAction] = mapped_column(
-        SAEnum(AuditAction, native_enum=False, length=60, validate_strings=True),
+        enum_column(AuditAction, length=60),
         nullable=False,
         index=True,
     )
     severity: Mapped[AuditSeverity] = mapped_column(
-        SAEnum(AuditSeverity, native_enum=False, length=20, validate_strings=True),
+        enum_column(AuditSeverity, length=20),
         nullable=False,
         default=AuditSeverity.INFO,
     )

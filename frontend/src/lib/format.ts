@@ -85,3 +85,59 @@ export function initials(name: string, fallback = '?'): string {
   if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
+
+/**
+ * Format a money value that arrived from the API as a decimal **string**.
+ *
+ * The backend serialises money as a string on purpose: a JSON number is an
+ * IEEE-754 double in JavaScript, so `1234567.89` would arrive as
+ * `1234567.8899999999`. Passing that string straight to `formatCurrency` would
+ * undo the whole point by calling `Number()` on it.
+ *
+ * `Intl.NumberFormat` accepts a string directly and formats it exactly, with no
+ * float conversion anywhere in the path.
+ */
+export function formatMoney(
+  value: string | null | undefined,
+  currency = 'INR',
+  locale = 'en-IN',
+): string {
+  if (value === null || value === undefined || value === '')
+    return currencyFormatter(currency, locale).format(0);
+  return currencyFormatter(currency, locale).format(value as unknown as number);
+}
+
+/**
+ * Compare two API money strings without converting to `number`.
+ *
+ * Returns a negative number, zero, or a positive number, like a comparator.
+ * Used for sorting and for sign checks (is this balance negative?).
+ */
+export function compareMoney(a: string, b: string): number {
+  const left = BigInt(scaleToInteger(a));
+  const right = BigInt(scaleToInteger(b));
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** True when an API money string represents zero, whatever its scale. */
+export function isZeroMoney(value: string | null | undefined): boolean {
+  if (!value) return true;
+  return /^-?0*(\.0*)?$/.test(value.trim());
+}
+
+/** True when an API money string is negative. */
+export function isNegativeMoney(value: string | null | undefined): boolean {
+  return !!value && value.trim().startsWith('-');
+}
+
+/**
+ * Normalise a decimal string to a fixed-scale integer string, so two values of
+ * differing scale ("0" and "0.0000") compare equal.
+ */
+function scaleToInteger(value: string, scale = 6): string {
+  const trimmed = value.trim();
+  const negative = trimmed.startsWith('-');
+  const [whole, fraction = ''] = trimmed.replace(/^[-+]/, '').split('.');
+  const padded = (fraction + '0'.repeat(scale)).slice(0, scale);
+  return `${negative ? '-' : ''}${whole}${padded}`;
+}

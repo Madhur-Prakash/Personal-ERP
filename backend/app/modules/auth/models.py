@@ -27,13 +27,11 @@ from sqlalchemy import (
     String,
     text,
 )
-from sqlalchemy import (
-    Enum as SAEnum,
-)
 from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.types import enum_column
 
 if TYPE_CHECKING:
     from app.modules.users.models import User
@@ -93,7 +91,7 @@ class UserSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     device_type: Mapped[str | None] = mapped_column(String(20))
 
     login_method: Mapped[LoginMethod] = mapped_column(
-        SAEnum(LoginMethod, native_enum=False, length=20, validate_strings=True),
+        enum_column(LoginMethod, length=20),
         nullable=False,
         default=LoginMethod.PASSWORD,
     )
@@ -105,7 +103,7 @@ class UserSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     last_used_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     revocation_reason: Mapped[SessionRevocationReason | None] = mapped_column(
-        SAEnum(SessionRevocationReason, native_enum=False, length=30, validate_strings=True)
+        enum_column(SessionRevocationReason, length=30)
     )
 
     # --- Relationships ---

@@ -64,6 +64,8 @@ _SEVERITY_OVERRIDES: dict[AuditAction, AuditSeverity] = {
     AuditAction.MEMBER_ROLE_CHANGED: AuditSeverity.WARNING,
     AuditAction.ROLE_DELETED: AuditSeverity.WARNING,
     AuditAction.USER_PASSWORD_CHANGED: AuditSeverity.WARNING,
+    # The moment a machine-read figure becomes money owed to a supplier.
+    AuditAction.DOCUMENT_CONFIRMED: AuditSeverity.WARNING,
 }
 
 

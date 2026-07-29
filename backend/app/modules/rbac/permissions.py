@@ -64,6 +64,14 @@ class Permission(StrEnum):
     JOURNAL_READ = "journal:read"
     JOURNAL_WRITE = "journal:write"
     JOURNAL_POST = "journal:post"
+    #: Reversing a posted entry is separated from posting: it rewrites the
+    #: effective books, so an organization may want to restrict it more tightly.
+    JOURNAL_REVERSE = "journal:reverse"
+    PERIOD_READ = "period:read"
+    #: Closing a period freezes filed numbers. Deliberately not implied by
+    #: `journal:post` — a bookkeeper posts daily but should not be able to seal a
+    #: quarter.
+    PERIOD_CLOSE = "period:close"
     REPORT_READ = "report:read"
 
     # --- Sales (Stage 3) ---
@@ -83,6 +91,15 @@ class Permission(StrEnum):
     PURCHASE_APPROVE = "purchase:approve"
     INVENTORY_READ = "inventory:read"
     INVENTORY_WRITE = "inventory:write"
+
+    # --- Scanned documents ---
+    DOCUMENT_READ = "document:read"
+    DOCUMENT_WRITE = "document:write"
+    #: Turning a scanned document into a bill. Separate from `document:write`, and
+    #: the endpoint requires `purchase:write` as well: uploading and reviewing a
+    #: supplier's PDF is clerical work, while accepting machine-read figures as
+    #: money owed is not.
+    DOCUMENT_CONFIRM = "document:confirm"
 
     @property
     def resource(self) -> str:
@@ -143,13 +160,16 @@ PERMISSION_GROUPS: Final[tuple[PermissionGroup, ...]] = (
     PermissionGroup(
         "accounting",
         "Accounting",
-        "Chart of accounts, journals, and financial reports",
+        "Chart of accounts, journals, periods, and financial reports",
         (
             Permission.ACCOUNT_READ,
             Permission.ACCOUNT_WRITE,
             Permission.JOURNAL_READ,
             Permission.JOURNAL_WRITE,
             Permission.JOURNAL_POST,
+            Permission.JOURNAL_REVERSE,
+            Permission.PERIOD_READ,
+            Permission.PERIOD_CLOSE,
             Permission.REPORT_READ,
         ),
     ),
@@ -179,6 +199,16 @@ PERMISSION_GROUPS: Final[tuple[PermissionGroup, ...]] = (
             Permission.PURCHASE_APPROVE,
             Permission.INVENTORY_READ,
             Permission.INVENTORY_WRITE,
+        ),
+    ),
+    PermissionGroup(
+        "documents",
+        "Scanned documents",
+        "Uploading supplier invoices and turning them into bills",
+        (
+            Permission.DOCUMENT_READ,
+            Permission.DOCUMENT_WRITE,
+            Permission.DOCUMENT_CONFIRM,
         ),
     ),
 )
@@ -212,6 +242,7 @@ SYSTEM_ROLE_PERMISSIONS: Final[dict[SystemRole, tuple[str, ...]]] = {
         "settings:*",
         "account:*",
         "journal:*",
+        "period:*",
         Permission.REPORT_READ,
         "customer:*",
         "invoice:*",
@@ -219,12 +250,14 @@ SYSTEM_ROLE_PERMISSIONS: Final[dict[SystemRole, tuple[str, ...]]] = {
         "supplier:*",
         "purchase:*",
         "inventory:*",
+        "document:*",
     ),
     SystemRole.ACCOUNTANT: (
         Permission.ORG_READ,
         Permission.MEMBER_READ,
         "account:*",
         "journal:*",
+        "period:*",
         Permission.REPORT_READ,
         Permission.CUSTOMER_READ,
         "invoice:*",
@@ -232,6 +265,7 @@ SYSTEM_ROLE_PERMISSIONS: Final[dict[SystemRole, tuple[str, ...]]] = {
         Permission.SUPPLIER_READ,
         Permission.PURCHASE_READ,
         Permission.INVENTORY_READ,
+        "document:*",
         Permission.AUDIT_READ,
     ),
     SystemRole.SALES: (
@@ -242,6 +276,7 @@ SYSTEM_ROLE_PERMISSIONS: Final[dict[SystemRole, tuple[str, ...]]] = {
         Permission.INVOICE_WRITE,
         Permission.PAYMENT_READ,
         Permission.INVENTORY_READ,
+        Permission.PERIOD_READ,
         Permission.REPORT_READ,
     ),
     SystemRole.VIEWER: (
@@ -249,6 +284,7 @@ SYSTEM_ROLE_PERMISSIONS: Final[dict[SystemRole, tuple[str, ...]]] = {
         Permission.MEMBER_READ,
         Permission.ACCOUNT_READ,
         Permission.JOURNAL_READ,
+        Permission.PERIOD_READ,
         Permission.REPORT_READ,
         Permission.CUSTOMER_READ,
         Permission.INVOICE_READ,
@@ -256,6 +292,7 @@ SYSTEM_ROLE_PERMISSIONS: Final[dict[SystemRole, tuple[str, ...]]] = {
         Permission.SUPPLIER_READ,
         Permission.PURCHASE_READ,
         Permission.INVENTORY_READ,
+        Permission.DOCUMENT_READ,
     ),
 }
 

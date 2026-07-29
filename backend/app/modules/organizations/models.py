@@ -7,11 +7,9 @@ organizations through :class:`OrganizationMember`, so one person can be the
 accountant for three companies with a single login — the normal case for the
 small-business owners and part-time accountants this product targets.
 
-A note on enum storage: enums are persisted as ``VARCHAR`` with a ``CHECK``
-constraint (``native_enum=False``) rather than as PostgreSQL ``ENUM`` types.
-Adding a value to a native enum requires ``ALTER TYPE``, which cannot run inside
-a transaction in older PostgreSQL and is awkward to reverse. A check constraint
-is a one-line, fully reversible migration.
+Enum columns go through :func:`app.db.types.enum_column`, never
+``sqlalchemy.Enum`` directly — see that function for why the obvious spelling
+silently stores the member *name* and creates no constraint at all.
 """
 
 from __future__ import annotations
@@ -31,13 +29,11 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy import (
-    Enum as SAEnum,
-)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.types import enum_column
 
 if TYPE_CHECKING:
     from app.modules.rbac.models import Role
@@ -102,7 +98,7 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
     # --- Lifecycle ---
     plan: Mapped[OrganizationPlan] = mapped_column(
-        SAEnum(OrganizationPlan, native_enum=False, length=20, validate_strings=True),
+        enum_column(OrganizationPlan, length=20),
         nullable=False,
         default=OrganizationPlan.FREE,
     )
@@ -164,7 +160,7 @@ class OrganizationMember(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     is_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     status: Mapped[MemberStatus] = mapped_column(
-        SAEnum(MemberStatus, native_enum=False, length=20, validate_strings=True),
+        enum_column(MemberStatus, length=20),
         nullable=False,
         default=MemberStatus.ACTIVE,
     )
@@ -221,7 +217,7 @@ class Invitation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
 
     status: Mapped[InvitationStatus] = mapped_column(
-        SAEnum(InvitationStatus, native_enum=False, length=20, validate_strings=True),
+        enum_column(InvitationStatus, length=20),
         nullable=False,
         default=InvitationStatus.PENDING,
     )

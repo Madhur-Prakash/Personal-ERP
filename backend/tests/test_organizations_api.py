@@ -16,7 +16,8 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
@@ -479,6 +480,75 @@ class TestInvitations:
         )
         assert second.status_code == 409
         assert second.json()["error"]["code"] == "invitation_pending"
+
+    async def test_database_also_blocks_a_second_pending_invitation(
+        self,
+        authed_client: AsyncClient,
+        api: str,
+        db: AsyncSession,
+        organization: Organization,
+    ) -> None:
+        """The partial unique index must fire, not just the service check.
+
+        `uq_invitation_pending_email` is a partial unique index with predicate
+        `WHERE status = 'pending'`. It was silently inert for a while: enum columns
+        stored the member *name* (`'PENDING'`), so the predicate matched no row and
+        the index guaranteed nothing. The test above still passed, because the
+        service's own check caught the duplicate first — which is precisely why the
+        gap went unnoticed.
+
+        This test bypasses the service and writes directly, so only the database
+        can stop it.
+        """
+        first = await authed_client.post(
+            f"{api}/organizations/current/invitations", json={"email": "race@example.com"}
+        )
+        assert first.status_code == 201
+
+        role = (
+            await db.execute(
+                select(Role).where(
+                    Role.organization_id == organization.id,
+                    Role.slug == SystemRole.VIEWER,
+                )
+            )
+        ).scalar_one()
+
+        with pytest.raises(IntegrityError, match="uq_invitation_pending_email"):
+            async with db.begin_nested():  # savepoint, so the session survives
+                db.add(
+                    Invitation(
+                        organization_id=organization.id,
+                        email="race@example.com",
+                        role_id=role.id,
+                        token_hash=uuid.uuid4().hex * 2,
+                        status=InvitationStatus.PENDING,
+                        expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=7),
+                    )
+                )
+                await db.flush()
+
+    async def test_enum_columns_store_values_not_names(
+        self, authed_client: AsyncClient, api: str, db: AsyncSession
+    ) -> None:
+        """Guards the root cause of the inert-index bug.
+
+        The database must hold `'pending'`, matching what the API serialises. If
+        this ever reads `'PENDING'` again, every value-based SQL predicate in the
+        schema has quietly stopped working.
+        """
+        created = await authed_client.post(
+            f"{api}/organizations/current/invitations", json={"email": "casing@example.com"}
+        )
+        assert created.status_code == 201
+
+        stored = (
+            await db.execute(
+                text("SELECT status FROM invitation WHERE email = :email"),
+                {"email": "casing@example.com"},
+            )
+        ).scalar_one()
+        assert stored == "pending", f"expected the enum value, got {stored!r}"
 
     async def test_revoking_invalidates_the_emailed_link(
         self, authed_client: AsyncClient, api: str, db: AsyncSession

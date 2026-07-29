@@ -8,6 +8,9 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  BarChart3,
+  IndianRupee,
+  ScanLine,
   Search,
   Settings,
   ShieldCheck,
@@ -51,9 +54,13 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Finance',
     items: [
-      { label: 'Accounting', to: '/accounting', icon: Wallet, stage: 2 },
-      { label: 'Invoices', to: '/invoices', icon: FileText, stage: 3 },
-      { label: 'Inventory', to: '/inventory', icon: Boxes, stage: 4 },
+      // First: for most users this is the only screen they open.
+      { label: 'Billing', to: '/billing', icon: IndianRupee, permission: 'journal:read' },
+      { label: 'Accounting', to: '/accounting', icon: Wallet, permission: 'account:read' },
+      { label: 'Sales', to: '/invoices', icon: FileText, permission: 'invoice:read' },
+      { label: 'Inventory', to: '/inventory', icon: Boxes, permission: 'inventory:read' },
+      { label: 'Documents', to: '/documents', icon: ScanLine, permission: 'document:read' },
+      { label: 'Analytics', to: '/analytics', icon: BarChart3, permission: 'report:read' },
     ],
   },
   {

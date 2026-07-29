@@ -1,0 +1,106 @@
+"""Billing API contracts."""
+
+from __future__ import annotations
+
+import datetime as dt
+import uuid
+from decimal import Decimal
+from typing import Annotated
+
+from pydantic import Field, StringConstraints
+
+from app.core.schemas import BaseSchema, ResponseSchema
+from app.modules.billing.service import Direction
+
+#: A money amount on the way in. Positive only — a correction is a reversal, not a
+#: negative entry, because a ledger records what happened rather than the net of it.
+#: `decimal_places=2` because a person typing an amount by hand means rupees and
+#: paise; the column keeps 4 for computed figures.
+Amount = Annotated[Decimal, Field(gt=0, max_digits=18, decimal_places=2)]
+
+Description = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class RecordEntryRequest(BaseSchema):
+    """What the form sends.
+
+    Only three fields are required: which way, when, and how much — plus a note,
+    because an amount with no description is unidentifiable a month later and the
+    ledger's narration cannot be blank.
+
+    `category_id` and `money_account_id` are optional and fall back to sensible
+    defaults, so a first entry needs no understanding of the chart of accounts.
+    """
+
+    direction: Direction
+    amount: Amount
+    description: Description
+    #: Defaults to today, resolved in the organization's own timezone.
+    entry_date: dt.date | None = None
+    category_id: uuid.UUID | None = None
+    money_account_id: uuid.UUID | None = None
+    reference: str | None = Field(default=None, max_length=100)
+
+
+class ReverseEntryRequest(BaseSchema):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class CategoryRead(ResponseSchema):
+    id: uuid.UUID
+    code: str
+    name: str
+    #: Which way this category applies. Income categories cannot take money out.
+    direction: Direction
+    is_default: bool
+
+
+class MoneyAccountRead(ResponseSchema):
+    id: uuid.UUID
+    code: str
+    name: str
+    is_default: bool
+
+
+class BillingOptions(ResponseSchema):
+    """Everything the form needs to render, in one request.
+
+    Served rather than hard-coded so the categories follow the organization's actual
+    chart of accounts — including any account it has added itself.
+    """
+
+    categories: list[CategoryRead]
+    money_accounts: list[MoneyAccountRead]
+    #: Today in the organization's timezone, so the date field opens on the right day
+    #: rather than on the server's UTC date.
+    today: dt.date
+    currency: str
+
+
+class EntryRead(ResponseSchema):
+    id: uuid.UUID
+    #: The ledger's own number for this entry, so it can be found in the journal.
+    entry_number: str | None
+    date: dt.date
+    direction: Direction
+    amount: Decimal
+    description: str
+    reference: str | None
+
+    category_id: uuid.UUID
+    category_name: str
+    money_account_id: uuid.UUID
+    money_account_name: str
+
+    created_at: dt.datetime
+    #: Cancelled by a reversal. Still listed — the cancellation is part of the record.
+    is_reversed: bool
+
+
+class BillingSummary(ResponseSchema):
+    from_date: dt.date
+    to_date: dt.date
+    money_in: Decimal
+    money_out: Decimal
+    net: Decimal
+    entry_count: int

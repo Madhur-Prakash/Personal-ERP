@@ -77,7 +77,21 @@ IpAddress = Annotated[str, BeforeValidator(_stringify_ip)]
 
 
 class BaseSchema(BaseModel):
-    """Base for request bodies and internal DTOs."""
+    """Base for request bodies and internal DTOs.
+
+    **``use_enum_values`` is deliberately absent here**, unlike on
+    :class:`ResponseSchema`. With it enabled, a validated enum field becomes a
+    plain ``str``, so ``data.method.is_cash`` raises ``AttributeError`` — the enum
+    helpers that make the domain readable stop existing precisely where services
+    reach for them. It caused exactly that bug in payment posting.
+
+    Requests do not need it: SQLAlchemy accepts an enum member for an enum column,
+    and FastAPI serialises enums fine on the way out (where ``ResponseSchema``
+    *does* enable it, so the JSON carries stable values rather than member names).
+
+    Keeping enums as enums through the request path means a service can rely on
+    their behaviour, which is the whole reason for declaring them as enums.
+    """
 
     model_config = ConfigDict(
         # Reject unknown fields: a silently ignored typo'd field is a bug the
@@ -85,7 +99,6 @@ class BaseSchema(BaseModel):
         extra="forbid",
         str_strip_whitespace=True,
         validate_assignment=True,
-        use_enum_values=True,
     )
 
 
@@ -134,16 +147,35 @@ class HealthStatus(ResponseSchema):
 
 
 def with_computed[SchemaT: BaseModel](schema: type[SchemaT], obj: Any, **computed: Any) -> SchemaT:
-    """Validate an ORM object into ``schema``, then overlay computed fields.
+    """Build a response schema from an ORM object plus server-computed fields.
 
     Response schemas routinely need a value the ORM row cannot supply — a
-    ``member_count`` from a separate aggregate, an ``is_current`` flag that
-    depends on the caller's session. ``model_validate`` accepts no such overlay
-    (it has no ``update`` parameter), so the two steps are combined here rather
-    than open-coded at a dozen call sites.
+    ``member_count`` from a separate aggregate, a ``customer_name`` reached through
+    a relationship, an ``outstanding`` derived from two columns.
 
-    The overlaid values bypass validation, which is safe *because they are
-    computed server-side* — never taken from request data. Anything arriving from
-    a client must go through a request schema instead.
+    **The computed values are merged before validation, not after.** The obvious
+    implementation is ``model_validate(obj).model_copy(update=computed)``, and it is
+    broken: validation runs first, so any *required* field the ORM object cannot
+    supply raises ``ValidationError`` before the overlay ever happens. It works only
+    when every computed field is optional, which silently stops being true the first
+    time someone adds a required one.
+
+    So the schema's declared fields are read off the object, the computed values are
+    layered on top, and the merged mapping is validated once.
+
+    Fields present in ``computed`` are never read from the object. That matters
+    beyond efficiency: a relationship collection passed in explicitly must not also
+    be touched here, or it would trigger a lazy load — see the ``LazyLoadDetected``
+    guard in the test suite.
     """
-    return schema.model_validate(obj).model_copy(update=computed)
+    data: dict[str, Any] = {}
+    for name in schema.model_fields:
+        if name in computed:
+            continue
+        # Only fields the object actually has. Anything missing falls through to the
+        # schema's own default, or fails validation if it is genuinely required.
+        if hasattr(obj, name):
+            data[name] = getattr(obj, name)
+
+    data.update(computed)
+    return schema.model_validate(data)

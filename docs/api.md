@@ -102,7 +102,12 @@ of reasons.
 
 ## Endpoints
 
-47 in total.
+177 operations across 136 paths. The tables below cover the platform modules and
+scanned documents in prose because their rules are not visible from a schema. For
+the commercial modules — accounting, sales, purchasing, inventory — **the generated
+OpenAPI schema at `/docs` is the reference**, and it is authoritative: it is
+produced from the same Pydantic models the endpoints validate against, so it cannot
+drift from the implementation the way a hand-written table does.
 
 ### Authentication — `/auth`
 
@@ -190,6 +195,102 @@ merely checked.
 | --- | --- | --- |
 | GET | `/` | `audit:read` — cursor-paginated, filterable |
 | GET | `/actions` | `audit:read` — the action vocabulary |
+
+### Scanned documents — `/documents`
+
+Two permissions guard writing here, and the split is deliberate. `document:write`
+covers uploading and rejecting — clerical work. `document:confirm` **plus**
+`purchase:write` are both required to turn a document into a bill, because
+accepting a machine-read total as money owed is not clerical.
+
+| Method | Path | Permission | Notes |
+| --- | --- | --- | --- |
+| GET | `/capabilities` | `document:read` | Which engines and formats this server can read. Authenticated: it names installed software |
+| POST | `/` | `document:write` | Multipart. Recognises and extracts inline; a file that cannot be read still returns 201 with `status: failed` |
+| GET | `/` | `document:read` | Review queue, newest first. Filter by `status`, `kind`, `needs_review`, `q` |
+| GET | `/{id}` | `document:read` | Full detail with per-field confidence |
+| GET | `/{id}/text` | `document:read` | The recognised text — the only answer to "where did this number come from?" |
+| GET | `/{id}/file` | `document:read` | The original bytes, `Content-Disposition: attachment` + `nosniff` + a `sandbox` CSP |
+| POST | `/{id}/reextract` | `document:write` | Re-parses the stored text. No engine, no file read — for applying a parser improvement to older documents |
+| POST | `/{id}/confirm` | `document:confirm` **and** `purchase:write` | Creates a bill from the **submitted** values via `BillService`, not the extracted ones |
+| POST | `/{id}/reject` | `document:write` | A reason is required |
+| DELETE | `/{id}` | `document:write` | Soft delete. Refused once the document has become a bill |
+
+Three behaviours worth knowing before integrating:
+
+- **Uploading the same bytes twice is not an error.** The response carries
+  `already_uploaded: true` and the document created the first time. Blobs are
+  content-addressed by SHA-256, so identical files cannot become two documents.
+- **A likely duplicate invoice is a warning, not a rejection.** When an earlier
+  document has the same supplier GSTIN and invoice number, `duplicate` is populated
+  and `document.is_duplicate` is true — but the upload succeeds and can still be
+  confirmed. The values compared were read by an OCR engine, so refusing a genuine
+  invoice over a misread digit would be worse than the manual entry this replaces.
+- **Confirming inherits every bill rule**, including the refusal to accept the same
+  `supplier_invoice_number` for one supplier twice, period locks, and GST
+  resolution. There is no second posting path.
+
+### Analytics — `/analytics`
+
+Every figure is computed by the same `ReportingService` that renders the financial
+statements, so a dashboard tile cannot disagree with the P&L or balance sheet behind
+it. All require `report:read`.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/periods` | The selectable windows plus the organization's fiscal-year start. Served so "this financial year" means the same dates on both sides |
+| GET | `/dashboard` | Revenue, expenses, gross and net profit with period comparison; cash, receivables, payables, stock as at the window end |
+| GET | `/trend` | Income, expenses, and profit per calendar month. Empty months are returned as zeroes, never omitted |
+| GET | `/top-customers` | Ranked on **taxable** value, not the invoice total |
+| GET | `/top-products` | Grouped by line description, so free-text service lines are counted |
+| GET | `/control-checks` | Receivables, payables, and stock derived twice — from the ledger and from the documents — and compared |
+
+Three behaviours that matter when integrating:
+
+- **`change_percent` is `null` when there is no basis.** Going from ₹0 to ₹50,000 is
+  not "+100%" and not "+∞" — it is undefined. Render "no prior data"; do not coerce
+  it to a number.
+- **`comparison` is a real window, and for a month-to-date figure it is truncated.**
+  On the 3rd of the month, `span` is 3 days and `comparison` is days 1-3 of the
+  previous month — not the whole of it. Comparing 3 days against 30 reports a 90%
+  collapse that did not happen. The dates are in the response so this is checkable.
+- **`all_agree: false` is data, not an error.** It means a document updated one table
+  and not the other. It is reported rather than raised for the same reason
+  `TrialBalance.is_balanced` is: a broken figure should be visible, not a 500 on an
+  otherwise useful screen.
+
+### Billing — `/billing`
+
+The simple path: money in and money out, with no customer or supplier. Guarded on
+`journal:read` / `journal:write` rather than a permission of its own — these entries
+*are* journal entries, and a parallel permission granting the same underlying
+capability would be security theatre.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/options` | Categories, cash/bank accounts, today in the org's timezone, currency — one call so the form renders complete |
+| POST | `/` | Record one movement. Posted immediately, never a draft |
+| GET | `/` | The day book, newest first. Filter by `direction`, date range, or description |
+| GET | `/summary` | Money in, money out, net, and a count for a window |
+| GET | `/{id}` | One entry |
+| POST | `/{id}/reverse` | Cancel it by posting the mirror entry |
+
+Worth knowing:
+
+- **Only `direction`, `amount`, and `description` are required.** The date defaults to
+  today in the organization's timezone, and the category and cash account fall back to
+  sensible defaults, so a first entry needs no knowledge of the chart of accounts.
+- **The fiscal year is created on demand.** Without it the first posting would fail
+  with "no accounting period covers this date", which is meaningless to someone who
+  never asked for a fiscal calendar.
+- **Amounts must be positive.** A correction is a reversal, not a negative entry — a
+  ledger records what happened, not the net of it.
+- **A reversal does not appear in the list.** `reverse_entry` copies `source_type` onto
+  the mirror entry, so without filtering it a cancelled ₹5,000 payment would show twice:
+  once struck through and once as a phantom ₹5,000 receipt. The original carries
+  `is_reversed`, which is all the user needs; the ledger keeps both rows.
+- **These are real postings**, so they reach the trial balance, P&L, cash flow
+  statement, dashboard, and analytics trend with nothing else wired up.
 
 ### Health — `/health` (unversioned, public)
 

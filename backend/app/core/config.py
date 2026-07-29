@@ -157,6 +157,38 @@ class Settings(BaseSettings):
     # ---- Frontend -----------------------------------------------------------
     frontend_url: str = "http://localhost:5173"
 
+    # ---- Documents & OCR ----------------------------------------------------
+    #: Where uploaded documents are stored.
+    #:
+    #: The filesystem, not the database. Scanned invoices are megabytes of opaque
+    #: bytes: putting them in Postgres bloats every backup and every replication
+    #: stream with data no query ever reads. A directory is also what makes
+    #: `rsync`-ing the whole install to a new box a viable backup story for a
+    #: self-hosted deployment, which is the point of this product.
+    upload_dir: Path = BACKEND_DIR / "var" / "uploads"
+
+    #: Hard ceiling on one upload. A 600 dpi colour scan of an A4 invoice is
+    #: ~8 MB, so 15 MB accepts real documents and refuses everything else — the
+    #: limit is enforced while streaming, so an oversized body is never buffered.
+    max_upload_bytes: int = Field(default=15 * 1024 * 1024, ge=64 * 1024)
+
+    ocr_enabled: bool = True
+
+    #: Absolute path to the Tesseract binary. Blank means "find it on PATH".
+    #: Needed because the Windows installer does not add itself to PATH, so the
+    #: engine is unreachable on machines where it is plainly installed.
+    tesseract_cmd: str = ""
+
+    #: Tesseract language packs, ``+``-separated (e.g. ``eng+hin``). Each one must
+    #: be installed alongside the binary; naming a missing pack makes recognition
+    #: fail outright rather than degrade.
+    ocr_languages: str = "eng"
+
+    #: Wall-clock ceiling on one recognition pass. Tesseract on a large noisy
+    #: image can run for minutes, and a request that never returns is worse than
+    #: one that fails with an explanation.
+    ocr_timeout_seconds: int = Field(default=30, ge=1, le=300)
+
     # -------------------------------------------------------------------------
     # Derived values
     # -------------------------------------------------------------------------

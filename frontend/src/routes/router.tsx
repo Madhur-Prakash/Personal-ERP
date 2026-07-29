@@ -16,11 +16,17 @@ import {
 } from '@/features/auth/PasswordPages';
 import { MagicLinkPage, MagicLinkVerifyPage, OtpPage } from '@/features/auth/PasswordlessPages';
 import { RegisterPage } from '@/features/auth/RegisterPage';
+import { AccountingPage } from '@/features/accounting/AccountingPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
+import { AnalyticsPage } from '@/features/analytics/AnalyticsPage';
+import { BillingPage } from '@/features/billing/BillingPage';
+import { DocumentsPage } from '@/features/documents/DocumentsPage';
+import { InventoryPage } from '@/features/inventory/InventoryPage';
 import { AcceptInvitePage } from '@/features/organizations/AcceptInvitePage';
 import { AuditPage } from '@/features/organizations/AuditPage';
 import { MembersPage } from '@/features/organizations/MembersPage';
 import { RolesPage } from '@/features/organizations/RolesPage';
+import { InvoicesPage } from '@/features/sales/InvoicesPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { NotFoundPage } from '@/routes/NotFoundPage';
 import { RouteErrorPage } from '@/routes/RouteErrorPage';
@@ -211,42 +217,64 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
-// Placeholders for later stages. Registered so the navigation links resolve
-// instead of 404-ing, and so the delivery plan is visible in the product.
+// Built modules. Each is permission-guarded in `beforeLoad` rather than inside
+// the component, so an unauthorised user is redirected before the page renders
+// and never briefly sees data they are not entitled to.
+// Billing is guarded on `journal:write` rather than a permission of its own: these
+// entries *are* journal entries, and inventing a parallel permission that grants the
+// same underlying capability would be security theatre.
+const billingRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/billing',
+  beforeLoad: ({ context }) => {
+    if (!context.hasPermission('journal:read')) throw redirect({ to: '/' });
+  },
+  component: BillingPage,
+});
+
 const accountingRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/accounting',
-  component: () => (
-    <StagePlaceholder
-      title="Accounting"
-      description="Chart of accounts, journals, ledgers, and financial statements."
-      stage={2}
-    />
-  ),
+  beforeLoad: ({ context }) => {
+    if (!context.hasPermission('account:read')) throw redirect({ to: '/' });
+  },
+  component: AccountingPage,
 });
 
 const invoicesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/invoices',
-  component: () => (
-    <StagePlaceholder
-      title="Invoices"
-      description="Quotations, sales orders, invoices, and payments."
-      stage={3}
-    />
-  ),
+  beforeLoad: ({ context }) => {
+    if (!context.hasPermission('invoice:read')) throw redirect({ to: '/' });
+  },
+  component: InvoicesPage,
 });
 
 const inventoryRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/inventory',
-  component: () => (
-    <StagePlaceholder
-      title="Inventory"
-      description="Warehouses, stock movements, and barcode support."
-      stage={4}
-    />
-  ),
+  beforeLoad: ({ context }) => {
+    if (!context.hasPermission('inventory:read')) throw redirect({ to: '/' });
+  },
+  component: InventoryPage,
+});
+
+const documentsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/documents',
+  beforeLoad: ({ context }) => {
+    if (!context.hasPermission('document:read')) throw redirect({ to: '/' });
+  },
+  component: DocumentsPage,
+});
+
+const analyticsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/analytics',
+  beforeLoad: ({ context }) => {
+    if (!context.hasPermission('report:read')) throw redirect({ to: '/' });
+  },
+  component: AnalyticsPage,
 });
 
 const assistantRoute = createRoute({
@@ -280,9 +308,12 @@ const routeTree = rootRoute.addChildren([
     rolesRoute,
     auditRoute,
     settingsRoute,
+    billingRoute,
     accountingRoute,
     invoicesRoute,
     inventoryRoute,
+    documentsRoute,
+    analyticsRoute,
     assistantRoute,
   ]),
 ]);
