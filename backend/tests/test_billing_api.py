@@ -733,6 +733,16 @@ class TestReversal:
         report = (await authed_client.get(f"{api}/reports/trial-balance")).json()
         assert report["is_balanced"] is True
 
+        # Total movement balances too, and this is the case that proves it is a real
+        # check rather than a restatement of `is_balanced`: here the net figures are all
+        # nil, so the balance columns agree trivially at zero, while the gross columns
+        # still carry ₹5,000 on each side. The trial balance reports both, and the UI
+        # footers them side by side.
+        assert sum(D(row["gross_debit"]) for row in report["rows"]) == sum(
+            D(row["gross_credit"]) for row in report["rows"]
+        )
+        assert sum(D(row["gross_debit"]) for row in report["rows"]) > 0
+
     async def test_the_original_stays_in_the_list(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:

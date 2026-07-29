@@ -25,6 +25,13 @@ export interface Column<T> {
   numeric?: boolean;
   /** Hide below the `sm` breakpoint - for columns that are nice-to-have. */
   hideOnMobile?: boolean;
+  /**
+   * Applied to the header *and* every cell in the column.
+   *
+   * Both, because the only thing a caller wants from a column-level class is to style
+   * the column: a left border set on the header alone draws a rule that stops after the
+   * first row, which reads as a rendering fault rather than a divider.
+   */
   className?: string;
 }
 
@@ -102,6 +109,7 @@ export function DataTable<T>({
                     'text-content px-3 py-2.5 align-middle',
                     column.numeric && 'text-right tabular-nums',
                     column.hideOnMobile && 'hidden sm:table-cell',
+                    column.className,
                   )}
                 >
                   {column.cell(row)}

@@ -131,6 +131,43 @@ export function isNegativeMoney(value: string | null | undefined): boolean {
 }
 
 /**
+ * Money for a dense report table: grouped, two decimals, no currency symbol.
+ *
+ * A statement with six money columns repeats `₹` six times per row for no information -
+ * it is the same currency throughout, so the symbol belongs once in the heading. That is
+ * how printed statements have always done it, and it is also what lets the columns fit
+ * without scrolling sideways to compare two totals that must agree.
+ *
+ * Exact, like `formatMoney`: the string goes to `Intl` untouched, never through `Number`.
+ */
+export function formatAmount(value: string | null | undefined, locale = 'en-IN'): string {
+  if (value === null || value === undefined || value === '') return '0.00';
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value as unknown as number);
+}
+
+/**
+ * Add API money strings exactly, returning a money string.
+ *
+ * Not `values.reduce((sum, v) => sum + Number(v), 0)`. A total on the trial balance is
+ * the one figure whose whole purpose is to prove nothing has drifted, so computing it
+ * through binary floating point - where 0.1 + 0.2 is not 0.3 - would undermine the report
+ * it appears on. Scales to integers and adds with `BigInt`, the same way `compareMoney`
+ * compares them.
+ */
+export function sumMoney(values: readonly string[], scale = 6): string {
+  const total = values.reduce((sum, value) => sum + BigInt(scaleToInteger(value, scale)), 0n);
+
+  const negative = total < 0n;
+  const digits = (negative ? -total : total).toString().padStart(scale + 1, '0');
+  const whole = digits.slice(0, digits.length - scale);
+  const fraction = digits.slice(digits.length - scale);
+  return `${negative ? '-' : ''}${whole}.${fraction}`;
+}
+
+/**
  * Normalise a decimal string to a fixed-scale integer string, so two values of
  * differing scale ("0" and "0.0000") compare equal.
  */
