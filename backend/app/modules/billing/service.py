@@ -463,17 +463,19 @@ class BillingService:
         # Money in: the cash grows (debit), the income grows (credit).
         if direction is Direction.OUT:
             debit_account, credit_account = category.id, money.id
-            journal_type = JournalType.CASH
         else:
             debit_account, credit_account = money.id, category.id
-            journal_type = JournalType.CASH
+
+        journal_type = (
+            JournalType.CASH if money.subtype is AccountSubtype.CASH else JournalType.BANK
+        )
 
         from app.modules.accounting.schemas import JournalEntryCreate, JournalEntryLineInput
 
         journal = await self.posting.journals.get_by_type(organization_id, journal_type)
         if journal is None:
             raise BusinessRuleError(
-                "This organization has no cash journal configured. "
+                f"This organization has no {journal_type} journal configured. "
                 "Set up the chart of accounts first.",
                 code="no_cash_journal",
             )

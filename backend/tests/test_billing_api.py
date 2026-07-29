@@ -73,6 +73,95 @@ async def record(
 
 
 # ---------------------------------------------------------------------------
+# Which book an entry is filed in
+# ---------------------------------------------------------------------------
+class TestJournalRouting:
+    """Cash entries belong in the Cash Book, bank entries in the Bank Book.
+
+    The choice used to be keyed on direction - which does not affect it, since a cash book
+    has both a receipts and a payments side - so everything landed in the Cash Book even
+    when the money moved through a bank. Sales and purchasing already route by account,
+    and billing disagreeing with them meant the same payment recorded two ways ended up in
+    two different books.
+    """
+
+    async def test_cash_goes_to_the_cash_book(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        options = (await authed_client.get(f"{api}/billing/options")).json()
+        cash = next(a for a in options["money_accounts"] if "Cash" in a["name"])
+
+        for direction in ("in", "out"):
+            response = await authed_client.post(
+                f"{api}/billing",
+                json={
+                    "direction": direction,
+                    "amount": "100",
+                    "description": "Over the counter",
+                    "party": "Ramesh",
+                    "money_account_id": cash["id"],
+                },
+            )
+            assert response.status_code == 201, response.text
+            # Both directions, one book: that is what a cash book is for.
+            assert response.json()["entry_number"].startswith("CB-")
+
+    async def test_bank_goes_to_the_bank_book(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        options = (await authed_client.get(f"{api}/billing/options")).json()
+        bank = next(a for a in options["money_accounts"] if "Bank" in a["name"])
+
+        response = await authed_client.post(
+            f"{api}/billing",
+            json={
+                "direction": "in",
+                "amount": "112",
+                "description": "Transfer received",
+                "party": "A customer",
+                "money_account_id": bank["id"],
+            },
+        )
+        assert response.status_code == 201, response.text
+        entry = response.json()
+        assert entry["entry_number"].startswith("BB-"), entry["entry_number"]
+
+        # And the journal itself says so, not just the number prefix.
+        entries = (await authed_client.get(f"{api}/journal-entries")).json()
+        posted = next(e for e in entries["items"] if e["id"] == entry["id"])
+        assert posted["journal_code"] == "BNK"
+
+    async def test_a_bank_entry_still_appears_in_the_billing_day_book(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The regression this change could have caused.
+
+        The day book selects on `source_type`, not on the journal - so moving bank entries
+        into a different book must not hide them from the screen they were entered on.
+        """
+        options = (await authed_client.get(f"{api}/billing/options")).json()
+        bank = next(a for a in options["money_accounts"] if "Bank" in a["name"])
+
+        created = await authed_client.post(
+            f"{api}/billing",
+            json={
+                "direction": "in",
+                "amount": "112",
+                "description": "Transfer received",
+                "party": "A customer",
+                "money_account_id": bank["id"],
+            },
+        )
+        assert created.status_code == 201, created.text
+
+        listing = (await authed_client.get(f"{api}/billing")).json()
+        row = next(r for r in listing["items"] if r["id"] == created.json()["id"])
+        assert row["direction"] == "in"
+        assert D(row["amount"]) == D("112")
+        assert row["money_account_name"] == bank["name"]
+
+
+# ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
 class TestOptions:
