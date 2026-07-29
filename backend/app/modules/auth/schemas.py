@@ -257,6 +257,17 @@ class OrganizationSummary(ResponseSchema):
     role_slug: str
     is_owner: bool
 
+    #: How this organization's figures and dates are to be rendered.
+    #:
+    #: Carried on the session payload rather than fetched per screen: every amount and
+    #: every date in the app needs them, so a separate request would mean either a second
+    #: round trip before the first paint or a hardcoded "INR" standing in until it lands -
+    #: and a figure that renders in the wrong currency for a moment is worse than one that
+    #: renders late.
+    currency: str
+    timezone: str
+    fiscal_year_start_month: int
+
 
 class AuthenticatedUser(ResponseSchema):
     """The ``/auth/me`` payload - everything the client needs to render a shell.

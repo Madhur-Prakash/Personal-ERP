@@ -45,6 +45,7 @@ import {
 } from '@/features/analytics/api';
 import { cn } from '@/lib/cn';
 import { formatCompact, formatDate, formatMoney, isZeroMoney } from '@/lib/format';
+import { localeSettings } from '@/lib/locale';
 
 export function AnalyticsPage() {
   const [period, setPeriod] = useState<Period>('this_fiscal_year');
@@ -81,7 +82,9 @@ export function AnalyticsPage() {
     queryFn: () => analyticsApi.controlChecks(),
   });
 
-  const currency = dashboard?.currency ?? 'INR';
+  // The organization's currency, not a literal: the response carries one, but the
+  // fallback used to be 'INR' whatever the books were kept in.
+  const currency = dashboard?.currency ?? localeSettings().currency;
 
   return (
     <div>

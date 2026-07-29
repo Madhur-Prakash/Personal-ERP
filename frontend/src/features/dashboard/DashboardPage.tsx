@@ -39,6 +39,7 @@ import { useAuth } from '@/features/auth/AuthProvider';
 import { organizationsApi } from '@/features/organizations/api';
 import { cn } from '@/lib/cn';
 import { formatCompact, formatDate, formatMoney, formatRelative, isZeroMoney } from '@/lib/format';
+import { localeSettings } from '@/lib/locale';
 
 /**
  * The dashboard.
@@ -126,7 +127,7 @@ export function DashboardPage() {
     );
   }
 
-  const currency = dashboard?.currency ?? 'INR';
+  const currency = dashboard?.currency ?? localeSettings().currency;
 
   return (
     <div>

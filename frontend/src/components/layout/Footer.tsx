@@ -30,6 +30,7 @@ import { analyticsApi } from '@/features/analytics/api';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { env } from '@/lib/env';
 import { formatDate } from '@/lib/format';
+import { localeSettings } from '@/lib/locale';
 
 /**
  * "1 April to 31 March", from the month the year opens in.
@@ -40,7 +41,9 @@ import { formatDate } from '@/lib/format';
  */
 function fiscalYearSpan(startMonth: number): string {
   const monthName = (month: number) =>
-    new Intl.DateTimeFormat('en-IN', { month: 'long' }).format(new Date(2000, month - 1, 1));
+    new Intl.DateTimeFormat(localeSettings().locale, { month: 'long' }).format(
+      new Date(2000, month - 1, 1),
+    );
   // The last month is the one before the start, wrapping December → January.
   const endMonth = startMonth === 1 ? 12 : startMonth - 1;
   // February is 28 days in three years out of four, so naming a day would be wrong in the
@@ -174,7 +177,7 @@ export function Footer() {
 
       <div className="border-border/60 mt-7 flex flex-col gap-3 border-t pt-5 sm:flex-row sm:items-start sm:justify-between">
         <p className="max-w-3xl leading-relaxed">
-          This software  is self-hosted ERP and accounting platform
+          This software is self-hosted ERP and accounting platform
         </p>
 
         <p className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">

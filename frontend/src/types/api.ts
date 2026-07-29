@@ -22,6 +22,11 @@ export interface OrganizationSummary {
   role_name: string;
   role_slug: string;
   is_owner: boolean;
+  /** How this organization's figures and dates are rendered. On the session payload
+   *  because every screen needs them before its first paint. */
+  currency: string;
+  timezone: string;
+  fiscal_year_start_month: number;
 }
 
 export interface AuthenticatedUser {

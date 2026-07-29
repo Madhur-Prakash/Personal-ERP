@@ -17,6 +17,7 @@ import { useState } from 'react';
 import { Input } from '@/components/ui/Input';
 import { analyticsApi } from '@/features/analytics/api';
 import { cn } from '@/lib/cn';
+import { localeSettings } from '@/lib/locale';
 
 export interface DateRange {
   from_date: string;
@@ -99,7 +100,10 @@ export function useReportRange(): {
     queryFn: () => analyticsApi.periods(),
   });
 
-  const fiscalStartMonth = periods?.fiscal_year_start_month ?? 4;
+  // Falls back to the session's own value rather than a hardcoded April, so the presets
+  // match the organization's year even in the instant before `/analytics/periods` lands.
+  const fiscalStartMonth =
+    periods?.fiscal_year_start_month ?? localeSettings().fiscalYearStartMonth;
   // The server's today, in the organization's timezone - not the browser's.
   const today = periods?.today ? new Date(`${periods.today}T00:00:00`) : new Date();
 

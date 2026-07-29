@@ -1206,6 +1206,9 @@ class AuthService:
                 role_name=membership.role.name,
                 role_slug=membership.role.slug,
                 is_owner=membership.is_owner,
+                currency=membership.organization.currency,
+                timezone=membership.organization.timezone,
+                fiscal_year_start_month=membership.organization.fiscal_year_start_month,
             )
             for membership in memberships
         ]

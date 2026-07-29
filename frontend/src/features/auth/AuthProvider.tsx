@@ -11,6 +11,7 @@ import {
 
 import { authApi } from '@/features/auth/api';
 import { bootstrapSession, setAccessToken, setSessionExpiredHandler } from '@/lib/api';
+import { setLocaleSettings } from '@/lib/locale';
 import type { AuthenticatedUser, TokenResponse } from '@/types/api';
 
 interface AuthContextValue {
@@ -47,19 +48,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const queryClient = useQueryClient();
 
+  /**
+   * Set the principal, and adopt their organization's currency, timezone, and financial
+   * year at the same moment.
+   *
+   * One function rather than a `setUser` call plus a reminder, because the two must never
+   * drift: the formatters read those settings, so a principal set without them renders
+   * every amount on the next paint in the wrong currency. Applied before the re-render
+   * this triggers, so the first paint after signing in is already correct.
+   */
+  const applyPrincipal = useCallback((principal: AuthenticatedUser | null) => {
+    setLocaleSettings(principal?.active_organization ?? null);
+    setUser(principal);
+  }, []);
+
   const clearSession = useCallback(() => {
     setAccessToken(null);
-    setUser(null);
+    applyPrincipal(null);
     // Drop every cached query: leaving another user's data in the cache after a
     // sign-out on a shared machine would leak it to the next person.
     queryClient.clear();
-  }, [queryClient]);
+  }, [queryClient, applyPrincipal]);
 
   // Called by the HTTP layer when a refresh fails - the session is genuinely
   // over, not merely stale.
   useEffect(() => {
     setSessionExpiredHandler(clearSession);
-  }, [clearSession]);
+  }, [clearSession, applyPrincipal]);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (restored) {
           const principal = await authApi.me();
-          if (!cancelled) setUser(principal);
+          if (!cancelled) applyPrincipal(principal);
         }
       } catch {
         if (!cancelled) clearSession();
@@ -84,12 +99,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [clearSession]);
+  }, [clearSession, applyPrincipal]);
 
-  const applySession = useCallback((tokens: TokenResponse) => {
-    setAccessToken(tokens.access_token);
-    setUser(tokens.user);
-  }, []);
+  const applySession = useCallback(
+    (tokens: TokenResponse) => {
+      setAccessToken(tokens.access_token);
+      applyPrincipal(tokens.user);
+    },
+    [applyPrincipal],
+  );
 
   const signOut = useCallback(
     async (allDevices = false) => {
@@ -107,11 +125,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      setUser(await authApi.me());
+      applyPrincipal(await authApi.me());
     } catch {
       clearSession();
     }
-  }, [clearSession]);
+  }, [clearSession, applyPrincipal]);
 
   const switchOrganization = useCallback(
     async (organizationId: string) => {
@@ -119,11 +137,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // embedded in the token, so the old one cannot be reused.
       const tokens = await authApi.switchOrganization(organizationId);
       setAccessToken(tokens.access_token);
-      setUser(tokens.user);
+      applyPrincipal(tokens.user);
       // Every cached query was scoped to the previous organization.
       queryClient.clear();
     },
-    [queryClient],
+    [queryClient, applyPrincipal],
   );
 
   const can = useCallback(

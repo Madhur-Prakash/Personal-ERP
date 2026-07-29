@@ -339,6 +339,15 @@ class TestMe:
 
         assert body["email"] == user.email
         assert body["active_organization"]["id"] == str(organization.id)
+
+        # The rendering settings ride along, so no screen has to fetch them or fall back to
+        # a hardcoded "INR" for the first paint.
+        assert body["active_organization"]["currency"] == organization.currency
+        assert body["active_organization"]["timezone"] == organization.timezone
+        assert (
+            body["active_organization"]["fiscal_year_start_month"]
+            == organization.fiscal_year_start_month
+        )
         assert body["active_organization"]["is_owner"] is True
         # The owner holds every permission in the catalogue.
         from app.modules.rbac.permissions import ALL_PERMISSION_VALUES

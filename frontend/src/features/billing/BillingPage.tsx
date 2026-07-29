@@ -40,6 +40,7 @@ import {
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { formatDate, formatMoney } from '@/lib/format';
+import { localeSettings } from '@/lib/locale';
 
 export function BillingPage() {
   const [composing, setComposing] = useState<Direction | null>(null);
@@ -68,7 +69,7 @@ export function BillingPage() {
       }),
   });
 
-  const currency = options?.currency ?? 'INR';
+  const currency = options?.currency ?? localeSettings().currency;
 
   return (
     <div>
@@ -352,9 +353,7 @@ function EntryForm({
               placeholder={direction === 'in' ? 'Walk-in customer' : 'Airtel'}
               value={party}
               onChange={(event) => setParty(event.target.value)}
-              hint={
-                direction === 'in' ? 'Who the money came from.' : 'Who the money went to.'
-              }
+              hint={direction === 'in' ? 'Who the money came from.' : 'Who the money went to.'}
             />
             <Input
               label="Reference"

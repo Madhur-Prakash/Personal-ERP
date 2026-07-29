@@ -48,6 +48,7 @@ from app.modules.auth.dependencies import (
     ActiveOrganizationId,
     CurrentUser,
     DbSession,
+    OrganizationToday,
     RequestCtx,
     require_permission,
 )
@@ -131,6 +132,7 @@ async def list_accounts(
     organization_id: ActiveOrganizationId,
     chart: ChartDep,
     reporting: ReportingDep,
+    today: OrganizationToday,
     _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_READ))],
     account_type: Annotated[AccountType | None, Query()] = None,
     include_inactive: Annotated[bool, Query()] = False,
@@ -144,7 +146,7 @@ async def list_accounts(
         include_inactive=include_inactive,
         postable_only=postable_only,
     )
-    effective = as_of or dt.date.today()
+    effective = as_of or today
     balances = await reporting.accounts.balances(organization_id, to_date=effective)
 
     result: list[AccountWithBalance] = []
@@ -478,6 +480,7 @@ reports_router = APIRouter(prefix="/reports", tags=["Financial reports"])
 async def trial_balance(
     organization_id: ActiveOrganizationId,
     reporting: ReportingDep,
+    today: OrganizationToday,
     _: Annotated[None, Depends(require_permission(Permission.REPORT_READ))],
     as_of: Annotated[dt.date | None, Query()] = None,
     from_date: Annotated[dt.date | None, Query()] = None,
@@ -486,7 +489,7 @@ async def trial_balance(
     """Total debits must equal total credits - see `is_balanced`."""
     return await reporting.trial_balance(
         organization_id,
-        as_of=as_of or dt.date.today(),
+        as_of=as_of or today,
         from_date=from_date,
         include_zero=include_zero,
     )
@@ -507,6 +510,7 @@ async def profit_and_loss(
 async def balance_sheet(
     organization_id: ActiveOrganizationId,
     reporting: ReportingDep,
+    today: OrganizationToday,
     _: Annotated[None, Depends(require_permission(Permission.REPORT_READ))],
     as_of: Annotated[dt.date | None, Query()] = None,
 ) -> BalanceSheet:
@@ -515,7 +519,7 @@ async def balance_sheet(
     `current_period_earnings` carries this year's profit, which is not yet in
     retained earnings until the year is closed.
     """
-    return await reporting.balance_sheet(organization_id, as_of=as_of or dt.date.today())
+    return await reporting.balance_sheet(organization_id, as_of=as_of or today)
 
 
 @reports_router.get("/cash-flow", response_model=CashFlowStatement, summary="Cash flow")

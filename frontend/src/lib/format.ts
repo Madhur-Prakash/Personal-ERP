@@ -1,9 +1,19 @@
 /**
  * Formatting helpers.
  *
- * `Intl` formatters are cached: constructing one costs roughly as much as
- * formatting a hundred values, and a data table calls these per cell per render.
+ * **Nothing here hardcodes a currency, a locale, or a timezone.** Every default comes from
+ * `localeSettings()`, which holds the signed-in organization's own settings - so changing
+ * the currency in Settings changes every amount on every screen, with no call site touched.
+ * The values were literal `'INR'` and `'en-IN'` defaults, which meant an organization
+ * keeping books in dollars still saw rupees everywhere.
+ *
+ * Read at call time, never captured at module load: the settings arrive with the session,
+ * which is after this module is imported.
+ *
+ * `Intl` formatters are cached: constructing one costs roughly as much as formatting a
+ * hundred values, and a data table calls these per cell per render.
  */
+import { localeSettings } from '@/lib/locale';
 
 const currencyCache = new Map<string, Intl.NumberFormat>();
 
@@ -21,34 +31,64 @@ function currencyFormatter(currency: string, locale: string): Intl.NumberFormat 
   return formatter;
 }
 
-/** Format money. Defaults to INR/en-IN, which lakh-groups (₹1,20,000). */
-export function formatCurrency(amount: number, currency = 'INR', locale = 'en-IN'): string {
-  return currencyFormatter(currency, locale).format(amount);
+/** Format money in the organization's currency. */
+export function formatCurrency(amount: number, currency?: string, locale?: string): string {
+  const settings = localeSettings();
+  return currencyFormatter(currency ?? settings.currency, locale ?? settings.locale).format(amount);
 }
 
 /** Abbreviate a large number for a KPI tile: 1.2K, 3.4M, 1.1Cr. */
-export function formatCompact(value: number, locale = 'en-IN'): string {
-  return new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(
-    value,
-  );
+export function formatCompact(value: number, locale?: string): string {
+  return new Intl.NumberFormat(locale ?? localeSettings().locale, {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value);
 }
 
-export function formatNumber(value: number, locale = 'en-IN'): string {
-  return new Intl.NumberFormat(locale).format(value);
+export function formatNumber(value: number, locale?: string): string {
+  return new Intl.NumberFormat(locale ?? localeSettings().locale).format(value);
 }
 
 export function formatPercent(value: number, fractionDigits = 1): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(fractionDigits)}%`;
 }
 
-export function formatDate(value: string | Date, locale = 'en-IN'): string {
+/** Matches `YYYY-MM-DD` with no time component. */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Format a date.
+ *
+ * **A date-only value is not converted between timezones, and that is the whole subtlety
+ * here.** `"2026-07-30"` is a calendar date - the day an entry was posted - not an instant.
+ * `new Date()` parses it as midnight UTC, so rendering it in a zone behind UTC would show
+ * the 29th: every entry dated the 1st of a month would appear to fall in the previous one,
+ * and a report filtered by month would disagree with the rows it listed. So a date-only
+ * string is pinned to UTC, which returns the same calendar day to every viewer.
+ *
+ * A full timestamp *is* an instant, and is shown in the organization's zone - because
+ * "which day did this happen on" is a question about the organization's clock, not the
+ * clock of whoever is looking.
+ */
+export function formatDate(value: string | Date, locale?: string): string {
+  const settings = localeSettings();
+  const dateOnly = typeof value === 'string' && DATE_ONLY.test(value);
   const date = typeof value === 'string' ? new Date(value) : value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(date);
+
+  return new Intl.DateTimeFormat(locale ?? settings.locale, {
+    dateStyle: 'medium',
+    timeZone: dateOnly ? 'UTC' : settings.timeZone,
+  }).format(date);
 }
 
-export function formatDateTime(value: string | Date, locale = 'en-IN'): string {
+export function formatDateTime(value: string | Date, locale?: string): string {
+  const settings = localeSettings();
   const date = typeof value === 'string' ? new Date(value) : value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  return new Intl.DateTimeFormat(locale ?? settings.locale, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: settings.timeZone,
+  }).format(date);
 }
 
 /**
@@ -99,12 +139,13 @@ export function initials(name: string, fallback = '?'): string {
  */
 export function formatMoney(
   value: string | null | undefined,
-  currency = 'INR',
-  locale = 'en-IN',
+  currency?: string,
+  locale?: string,
 ): string {
-  if (value === null || value === undefined || value === '')
-    return currencyFormatter(currency, locale).format(0);
-  return currencyFormatter(currency, locale).format(value as unknown as number);
+  const settings = localeSettings();
+  const formatter = currencyFormatter(currency ?? settings.currency, locale ?? settings.locale);
+  if (value === null || value === undefined || value === '') return formatter.format(0);
+  return formatter.format(value as unknown as number);
 }
 
 /**
@@ -140,9 +181,9 @@ export function isNegativeMoney(value: string | null | undefined): boolean {
  *
  * Exact, like `formatMoney`: the string goes to `Intl` untouched, never through `Number`.
  */
-export function formatAmount(value: string | null | undefined, locale = 'en-IN'): string {
+export function formatAmount(value: string | null | undefined, locale?: string): string {
   if (value === null || value === undefined || value === '') return '0.00';
-  return new Intl.NumberFormat(locale, {
+  return new Intl.NumberFormat(locale ?? localeSettings().locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value as unknown as number);
