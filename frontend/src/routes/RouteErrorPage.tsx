@@ -9,7 +9,7 @@ import { env } from '@/lib/env';
  * Route-level error boundary.
  *
  * Shows the request id when the failure came from the API, because that is what
- * makes a user report actionable — it maps directly to the backend log lines for
+ * makes a user report actionable - it maps directly to the backend log lines for
  * that exact request. The stack trace is shown in development only; in
  * production it would leak internals to no benefit.
  */

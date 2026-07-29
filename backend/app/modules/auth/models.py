@@ -1,4 +1,4 @@
-"""Session persistence — refresh tokens and device history in one table.
+"""Session persistence - refresh tokens and device history in one table.
 
 One row per sign-in. It serves three purposes at once:
 
@@ -10,7 +10,7 @@ One row per sign-in. It serves three purposes at once:
   which is what a security-conscious user wants to audit.
 
 Modelling these separately would mean three tables written on every login with
-identical lifetimes — the same fact recorded three times.
+identical lifetimes - the same fact recorded three times.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ class UserSession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     #: Set when this session's token is rotated, pointing at the replacement.
     #: Lets reuse detection distinguish "stolen token replayed" from "client
-    #: retried after a dropped response" — the latter is benign.
+    #: retried after a dropped response" - the latter is benign.
     rotated_to_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("user_session.id", ondelete="SET NULL")
     )

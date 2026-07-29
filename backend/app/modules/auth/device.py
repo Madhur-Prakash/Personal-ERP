@@ -1,7 +1,7 @@
 """User-agent summarisation for device history.
 
-Deliberately crude. The goal is a label a person recognises in a session list —
-"Chrome on Windows", "Safari on iPhone" — so they can spot the entry that is not
+Deliberately crude. The goal is a label a person recognises in a session list -
+"Chrome on Windows", "Safari on iPhone" - so they can spot the entry that is not
 theirs. It is not analytics, and it is never a security control: the user agent is
 client-supplied and trivially forged.
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import Final
 
-#: Order matters — the first match wins. Chrome's UA contains "Safari", Edge's
+#: Order matters - the first match wins. Chrome's UA contains "Safari", Edge's
 #: contains both "Chrome" and "Safari", so the most specific brands come first.
 _BROWSERS: Final[tuple[tuple[str, str], ...]] = (
     (r"Edg[eA]?/", "Edge"),

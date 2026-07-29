@@ -123,7 +123,7 @@ Python 3.13 has no `uuid.uuid7()`, so it is assembled in
 asserting version, variant, ordering, and timestamp round-trip.
 
 The column also has `server_default gen_random_uuid()` as a fallback for raw SQL
-inserts. Those yield a v4 — only ORM inserts get the time-ordered v7.
+inserts. Those yield a v4 - only ORM inserts get the time-ordered v7.
 
 ### Constraint naming convention
 
@@ -149,7 +149,7 @@ accidental deletion of an entire book of accounts has to be reversible.
 remember. Forgetting that filter in one query is how "deleted" customers reappear
 on an invoice.
 
-Join rows (`organization_member`) *are* hard-deleted — they are not business
+Join rows (`organization_member`) *are* hard-deleted - they are not business
 documents, and the audit trail preserves the fact that the person was there.
 
 ### Table naming
@@ -169,7 +169,7 @@ Beyond the primary keys and unique constraints:
 
 | Index | Purpose |
 | --- | --- |
-| `ix_app_user_email` (unique) | Login lookup — the hottest query in the system |
+| `ix_app_user_email` (unique) | Login lookup - the hottest query in the system |
 | `ix_app_user_active` partial `WHERE deleted_at IS NULL` | Active-user scans skip deleted rows entirely |
 | `ix_organization_slug` (unique) | Slug resolution |
 | `uq_member_org_user` | A user joins an organization at most once |
@@ -186,8 +186,8 @@ Beyond the primary keys and unique constraints:
 **Partial indexes are doing real work here.** `uq_member_single_owner` is the
 clearest example: a plain unique index on `organization_id` would allow only one
 member per organization, which is nonsense. Restricting it to
-`WHERE is_owner IS TRUE` expresses exactly the intended invariant — one owner,
-many members — at the database level, where application code cannot bypass it. A
+`WHERE is_owner IS TRUE` expresses exactly the intended invariant - one owner,
+many members - at the database level, where application code cannot bypass it. A
 test asserts a second owner insert raises `IntegrityError`.
 
 The same technique gives `uq_invitation_pending_email` its meaning: an address can
@@ -199,8 +199,8 @@ have many *historical* invitations but only one *pending* one.
 
 Alembic, run over asyncpg via `connection.run_sync`.
 
-The obvious alternative — strip `+asyncpg` from the DSN and let SQLAlchemy fall
-back to psycopg2 — means installing and maintaining a second PostgreSQL driver
+The obvious alternative - strip `+asyncpg` from the DSN and let SQLAlchemy fall
+back to psycopg2 - means installing and maintaining a second PostgreSQL driver
 whose only job is migrations, and being exposed to behavioural differences between
 the two exactly where correctness matters most.
 
@@ -208,7 +208,7 @@ the two exactly where correctness matters most.
 
 ```bash
 make migration m="add invoice tables"   # autogenerate
-# review the generated file — always
+# review the generated file - always
 make migrate                            # apply
 make db-check                            # assert no drift
 make rollback                            # undo the last one
@@ -238,7 +238,7 @@ type really did change.
 
 `Base.metadata` only knows about classes that have been imported.
 [`db/registry.py`](../backend/app/db/registry.py) imports every model, and adding
-one there must happen in the same commit as the model itself — otherwise
+one there must happen in the same commit as the model itself - otherwise
 autogenerate silently omits the table and produces an empty migration.
 
 ---
@@ -269,7 +269,7 @@ Truncating tables between tests would be slower, would race under parallel
 execution, and would leave sequences and cached plans behind. Rollback gives
 byte-identical starting state every time.
 
-The test schema is built with `create_all`, not `alembic upgrade head` — the schema
+The test schema is built with `create_all`, not `alembic upgrade head` - the schema
 under test should be the one the models describe, so a stale migration cannot make
 the suite pass against a schema the code no longer matches. Migration correctness
 is verified separately by `alembic check`.
@@ -279,7 +279,7 @@ is verified separately by `alembic check`.
 ## Backups
 
 `infra/scripts/backup.sh` uses `pg_dump --format=custom`, which is compressed and
-allows selective table restore via `pg_restore` — a plain SQL dump is all or
+allows selective table restore via `pg_restore` - a plain SQL dump is all or
 nothing.
 
 Two details that matter:

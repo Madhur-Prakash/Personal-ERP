@@ -8,7 +8,7 @@ export type ButtonSize = 'sm' | 'md' | 'lg' | 'icon';
 
 /**
  * Variants as a lookup table rather than a `cva` call: one fewer dependency, and
- * the complete class string for each variant is visible in one place — which is
+ * the complete class string for each variant is visible in one place - which is
  * what you want when working out why a button looks wrong.
  */
 const VARIANTS: Record<ButtonVariant, string> = {
@@ -41,7 +41,7 @@ const BASE =
 /**
  * The button class recipe, for elements that must not be a `<button>`.
  *
- * A navigation control has to render as an `<a>` — a `<Link>` nested inside a
+ * A navigation control has to render as an `<a>` - a `<Link>` nested inside a
  * `<button>` is invalid HTML, and a `<button>` that navigates loses
  * middle-click, "open in new tab", and the browser's own affordances. This lets
  * a link look identical without pretending to be a button.

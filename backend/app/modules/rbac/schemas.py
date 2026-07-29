@@ -57,7 +57,7 @@ class RoleRead(ResponseSchema):
     name: str
     slug: str
     description: str | None = None
-    #: As stored — may contain wildcards.
+    #: As stored - may contain wildcards.
     permissions: list[str]
     is_system: bool
     is_default: bool
@@ -73,7 +73,7 @@ class RoleDetail(RoleRead):
     actually enforces. Showing only the former makes ``*:*`` opaque.
     """
 
-    #: Defaulted because ``Role`` has no such column — the value is computed and
+    #: Defaulted because ``Role`` has no such column - the value is computed and
     #: overlaid by the router, and validation of the ORM object happens first.
     effective_permissions: list[str] = Field(
         default_factory=list,

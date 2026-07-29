@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear();
   }, [queryClient]);
 
-  // Called by the HTTP layer when a refresh fails — the session is genuinely
+  // Called by the HTTP layer when a refresh fails - the session is genuinely
   // over, not merely stale.
   useEffect(() => {
     setSessionExpiredHandler(clearSession);
@@ -96,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await authApi.logout({ all_devices: allDevices });
       } catch {
-        // Sign out locally even if the call fails — the user asked to leave, and
+        // Sign out locally even if the call fails - the user asked to leave, and
         // the token expires on its own regardless.
       } finally {
         clearSession();
@@ -151,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-// The hook belongs beside its provider — they are one unit.
+// The hook belongs beside its provider - they are one unit.
 // eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);

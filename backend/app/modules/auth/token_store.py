@@ -6,7 +6,7 @@ home because each one carries a natural TTL, and expiry-as-a-feature means no
 cleanup job and no table of dead rows.
 
 Only token *digests* are used as keys, never the tokens themselves. A dump of
-Redis therefore leaks nothing replayable — the same reasoning as hashing refresh
+Redis therefore leaks nothing replayable - the same reasoning as hashing refresh
 tokens in PostgreSQL.
 
 Consumption is atomic (``GETDEL``). A one-time token that could be read and then
@@ -43,7 +43,7 @@ class OneTimeTokenStore:
     async def issue(self, payload: dict[str, Any]) -> str:
         """Mint a token and store its payload under the token's digest.
 
-        Returns the *plaintext* token — the only time it exists in the clear.
+        Returns the *plaintext* token - the only time it exists in the clear.
         """
         token = generate_token()
         await get_redis().set(
@@ -110,7 +110,7 @@ class OtpStore:
 
     A user types a code without any accompanying identifier, so the address is
     the only available lookup key. Requesting a new code overwrites the old one,
-    which keeps "the code from my most recent email" true — the behaviour users
+    which keeps "the code from my most recent email" true - the behaviour users
     expect.
     """
 
@@ -157,7 +157,7 @@ class OtpStore:
             if attempts >= MAX_OTP_ATTEMPTS:
                 await redis.delete(RedisKey.otp(email))
                 log.warning(
-                    "otp attempt budget exhausted — code destroyed",
+                    "otp attempt budget exhausted - code destroyed",
                     extra={"email": email, "attempts": attempts},
                 )
             return False
@@ -280,7 +280,7 @@ class TokenEpochStore:
     """Per-user counter that invalidates outstanding access tokens.
 
     Access tokens are stateless JWTs, so they cannot be individually revoked
-    without a database lookup per request — which would defeat the point. Instead
+    without a database lookup per request - which would defeat the point. Instead
     each token carries the user's epoch, and bumping the epoch makes every
     already-issued token stale immediately.
 
@@ -308,7 +308,7 @@ class SessionRevocationStore:
     """Marks individual sessions as revoked for the access-token layer.
 
     The epoch counter is the right tool for revoking *all* of a user's tokens,
-    but too blunt for "sign out this one device" — bumping the epoch would log
+    but too blunt for "sign out this one device" - bumping the epoch would log
     the user out everywhere. This store handles the single-session case.
 
     Entries only need to outlive the longest-lived access token: once the JWT
@@ -337,7 +337,7 @@ class SessionRevocationStore:
         return bool(await get_redis().exists(RedisKey.revoked_session(str(session_id))))
 
 
-# Module-level singletons — all are stateless wrappers over the shared pool.
+# Module-level singletons - all are stateless wrappers over the shared pool.
 otp_store = OtpStore()
 revoked_sessions = SessionRevocationStore()
 login_throttle = LoginThrottle()

@@ -14,7 +14,7 @@ import { ApiError } from '@/lib/api';
 const emailSchema = z.string().min(1, 'Email is required').email('Enter a valid email address');
 
 // =============================================================================
-// Magic link — request
+// Magic link - request
 // =============================================================================
 export function MagicLinkPage() {
   const [email, setEmail] = useState('');
@@ -34,7 +34,7 @@ export function MagicLinkPage() {
     try {
       await authApi.requestMagicLink({ email: parsed.data });
     } catch {
-      // Neutral outcome regardless — see ForgotPasswordPage.
+      // Neutral outcome regardless - see ForgotPasswordPage.
     } finally {
       setSending(false);
       setSent(true);
@@ -114,7 +114,7 @@ export function MagicLinkPage() {
 }
 
 // =============================================================================
-// Magic link — consume
+// Magic link - consume
 // =============================================================================
 export function MagicLinkVerifyPage() {
   const navigate = useNavigate();

@@ -1,4 +1,4 @@
-"""The audit trail — an append-only record of who did what.
+"""The audit trail - an append-only record of who did what.
 
 Deliberately **immutable**: no ``updated_at``, no soft delete, no update path in
 the repository. An audit log that can be edited is not evidence. Stage 9 adds a
@@ -225,7 +225,7 @@ class AuditLog(Base, UUIDPrimaryKeyMixin):
 
     # --- Who ---
     #: Null for system/scheduled actions. ``SET NULL`` on user deletion so the
-    #: event survives the actor — the whole point of an audit trail.
+    #: event survives the actor - the whole point of an audit trail.
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("app_user.id", ondelete="SET NULL"), index=True
     )

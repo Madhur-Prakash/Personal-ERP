@@ -3,8 +3,8 @@
 Organised around the invariants rather than the classes, because the invariants
 are what actually matter: a violated one produces books that cannot be corrected.
 
-The reports get property-style assertions — a trial balance must sum to zero, a
-balance sheet must balance — checked against generated activity rather than
+The reports get property-style assertions - a trial balance must sum to zero, a
+balance sheet must balance - checked against generated activity rather than
 hand-computed expected values. Those identities have to hold for *any* set of
 valid entries, so asserting them is stronger than asserting one arithmetic result.
 """
@@ -69,7 +69,7 @@ async def books(db: AsyncSession, organization: Organization) -> Organization:
 
     The shared ``organization`` fixture constructs the row directly rather than
     going through ``OrganizationService.create``, so it has no books. Accounting
-    tests need them, and specifically need the fiscal year — without an open
+    tests need them, and specifically need the fiscal year - without an open
     period nothing can be posted at all.
     """
     await ChartOfAccountsService(db).seed_defaults(organization.id)
@@ -195,7 +195,7 @@ class TestChartTemplate:
 
 
 # =============================================================================
-# Invariant 1 — every entry balances
+# Invariant 1 - every entry balances
 # =============================================================================
 class TestBalanceInvariant:
     async def test_balanced_entry_posts(
@@ -294,8 +294,8 @@ class TestBalanceInvariant:
     ) -> None:
         """The CHECK constraint is real, not just an application rule.
 
-        Proves defence in depth: even a direct SQL insert — a bad data migration,
-        a manual fix in psql — cannot create an unbalanced entry.
+        Proves defence in depth: even a direct SQL insert - a bad data migration,
+        a manual fix in psql - cannot create an unbalanced entry.
         """
         period = await FiscalCalendarService(db).resolve_open_period(books.id, TODAY)
 
@@ -320,7 +320,7 @@ class TestBalanceInvariant:
 
 
 # =============================================================================
-# Invariant 2 — only postable accounts receive entries
+# Invariant 2 - only postable accounts receive entries
 # =============================================================================
 class TestPostableAccounts:
     async def test_group_account_cannot_receive_postings(
@@ -404,7 +404,7 @@ class TestPostableAccounts:
 
 
 # =============================================================================
-# Invariant 3 — posted entries are immutable
+# Invariant 3 - posted entries are immutable
 # =============================================================================
 class TestImmutability:
     async def test_posted_entry_cannot_be_edited(
@@ -474,7 +474,7 @@ class TestImmutability:
             user,
         )
         assert draft.status is EntryStatus.DRAFT
-        # A draft has consumed no number — that is the point of deferring them.
+        # A draft has consumed no number - that is the point of deferring them.
         assert draft.entry_number is None
 
         updated = await posting.update_entry(
@@ -488,7 +488,7 @@ class TestImmutability:
 
 
 # =============================================================================
-# Invariant 4 — closed periods reject postings
+# Invariant 4 - closed periods reject postings
 # =============================================================================
 class TestPeriodControl:
     async def test_posting_into_closed_period_is_refused(
@@ -648,7 +648,7 @@ class TestReversal:
         """The reversed pair must leave every balance exactly as it was.
 
         This is what makes including REVERSED entries in balance queries
-        load-bearing — excluding them would leave the mirror uncancelled.
+        load-bearing - excluding them would leave the mirror uncancelled.
         """
         cash = accounts[SystemAccount.CASH]
         revenue = accounts[SystemAccount.SALES_REVENUE]
@@ -762,7 +762,7 @@ async def activity(
     """A small but realistic set of posted transactions.
 
     Capital in, a cash sale, a credit sale, inventory bought on credit, and cost
-    of sales recognised — enough to exercise every report path.
+    of sales recognised - enough to exercise every report path.
     """
     moves = [
         (SystemAccount.CASH, SystemAccount.OWNER_CAPITAL, "500000"),
@@ -829,7 +829,7 @@ class TestProfitAndLoss:
     async def test_capital_contribution_is_not_income(
         self, reporting: ReportingService, activity: Organization
     ) -> None:
-        """Owner's capital is equity, not revenue — a classic misclassification."""
+        """Owner's capital is equity, not revenue - a classic misclassification."""
         pl = await reporting.profit_and_loss(
             activity.id, from_date=TODAY - dt.timedelta(days=1), to_date=TODAY
         )
@@ -863,7 +863,7 @@ class TestBalanceSheet:
     async def test_current_period_earnings_matches_profit_and_loss(
         self, reporting: ReportingService, activity: Organization
     ) -> None:
-        """The two statements must agree — they read the same ledger."""
+        """The two statements must agree - they read the same ledger."""
         bs = await reporting.balance_sheet(activity.id, as_of=TODAY)
         years = await reporting.calendar.list_years(activity.id)
         pl = await reporting.profit_and_loss(
@@ -944,7 +944,7 @@ class TestCashFlow:
 
 
 # =============================================================================
-# Programmatic posting — the seam later stages use
+# Programmatic posting - the seam later stages use
 # =============================================================================
 class TestProgrammaticPosting:
     async def test_post_simple_resolves_accounts_by_role(

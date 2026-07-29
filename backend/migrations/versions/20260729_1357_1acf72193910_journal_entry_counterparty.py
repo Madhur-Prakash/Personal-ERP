@@ -2,7 +2,7 @@
 
 Adds the "particulars" column of a traditional day book: who the money came from, or
 went to. Free text and nullable, deliberately not a foreign key to a customer or
-supplier — most parties in a small business are the auto driver or the electricity
+supplier - most parties in a small business are the auto driver or the electricity
 board, and requiring a master record before you can write down who paid you is the
 friction the billing screen exists to remove.
 

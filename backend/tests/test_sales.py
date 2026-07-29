@@ -1,7 +1,7 @@
 """Sales integration tests.
 
 The assertions that matter are the ones tying sales back to the ledger. An invoice
-is not a record that resembles accounting — issuing one *is* accounting, and if the
+is not a record that resembles accounting - issuing one *is* accounting, and if the
 posting is wrong the trial balance stops balancing. So the tests check the ledger
 after each sales action, not just the sales tables.
 """
@@ -73,7 +73,7 @@ async def books(db: AsyncSession, organization: Organization) -> Organization:
 
 @pytest.fixture
 async def customer(db: AsyncSession, books: Organization, user: User):
-    """A Maharashtra customer — same state as the seller, so CGST + SGST."""
+    """A Maharashtra customer - same state as the seller, so CGST + SGST."""
     return await CustomerService(db).create(
         books.id,
         CustomerCreate(
@@ -88,7 +88,7 @@ async def customer(db: AsyncSession, books: Organization, user: User):
 
 @pytest.fixture
 async def outstate_customer(db: AsyncSession, books: Organization, user: User):
-    """A Karnataka customer — different state, so IGST."""
+    """A Karnataka customer - different state, so IGST."""
     return await CustomerService(db).create(
         books.id,
         CustomerCreate(name="Bengaluru Traders", gstin="29AAAAA0000A1Z5"),
@@ -297,7 +297,7 @@ class TestDocumentChain:
 
 
 # =============================================================================
-# Invoice posting — the ledger boundary
+# Invoice posting - the ledger boundary
 # =============================================================================
 class TestInvoicePosting:
     async def test_posting_produces_correct_double_entry(
@@ -403,7 +403,7 @@ class TestInvoicePosting:
     async def test_revenue_is_grouped_by_account(
         self, db: AsyncSession, books: Organization, user: User, customer
     ) -> None:
-        """A five-line invoice against one revenue account makes one credit line —
+        """A five-line invoice against one revenue account makes one credit line -
         the ledger records the accounting effect, not the invoice layout."""
         invoice = await InvoiceService(db).create(
             books.id,

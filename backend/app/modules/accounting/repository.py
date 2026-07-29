@@ -7,7 +7,7 @@ report:
 
 Reversing entry *A* creates a mirror entry *B* and marks *A* as ``REVERSED``. The
 two cancel out arithmetically. So a balance query must include **both**
-``POSTED`` and ``REVERSED`` entries — excluding ``REVERSED`` would leave *B*'s
+``POSTED`` and ``REVERSED`` entries - excluding ``REVERSED`` would leave *B*'s
 mirror lines counted with nothing to cancel them, flipping the sign of every
 reversed transaction. Only ``DRAFT`` is excluded, because a draft is not yet in
 the books.
@@ -43,7 +43,7 @@ from app.modules.accounting.models import (
     PeriodStatus,
 )
 
-#: Statuses whose lines affect account balances. See the module docstring — the
+#: Statuses whose lines affect account balances. See the module docstring - the
 #: inclusion of REVERSED is load-bearing, not an oversight.
 POSTED_STATUSES: Final = (EntryStatus.POSTED, EntryStatus.REVERSED)
 
@@ -120,7 +120,7 @@ class AccountRepository(BaseRepository[Account]):
         """Aggregate debit/credit totals per account, as one query.
 
         Returned as a dict so report builders can walk the account tree in Python
-        without a query per node — the difference between one round trip and
+        without a query per node - the difference between one round trip and
         fifty-two for a chart of accounts.
 
         ``from_date`` omitted means "since inception", which is what balance-sheet
@@ -291,7 +291,7 @@ class JournalRepository(BaseRepository[Journal]):
         return (await self.session.execute(query)).scalars().all()
 
     async def get_by_type(self, organization_id: uuid.UUID, journal_type: str) -> Journal | None:
-        """Resolve the journal a given source posts to — Stage 3/4 use this."""
+        """Resolve the journal a given source posts to - Stage 3/4 use this."""
         query = (
             select(Journal)
             .where(
@@ -322,7 +322,7 @@ class SequenceRepository(BaseRepository[NumberSequence]):
 
         Locks the sequence row with ``FOR UPDATE``, so concurrent posts serialise
         on this one row rather than colliding. Because the increment is part of the
-        caller's transaction, a rollback returns the number — which a PostgreSQL
+        caller's transaction, a rollback returns the number - which a PostgreSQL
         ``SEQUENCE`` cannot do, and statutory numbering requires.
         """
         query = (
@@ -451,7 +451,7 @@ class JournalEntryRepository(BaseRepository[JournalEntry]):
         """Chronological lines for one account, for the general ledger.
 
         Ordered by date then entry number so the running balance is deterministic
-        — two entries on the same day must always appear in the same order, or the
+        - two entries on the same day must always appear in the same order, or the
         printed ledger changes between runs.
         """
         query = (

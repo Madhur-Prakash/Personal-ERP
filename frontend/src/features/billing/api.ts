@@ -1,5 +1,5 @@
 /**
- * Billing API client — money in and money out.
+ * Billing API client - money in and money out.
  *
  * Amounts are `string`, as everywhere else: a JSON number is an IEEE-754 double in
  * JavaScript, and these figures post to the ledger.
@@ -18,7 +18,7 @@ export interface Category {
   name: string;
   /** Income categories cannot take money out, and vice versa. */
   direction: Direction;
-  /** The parent group's name, used for `optgroup` — nearly eighty flat options is
+  /** The parent group's name, used for `optgroup` - nearly eighty flat options is
    *  a list nobody reads to the end of. */
   group: string;
   is_default: boolean;
@@ -57,7 +57,7 @@ export interface BillingEntry {
   money_account_name: string;
 
   created_at: string;
-  /** Cancelled by a reversal. Still listed — the cancellation is part of the record. */
+  /** Cancelled by a reversal. Still listed - the cancellation is part of the record. */
   is_reversed: boolean;
 }
 
@@ -100,21 +100,21 @@ export const billingApi = {
 
   /**
    * Add a category from a name alone. The account code, parent group, and subtype are
-   * derived server-side — nobody should need to understand the chart of accounts to
+   * derived server-side - nobody should need to understand the chart of accounts to
    * file a payment under a name the built-in list does not have.
    */
   createCategory: (name: string, direction: Direction) =>
     api.post<Category>('/billing/categories', { name, direction }),
 
   /**
-   * Add a place money can sit — a second bank, a UPI wallet, a partner's petty cash.
+   * Add a place money can sit - a second bank, a UPI wallet, a partner's petty cash.
    * The seeded chart only has one till and one current account.
    */
   createMoneyAccount: (name: string, kind: MoneyKind) =>
     api.post<MoneyAccount>('/billing/money-accounts', { name, kind }),
 
   /**
-   * Cancel an entry by posting its mirror image. There is no delete and no edit —
+   * Cancel an entry by posting its mirror image. There is no delete and no edit -
    * a posted ledger entry is immutable, so an opposite entry is the only honest undo.
    */
   reverse: (id: string, reason?: string) =>

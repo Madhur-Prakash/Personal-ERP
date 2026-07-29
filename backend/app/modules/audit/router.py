@@ -1,4 +1,4 @@
-"""Audit trail endpoints. Read-only by construction — there is no write route."""
+"""Audit trail endpoints. Read-only by construction - there is no write route."""
 
 from __future__ import annotations
 

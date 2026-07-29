@@ -12,7 +12,7 @@ should not be able to use this API to discover who has an account.
 
 **Refresh token rotation with reuse detection.** Every refresh mints a new token
 and revokes the old one. If a token that was already rotated is presented again,
-one of two parties is replaying a stolen credential — and we cannot tell which —
+one of two parties is replaying a stolen credential - and we cannot tell which -
 so the entire session lineage is revoked and the event is audited as critical.
 
 **Sessions and access tokens are revoked together.** Sessions live in PostgreSQL;
@@ -153,7 +153,7 @@ class AuthService:
         Returns ``(user, organization_id)``.
 
         A duplicate email *does* return a 409 here, unlike the reset flows. The
-        alternative — pretending to succeed — leaves the user staring at a
+        alternative - pretending to succeed - leaves the user staring at a
         verification email that never arrives, with no way to recover. Signup
         endpoints are rate-limited instead, which is the appropriate control.
         """
@@ -225,7 +225,7 @@ class AuthService:
         """Create an organization, give it working books, and make the creator owner.
 
         The books used to be missing here. This path predates accounting, and when the
-        chart of accounts arrived only `POST /organizations` was updated — so anyone who
+        chart of accounts arrived only `POST /organizations` was updated - so anyone who
         signed up with an organization name got an organization with no chart and no
         fiscal year, and the billing screen greeted them with "no income accounts exist
         yet". Both paths now go through `provision_books`.
@@ -362,7 +362,7 @@ class AuthService:
         Ordering here is security-relevant. The lockout check comes first, so a
         locked account costs no hashing. The user lookup is followed by
         :func:`dummy_password_verify` on a miss, equalising response time. Only
-        after the password is confirmed do we check verification and 2FA — a
+        after the password is confirmed do we check verification and 2FA - a
         pre-password check would reveal which addresses are registered.
         """
         email = email.strip().lower()
@@ -468,7 +468,7 @@ class AuthService:
                 ip_address=ctx.ip_address,
                 user_agent=ctx.user_agent,
             )
-            # Count 2FA failures toward the same lockout budget as passwords —
+            # Count 2FA failures toward the same lockout budget as passwords -
             # otherwise the second factor is brute-forceable at leisure.
             await login_throttle.record_failure(user.email)
             raise InvalidCredentialsError("Incorrect or expired code")
@@ -527,7 +527,7 @@ class AuthService:
             if verify_password(candidate, stored):
                 # Reassign rather than mutate in place: SQLAlchemy does not track
                 # in-place mutation of a plain JSONB list, and the removal would
-                # never be persisted — leaving the code reusable forever.
+                # never be persisted - leaving the code reusable forever.
                 user.recovery_code_hashes = [h for h in user.recovery_code_hashes if h != stored]
                 await self.session.flush()
                 return True
@@ -735,7 +735,7 @@ class AuthService:
         """Generate and store a TOTP secret, returning enrolment material.
 
         The secret is written now but ``totp_enabled_at`` stays null, so 2FA is
-        not yet in force — see :attr:`User.is_two_factor_enabled`. A user who
+        not yet in force - see :attr:`User.is_two_factor_enabled`. A user who
         abandons setup is not locked out.
         """
         if user.is_two_factor_enabled:
@@ -757,7 +757,7 @@ class AuthService:
 
         Requiring a valid code first is what prevents self-lockout from a
         mis-scanned QR. Recovery codes are returned once and stored only as
-        hashes — the same reasoning as passwords.
+        hashes - the same reasoning as passwords.
         """
         if user.totp_secret is None:
             raise ConflictError("Start two-factor setup first", code="two_factor_not_started")
@@ -911,7 +911,7 @@ class AuthService:
         """Pick which org the session opens in.
 
         Prefers the user's last active org, but only if the membership is still
-        valid — a removed or suspended member must not resume there.
+        valid - a removed or suspended member must not resume there.
         """
         memberships = await self.users.active_memberships(user.id)
         if not memberships:
@@ -963,7 +963,7 @@ class AuthService:
         """Resolve the effective permission set for a user in an organization.
 
         Role grants are expanded, then per-member ``deny`` overrides subtract from
-        the result. Deny wins over grant — the safe direction, and it makes
+        the result. Deny wins over grant - the safe direction, and it makes
         "everything except approving invoices" expressible without cloning a role.
         """
         if organization_id is None:
@@ -988,7 +988,7 @@ class AuthService:
 
         The stolen-token problem: an attacker who copies a refresh token can
         refresh forever, and we cannot distinguish them from the real user. The
-        mitigation is that rotation makes reuse *detectable* — the first party to
+        mitigation is that rotation makes reuse *detectable* - the first party to
         refresh invalidates the other's copy, so the second use of an already
         rotated token is a reliable signal that two parties hold it. Response:
         revoke the whole lineage and force a fresh sign-in.
@@ -999,7 +999,7 @@ class AuthService:
 
         if session.is_revoked:
             if session.rotated_to_id is not None:
-                # A rotated token replayed — treat as compromise.
+                # A rotated token replayed - treat as compromise.
                 await self._handle_refresh_reuse(session, ctx)
             raise InvalidTokenError("Session expired. Please sign in again.")
 
@@ -1047,7 +1047,7 @@ class AuthService:
         The caller raises :class:`InvalidTokenError` the moment this returns, and
         :func:`app.db.session.get_db` rolls back on any exception. Without
         committing here, the revocation and its audit row would be discarded by
-        the very 401 that reports the breach — the endpoint would *look* correct
+        the very 401 that reports the breach - the endpoint would *look* correct
         while leaving the stolen token's lineage fully usable and recording
         nothing. That is a silent security failure, and exactly the bug this
         comment exists to prevent someone from reintroducing.
@@ -1066,7 +1066,7 @@ class AuthService:
             organization_id=session.organization_id,
             resource_type="session",
             resource_id=session.id,
-            summary="Refresh token reuse detected — session lineage revoked",
+            summary="Refresh token reuse detected - session lineage revoked",
             severity=AuditSeverity.CRITICAL,
             context={"sessions_revoked": revoked, "generation": session.generation},
             ip_address=ctx.ip_address,

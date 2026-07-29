@@ -206,7 +206,7 @@ def upgrade() -> None:
 
     1. **Values were stored as member names.** `sqlalchemy.Enum` persists
        `EntryStatus.DRAFT` as `'DRAFT'` while the API serialises `'draft'`. Any
-       SQL predicate written against the value therefore never matched — most
+       SQL predicate written against the value therefore never matched - most
        consequentially `uq_invitation_pending_email`, the partial unique index
        meant to guarantee one live invitation per email, which has been inert.
 
@@ -242,7 +242,7 @@ def downgrade() -> None:
             if name == value:
                 continue
             op.execute(
-                sa.text(  # noqa: S608 — see upgrade()
+                sa.text(  # noqa: S608 - see upgrade()
                     f"UPDATE {table} SET {column} = :name WHERE {column} = :value"
                 ).bindparams(name=name, value=value)
             )

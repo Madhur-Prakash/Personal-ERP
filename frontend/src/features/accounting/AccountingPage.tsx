@@ -1,5 +1,5 @@
 /**
- * Accounting — chart of accounts, journal entries, and the financial statements.
+ * Accounting - chart of accounts, journal entries, and the financial statements.
  *
  * One page with tabs rather than four routes: an accountant moves between the
  * trial balance and the ledger constantly, and a full route transition (with its
@@ -70,7 +70,7 @@ export function AccountingPage() {
     <div>
       <PageHeader
         title="Accounting"
-        description="Double-entry ledger. Posted entries are immutable — corrections are made by reversal."
+        description="Double-entry ledger. Posted entries are immutable - corrections are made by reversal."
       />
 
       <div
@@ -151,7 +151,7 @@ function ChartOfAccounts() {
       numeric: true,
       cell: (row) =>
         row.is_group ? (
-          <span className="text-content-muted">—</span>
+          <span className="text-content-muted">-</span>
         ) : (
           <span className={cn(isZeroMoney(row.balance) && 'text-content-muted')}>
             {formatMoney(row.balance)}
@@ -238,7 +238,7 @@ function JournalEntries() {
       cell: (row) =>
         row.status === 'reversed' ? (
           <Badge tone="warning" title="Cancelled by an opposite entry. Both remain on the record.">
-            Reversed — cancelled
+            Reversed - cancelled
           </Badge>
         ) : row.reverses_id ? (
           <Badge tone="neutral" title="This entry cancels an earlier one.">
@@ -318,7 +318,7 @@ function TrialBalanceReport() {
               <p className="text-danger text-[13px] font-semibold">Ledger does not balance</p>
               <p className="text-content-secondary text-[12px]">
                 Debits {formatMoney(data.total_debit)} ≠ credits {formatMoney(data.total_credit)}.
-                This should be impossible — contact support.
+                This should be impossible - contact support.
               </p>
             </div>
           </CardBody>
@@ -354,7 +354,7 @@ function TrialBalanceReport() {
                     // more than its own total, which is worse than hiding it: a figure
                     // in an amount column that is not in the total is simply wrong.
                     // At the table's own 13px rather than 11px. A line whose entire job
-                    // is to explain something should not be set as fine print — and the
+                    // is to explain something should not be set as fine print - and the
                     // icon carries the meaning without relying on colour alone.
                     <p className="text-warning mt-1 flex items-start gap-1.5 text-[13px]">
                       <Undo2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -372,7 +372,7 @@ function TrialBalanceReport() {
               numeric: true,
               cell: (row) =>
                 isZeroMoney(row.debit) ? (
-                  <span className="text-content-muted">—</span>
+                  <span className="text-content-muted">-</span>
                 ) : (
                   formatMoney(row.debit)
                 ),
@@ -382,7 +382,7 @@ function TrialBalanceReport() {
               numeric: true,
               cell: (row) =>
                 isZeroMoney(row.credit) ? (
-                  <span className="text-content-muted">—</span>
+                  <span className="text-content-muted">-</span>
                 ) : (
                   formatMoney(row.credit)
                 ),
@@ -418,7 +418,7 @@ function TrialBalanceReport() {
 // ---------------------------------------------------------------------------
 function ProfitAndLossReport() {
   // The range is a control now, and the fiscal-year start comes from the server rather
-  // than a hardcoded April — which was wrong for any organization on a January year and
+  // than a hardcoded April - which was wrong for any organization on a January year and
   // duplicated a rule the backend already owns.
   const { range, control } = useReportRange();
 

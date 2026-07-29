@@ -1,7 +1,7 @@
 """The user account.
 
 A user is a *global* identity, not an organization-scoped one. They authenticate
-once and switch between the organizations they belong to — see
+once and switch between the organizations they belong to - see
 :class:`app.modules.organizations.models.OrganizationMember`.
 
 The table is named ``app_user`` because ``user`` is a reserved word in
@@ -49,7 +49,7 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # --- Two-factor authentication (TOTP) ---
-    #: Fernet-encrypted at rest — a leaked database must not yield working
+    #: Fernet-encrypted at rest - a leaked database must not yield working
     #: second factors. See :func:`app.core.security.encrypt_secret`.
     totp_secret: Mapped[str | None] = mapped_column(String(500))
     totp_enabled_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
@@ -69,7 +69,7 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="Asia/Kolkata")
     theme: Mapped[str] = mapped_column(String(10), nullable=False, default="system")
 
-    #: The organization to open on next sign-in. Convenience only — never a
+    #: The organization to open on next sign-in. Convenience only - never a
     #: source of authority; permissions always come from the membership row.
     last_organization_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
 

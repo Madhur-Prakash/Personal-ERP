@@ -1,4 +1,4 @@
-"""Goods receipts, bills, and supplier payments — the ledger-writing half.
+"""Goods receipts, bills, and supplier payments - the ledger-writing half.
 
 See :mod:`app.modules.purchasing.service` for the two-step accrual model and why
 receipt and bill post separately.
@@ -201,7 +201,7 @@ class GoodsReceiptService(PurchasingBase):
     ) -> GoodsReceipt:
         """Move the stock and recognise the accrual.
 
-        Only the **accepted** quantity enters stock — rejected units are recorded on
+        Only the **accepted** quantity enters stock - rejected units are recorded on
         the line for a supplier claim but were never really received, and adding them
         would overstate both inventory and the liability.
         """
@@ -256,7 +256,7 @@ class GoodsReceiptService(PurchasingBase):
                 JournalEntryCreate(
                     journal_id=journal.id,
                     entry_date=receipt.receipt_date,
-                    narration=f"Goods received {receipt.receipt_number} — {receipt.supplier.name}",
+                    narration=f"Goods received {receipt.receipt_number} - {receipt.supplier.name}",
                     reference=receipt.supplier_reference or receipt.receipt_number,
                     post=True,
                     lines=[
@@ -292,7 +292,7 @@ class GoodsReceiptService(PurchasingBase):
             organization_id=organization_id,
             resource_type="goods_receipt",
             resource_id=receipt.id,
-            summary=f"Posted {receipt.receipt_number} — stock in, {posted_value} accrued",
+            summary=f"Posted {receipt.receipt_number} - stock in, {posted_value} accrued",
             **_audit_ctx(ctx),
         )
         log.info(
@@ -604,7 +604,7 @@ class BillService(PurchasingBase):
                         )
                     )
 
-        # Input GST is an asset — recoverable against output tax.
+        # Input GST is an asset - recoverable against output tax.
         if bill.tax_total > 0:
             gst_input = await self.chart.resolve_system_account(
                 organization_id, SystemAccount.GST_INPUT
@@ -642,7 +642,7 @@ class BillService(PurchasingBase):
             JournalEntryLineInput(
                 account_id=payable.id,
                 credit=bill.grand_total,
-                description=f"{bill.supplier.name} — {bill.bill_number}",
+                description=f"{bill.supplier.name} - {bill.bill_number}",
             )
         )
 
@@ -651,7 +651,7 @@ class BillService(PurchasingBase):
             JournalEntryCreate(
                 journal_id=journal.id,
                 entry_date=bill.bill_date,
-                narration=f"Bill {bill.bill_number} — {bill.supplier.name}",
+                narration=f"Bill {bill.bill_number} - {bill.supplier.name}",
                 reference=bill.supplier_invoice_number or bill.bill_number,
                 post=True,
                 lines=lines,
@@ -683,7 +683,7 @@ class BillService(PurchasingBase):
         """Where a bill line's cost lands.
 
         Explicit override, then the product's inventory account for stocked items,
-        then a plain expense. A consumable is expensed on purchase by design — it is
+        then a plain expense. A consumable is expensed on purchase by design - it is
         not held as inventory.
         """
         if line.expense_account_id is not None:
@@ -869,7 +869,7 @@ class SupplierPaymentService(PurchasingBase):
             JournalEntryCreate(
                 journal_id=journal.id,
                 entry_date=payment.payment_date,
-                narration=f"Payment {payment.payment_number} — {supplier.name}",
+                narration=f"Payment {payment.payment_number} - {supplier.name}",
                 reference=data.reference or payment.payment_number,
                 post=True,
                 lines=[
@@ -931,7 +931,7 @@ class SupplierPaymentService(PurchasingBase):
         actor: User,
         ctx: RequestContext | None,
     ) -> None:
-        """Attach amounts to bills. No further posting — the payment already cleared
+        """Attach amounts to bills. No further posting - the payment already cleared
         payables in aggregate."""
         requested = sum((amount for _, amount in allocations), ZERO)
         if requested > payment.unallocated_amount:
@@ -963,7 +963,7 @@ class SupplierPaymentService(PurchasingBase):
                 )
             if not bill.status.is_posted:
                 raise BusinessRuleError(
-                    f"Bill {bill.bill_number} is {bill.status} — only a posted bill can be paid."
+                    f"Bill {bill.bill_number} is {bill.status} - only a posted bill can be paid."
                 )
             if amount > bill.outstanding:
                 raise BusinessRuleError(

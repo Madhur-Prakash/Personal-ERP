@@ -13,7 +13,7 @@ Precision is ``NUMERIC(18, 4)``:
 * **4 decimal places**, not 2, because unit prices and tax rates need sub-paisa
   precision during calculation. Rounding happens once, at presentation, not
   repeatedly mid-computation.
-* **18 total digits** leaves 14 for the integer part — up to ~99 trillion, which
+* **18 total digits** leaves 14 for the integer part - up to ~99 trillion, which
   is beyond any SME's books even in a low-denomination currency.
 """
 
@@ -28,7 +28,7 @@ from sqlalchemy import Date, Numeric, String
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import mapped_column
 
-#: Monetary amount. Exact decimal — see the module docstring.
+#: Monetary amount. Exact decimal - see the module docstring.
 Money = Annotated[Decimal, mapped_column(Numeric(18, 4))]
 
 #: A quantity of stock. Same exactness argument; 4dp covers fractional units
@@ -55,12 +55,12 @@ def enum_column[E: StrEnum](enum_cls: type[E], *, length: int) -> SAEnum:
     """A ``StrEnum`` column stored as its **value**, with a real CHECK constraint.
 
     Every enum column in the schema goes through this. Two SQLAlchemy defaults
-    make the naive spelling — ``Enum(MyEnum, native_enum=False)`` — quietly wrong:
+    make the naive spelling - ``Enum(MyEnum, native_enum=False)`` - quietly wrong:
 
     1. **It stores the member *name*, not the value.** ``EntryStatus.DRAFT``
        persists as ``'DRAFT'`` while the API serialises ``'draft'``, so the
        database and the JSON disagree. Worse, any SQL predicate written against
-       the value — a partial index ``WHERE status = 'pending'``, a ``CHECK`` —
+       the value - a partial index ``WHERE status = 'pending'``, a ``CHECK`` -
        silently never matches, so the constraint exists but enforces nothing.
        ``values_callable`` fixes this by persisting ``member.value``.
 
@@ -68,7 +68,7 @@ def enum_column[E: StrEnum](enum_cls: type[E], *, length: int) -> SAEnum:
        ``CHECK`` at all: the column is an unconstrained ``VARCHAR`` that will
        accept any string a bad migration or manual UPDATE puts there.
 
-    ``native_enum=False`` is still deliberate — a real PostgreSQL ``ENUM`` type
+    ``native_enum=False`` is still deliberate - a real PostgreSQL ``ENUM`` type
     needs ``ALTER TYPE`` to gain a value, which is awkward to reverse. A
     ``VARCHAR`` plus ``CHECK`` is a one-line, fully reversible migration.
     """

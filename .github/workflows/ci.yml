@@ -1,12 +1,12 @@
 # =============================================================================
-# CI — runs on every push and pull request.
+# CI - runs on every push and pull request.
 #
 # Backend and frontend run as independent jobs so a frontend type error does not
 # hide a backend test failure, and both report in parallel.
 #
 # The backend job runs against real PostgreSQL and Redis service containers
 # rather than mocks or SQLite. The test suite verifies partial unique indexes,
-# JSONB behaviour, and cursor pagination — none of which SQLite implements the
+# JSONB behaviour, and cursor pagination - none of which SQLite implements the
 # same way, so passing against a substitute would prove nothing.
 # =============================================================================
 
@@ -108,8 +108,8 @@ jobs:
 
       - name: Type check (mypy)
         # Blocking. It was non-blocking while a tail of third-party stub gaps was
-        # burned down; that work is finished — strict mypy is clean across all
-        # source files — so the gate is enforced to keep it that way. A clean
+        # burned down; that work is finished - strict mypy is clean across all
+        # source files - so the gate is enforced to keep it that way. A clean
         # typechecker that cannot fail the build silently rots.
         run: uv run mypy app
 
@@ -124,7 +124,7 @@ jobs:
           uv run alembic upgrade head
 
       - name: Verify no schema drift
-        # Fails if the models describe a schema the migrations do not produce —
+        # Fails if the models describe a schema the migrations do not produce -
         # i.e. someone changed a model without generating a migration.
         run: uv run alembic check
 
@@ -188,7 +188,7 @@ jobs:
     name: Docker images
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Only after both test jobs pass — no point building an image from code that
+    # Only after both test jobs pass - no point building an image from code that
     # does not compile.
     needs: [backend, frontend]
 

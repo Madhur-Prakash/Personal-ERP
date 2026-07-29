@@ -47,7 +47,7 @@ import { formatCompact, formatDate, formatMoney, formatRelative, isZeroMoney } f
  * existed these tiles showed illustrative numbers labelled "Sample", because an
  * unlabelled fake figure in an accounting product is the most damaging thing a page
  * can do. They now come from `/analytics/dashboard`, which is computed by the same
- * `ReportingService` that renders the P&L — so a tile cannot disagree with the
+ * `ReportingService` that renders the P&L - so a tile cannot disagree with the
  * statement behind it.
  *
  * Two presentation rules follow, and both are about not overclaiming:
@@ -134,7 +134,7 @@ export function DashboardPage() {
         title={`Good ${greeting()}, ${firstName}`}
         description={
           dashboard
-            ? `${dashboard.period_label} at ${user.active_organization.name} — ${formatDate(dashboard.span.start)} to ${formatDate(dashboard.span.end)}.`
+            ? `${dashboard.period_label} at ${user.active_organization.name} - ${formatDate(dashboard.span.start)} to ${formatDate(dashboard.span.end)}.`
             : `Here is what is happening at ${user.active_organization.name}.`
         }
         action={
@@ -171,7 +171,7 @@ export function DashboardPage() {
                   .map((check) => (
                     <li key={check.name}>
                       <strong>{check.name}</strong>: ledger {formatMoney(check.ledger, currency)},
-                      documents {formatMoney(check.subledger, currency)} — a difference of{' '}
+                      documents {formatMoney(check.subledger, currency)} - a difference of{' '}
                       {formatMoney(check.difference, currency)}
                     </li>
                   ))}
@@ -224,7 +224,7 @@ export function DashboardPage() {
               info={
                 <>
                   <p>
-                    Everything you earned this period — money recorded as coming in, plus any
+                    Everything you earned this period - money recorded as coming in, plus any
                     invoices you posted.
                   </p>
                   <p>
@@ -270,7 +270,7 @@ export function DashboardPage() {
               info={
                 <>
                   <p>
-                    What you actually hold across every cash and bank account, right now — not for
+                    What you actually hold across every cash and bank account, right now - not for
                     the period.
                   </p>
                   <p>
@@ -302,7 +302,7 @@ export function DashboardPage() {
                   not fully paid.
                 </p>
                 <p>
-                  It stays ₹0 if you only use the Billing screen — recording money in means the cash
+                  It stays ₹0 if you only use the Billing screen - recording money in means the cash
                   already arrived, so nobody owes you anything. This fills up only when you raise an
                   invoice under Sales and wait to be paid.
                 </p>
@@ -521,7 +521,7 @@ function greeting(): string {
 /**
  * The chart.
  *
- * **Recharts needs numbers, so `Number()` appears here — and only here.** A pixel
+ * **Recharts needs numbers, so `Number()` appears here - and only here.** A pixel
  * position does not need exact decimal arithmetic; a figure a user reads does. So the
  * plotted value is converted and the original decimal string is carried on the same
  * datum, with the tooltip formatting from the string. The geometry is approximate,
@@ -638,7 +638,7 @@ function MovementCard({
   info?: ReactNode;
 }) {
   // No percentage is possible, so say why rather than printing a misleading number.
-  // Skipped when the current figure is also zero — "no prior data" on an empty set
+  // Skipped when the current figure is also zero - "no prior data" on an empty set
   // of books is noise, not information.
   const noBasis =
     movement !== undefined && movement.change_percent === null && !isZeroMoney(movement.current);

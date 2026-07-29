@@ -5,8 +5,8 @@ Two deliberate choices:
 * **The DSN comes from :mod:`app.core.config`**, not ``alembic.ini``. One place
   builds database URLs, and no credentials live in a committed file.
 * **Migrations run over asyncpg**, the same driver the application uses. The
-  obvious alternative — strip ``+asyncpg`` and let SQLAlchemy fall back to
-  psycopg2 — means installing and maintaining a second PostgreSQL driver whose
+  obvious alternative - strip ``+asyncpg`` and let SQLAlchemy fall back to
+  psycopg2 - means installing and maintaining a second PostgreSQL driver whose
   only job is migrations, and being exposed to behavioural differences between
   the two exactly where correctness matters most. Alembic's autogenerate is
   synchronous, so it is driven through ``connection.run_sync``.
@@ -64,7 +64,7 @@ def run_migrations_offline() -> None:
     """Emit SQL to stdout instead of executing it.
 
     ``alembic upgrade head --sql`` produces a script a DBA can review and run by
-    hand — how production changes are applied where the application role has no
+    hand - how production changes are applied where the application role has no
     DDL rights. No connection is opened, so the async driver is irrelevant here.
     """
     context.configure(

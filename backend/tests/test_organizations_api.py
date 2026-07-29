@@ -2,8 +2,8 @@
 
 The emphasis is on the two failure modes that matter most in a multi-tenant ERP:
 
-* **Cross-tenant leakage** — one organization reading or mutating another's data.
-* **Self-inflicted lockout** — an organization destroying its own ability to be
+* **Cross-tenant leakage** - one organization reading or mutating another's data.
+* **Self-inflicted lockout** - an organization destroying its own ability to be
   administered (removing the owner, deleting a role people hold).
 
 Both are tested by attempting the bad thing and asserting it is refused.
@@ -494,7 +494,7 @@ class TestInvitations:
         `WHERE status = 'pending'`. It was silently inert for a while: enum columns
         stored the member *name* (`'PENDING'`), so the predicate matched no row and
         the index guaranteed nothing. The test above still passed, because the
-        service's own check caught the duplicate first — which is precisely why the
+        service's own check caught the duplicate first - which is precisely why the
         gap went unnoticed.
 
         This test bypasses the service and writes directly, so only the database
@@ -779,7 +779,7 @@ class TestRoles:
     async def test_system_role_permissions_can_be_adjusted(
         self, authed_client: AsyncClient, api: str, db: AsyncSession, organization: Organization
     ) -> None:
-        """Permissions are editable even on seeded roles — only names are fixed."""
+        """Permissions are editable even on seeded roles - only names are fixed."""
         role_id = await _role_id(db, organization, "sales")
         response = await authed_client.patch(
             f"{api}/roles/{role_id}",

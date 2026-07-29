@@ -9,11 +9,11 @@ which bill it became.
 
 Two indexes here are the feature, not tuning:
 
-* ``uq_document_org_sha256`` — unique on ``(organization_id, sha256)`` where the row
+* ``uq_document_org_sha256`` - unique on ``(organization_id, sha256)`` where the row
   is live. The same bytes are the same document, so uploading a file twice returns
   the first one instead of creating a second. Partial on ``deleted_at`` so deleting a
   document does not permanently poison its own hash.
-* ``ix_document_invoice_identity`` — ``(organization_id, supplier GSTIN, invoice
+* ``ix_document_invoice_identity`` - ``(organization_id, supplier GSTIN, invoice
   number)``. Deliberately **not** unique: paying a supplier invoice twice is the most
   expensive clerical error in payables and must be surfaced, but the values indexed
   were read by an OCR engine, and refusing a genuine invoice because a digit was

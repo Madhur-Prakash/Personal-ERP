@@ -1,8 +1,8 @@
 /**
  * A small ⓘ button that explains the thing next to it.
  *
- * Accounting software is full of terms that are precise and unfamiliar — "receivables",
- * "reversal", "control account" — and the usual answers are both bad: a manual nobody
+ * Accounting software is full of terms that are precise and unfamiliar - "receivables",
+ * "reversal", "control account" - and the usual answers are both bad: a manual nobody
  * reads, or a `title` attribute that never appears on a touch device and cannot hold a
  * sentence worth reading. So the explanation lives next to the number it explains.
  *

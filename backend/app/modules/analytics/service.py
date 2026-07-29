@@ -1,4 +1,4 @@
-"""Analytics — the numbers a business owner looks at first.
+"""Analytics - the numbers a business owner looks at first.
 
 **Analytics composes the reporting service; it does not re-query the ledger.** The
 headline revenue, expense, and profit figures come from
@@ -66,7 +66,7 @@ class Movement:
 
     current: Decimal
     previous: Decimal
-    #: ``None`` when the previous period gives no basis for a percentage — see
+    #: ``None`` when the previous period gives no basis for a percentage - see
     #: :func:`~app.modules.analytics.periods.percent_change`.
     change_percent: Decimal | None
 
@@ -223,7 +223,7 @@ class AnalyticsService:
 
         **From the ledger, not from the documents.** The invoice table also knows what
         is outstanding, but the Accounts Receivable account is the authoritative
-        figure — it is what the balance sheet reports and what an accountant checks.
+        figure - it is what the balance sheet reports and what an accountant checks.
         Where the two disagree, :meth:`control_checks` is what surfaces it.
         """
         accounts = await self.accounts.list_for_org(
@@ -317,7 +317,7 @@ class AnalyticsService:
     async def trend(self, organization_id: uuid.UUID, *, span: DateRange) -> list[TrendPoint]:
         """Income, expenses, and profit per month across ``span``.
 
-        One grouped query rather than a P&L per month — twelve P&L computations is
+        One grouped query rather than a P&L per month - twelve P&L computations is
         twenty-four round trips for a chart. The sign convention and the posted-status
         filter are the same ones the statements use, and
         ``test_analytics_api.py::test_the_trend_sums_to_the_profit_and_loss`` asserts
@@ -386,7 +386,7 @@ class AnalyticsService:
         """Customers by invoiced value in the window.
 
         Ranked on ``taxable_total``, not ``grand_total``. GST collected is money held
-        on the government's behalf and passed on — including it would rank a customer
+        on the government's behalf and passed on - including it would rank a customer
         buying 28% goods above one buying more of a 5% product, which is a fiction
         about who is worth more to the business.
         """
@@ -498,7 +498,7 @@ class AnalyticsService:
         * **Inventory** vs the sum of stock valuations.
 
         This is the monthly reconciliation a bookkeeper does by hand, and it catches
-        the class of bug that nothing else does — a document that updated a table but
+        the class of bug that nothing else does - a document that updated a table but
         not the ledger, or the reverse. It is cheap here and invaluable: without it,
         the drift is found a year later by an accountant who cannot say when it began.
         """
@@ -529,7 +529,7 @@ class AnalyticsService:
         ).scalar_one()
 
         # `stock_value`, not the `total_value` property. Both exist and mean the same
-        # thing, but only the column can be aggregated in SQL — the property would be
+        # thing, but only the column can be aggregated in SQL - the property would be
         # passed to `func.sum` as a Python callable.
         stock = (
             await self.session.execute(

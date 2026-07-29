@@ -5,7 +5,7 @@ the choices are made once and audited in one place.
 
 Decisions worth stating explicitly:
 
-* **Argon2id** for passwords — memory-hard, so GPU/ASIC cracking gains far less
+* **Argon2id** for passwords - memory-hard, so GPU/ASIC cracking gains far less
   than it does against bcrypt or PBKDF2. Parameters are configurable and the
   stored hash records them, so raising the cost later re-hashes users on their
   next successful login instead of locking anyone out.
@@ -13,7 +13,7 @@ Decisions worth stating explicitly:
   long-lived, so they are stored as SHA-256 digests: a database leak yields
   nothing usable. Access tokens stay stateless JWTs for cheap verification.
 * **SHA-256, not Argon2, for token digests.** These are 256-bit random values,
-  not human passwords — there is no dictionary to attack, so a slow KDF buys
+  not human passwords - there is no dictionary to attack, so a slow KDF buys
   nothing and would add latency to every refresh.
 * **Fernet (AES-128-CBC + HMAC) for TOTP secrets at rest.** A stolen database
   must not hand over working second factors.
@@ -116,7 +116,7 @@ def dummy_password_verify() -> None:
 
     Called when login hits a non-existent user so response time does not reveal
     whether the account exists. Without it, "user not found" returns in
-    microseconds while a real user costs ~50ms — a trivially measurable
+    microseconds while a real user costs ~50ms - a trivially measurable
     enumeration oracle.
     """
     # Always fails - the point is the elapsed time, not the result.
@@ -144,7 +144,7 @@ def create_access_token(
 
     Permissions are embedded so authorization needs no database round trip on
     every request. The trade-off is staleness bounded by the token TTL
-    (15 minutes by default); ``epoch`` is the escape hatch — bumping a user's
+    (15 minutes by default); ``epoch`` is the escape hatch - bumping a user's
     epoch in Redis invalidates their outstanding tokens immediately, which is
     what role changes and forced logout use.
 
@@ -221,7 +221,7 @@ def hash_token(token: str) -> str:
 
     Deterministic (unsalted) on purpose: lookup is by digest, so the same token
     must always hash identically. Safe here precisely because the input is
-    high-entropy random — see the module docstring.
+    high-entropy random - see the module docstring.
     """
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -234,7 +234,7 @@ def tokens_equal(left: str, right: str) -> bool:
 def generate_otp(length: int | None = None) -> str:
     """A numeric one-time code drawn from a CSPRNG.
 
-    ``secrets.randbelow`` per digit, not ``random`` — the latter is a Mersenne
+    ``secrets.randbelow`` per digit, not ``random`` - the latter is a Mersenne
     Twister whose future output is predictable from past samples.
     """
     digits = length or settings.otp_length
@@ -281,5 +281,5 @@ def decrypt_secret(ciphertext: str) -> str:
     try:
         return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
     except InvalidToken as exc:
-        log.error("failed to decrypt secret — wrong key or tampered ciphertext")
+        log.error("failed to decrypt secret - wrong key or tampered ciphertext")
         raise InvalidTokenError("Could not decrypt stored secret") from exc

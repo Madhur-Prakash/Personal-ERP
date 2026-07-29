@@ -16,7 +16,7 @@ raised to about 25% of RAM on anything larger.
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker "$USER" && newgrp docker
 
-# Firewall — only SSH and HTTP(S) reach the host.
+# Firewall - only SSH and HTTP(S) reach the host.
 # PostgreSQL and Redis are never published; they live on the internal Docker
 # network, which is what stops a misconfigured rule exposing the database.
 sudo ufw default deny incoming
@@ -40,7 +40,7 @@ git clone <repo> /srv/personalerp && cd /srv/personalerp
 cp .env.example .env
 ```
 
-Generate real secrets — do not hand-write them:
+Generate real secrets - do not hand-write them:
 
 ```bash
 python3 -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(64))"
@@ -94,7 +94,7 @@ Point an A record at the server, then edit
 domain (three places: the HTTP block, the HTTPS block, and the certificate paths).
 
 ```bash
-# The HTTP block must be live first — the ACME challenge is served over plain HTTP.
+# The HTTP block must be live first - the ACME challenge is served over plain HTTP.
 docker compose -f docker-compose.prod.yml up -d nginx
 
 docker compose -f docker-compose.prod.yml run --rm certbot certonly \
@@ -119,7 +119,7 @@ curl -fsS https://app.yourdomain.com/health/ready
 ```
 
 Migrations run as a **one-shot `migrate` service** that the API waits on via
-`service_completed_successfully`. This is what makes two API replicas safe — they
+`service_completed_successfully`. This is what makes two API replicas safe - they
 cannot race to apply the same migration.
 
 Register the first account at `https://app.yourdomain.com/register`. The first user
@@ -186,11 +186,11 @@ curl -fsS https://app.yourdomain.com/health/ready
 
 Three things together:
 
-1. **`order: start-first`** — the replacement container starts and passes its
+1. **`order: start-first`** - the replacement container starts and passes its
    health check before the old one stops.
-2. **Stateless replicas** — no instance holds session state, so Nginx can route to
+2. **Stateless replicas** - no instance holds session state, so Nginx can route to
    either during the overlap.
-3. **Migrations as a separate step** — if a migration fails, the currently-running
+3. **Migrations as a separate step** - if a migration fails, the currently-running
    version keeps serving traffic untouched. Rolling out first and migrating after
    would leave the new code pointed at an old schema.
 
@@ -230,7 +230,7 @@ Every line carries `request_id`, and authenticated lines carry `user_id` and
 directly to its operational log lines.
 
 Container logs are capped at 10 MB × 3 files per service. Without that, logs grow
-without bound and eventually fill the disk — the most common way a small VPS dies.
+without bound and eventually fill the disk - the most common way a small VPS dies.
 
 ### Health
 
@@ -244,28 +244,28 @@ Point external monitoring at `/health/ready`.
 
 ### Common problems
 
-**Backend will not start** — almost always failed config validation. The error
+**Backend will not start** - almost always failed config validation. The error
 names every problem:
 
 ```bash
 docker compose -f docker-compose.prod.yml logs backend | head -30
 ```
 
-**502 from Nginx** — the backend is not healthy yet, or migrations failed:
+**502 from Nginx** - the backend is not healthy yet, or migrations failed:
 
 ```bash
 docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs migrate
 ```
 
-**No emails** — check `SMTP_HOST` is set (unset means log-only, which is the
+**No emails** - check `SMTP_HOST` is set (unset means log-only, which is the
 development default and a common production oversight):
 
 ```bash
 docker compose -f docker-compose.prod.yml logs backend | grep -i "email"
 ```
 
-**"Session is no longer valid" immediately after signing in** — the token epoch
+**"Session is no longer valid" immediately after signing in** - the token epoch
 was bumped, or the client and server clocks disagree. Check `timedatectl`.
 
 ### Scaling

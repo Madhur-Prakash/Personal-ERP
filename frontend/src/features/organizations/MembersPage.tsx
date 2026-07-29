@@ -303,7 +303,7 @@ export function MembersPage() {
                         </td>
 
                         <td className="px-5 py-3">
-                          {/* The owner's role is fixed — the server rejects the
+                          {/* The owner's role is fixed - the server rejects the
                               change, so the control is not offered. */}
                           {can('member:update') && !member.is_owner ? (
                             <select

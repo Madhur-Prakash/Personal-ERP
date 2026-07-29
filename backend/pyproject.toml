@@ -1,7 +1,7 @@
 [project]
 name = "personalerp-backend"
 version = "0.1.0"
-description = "Personal ERP — a self-hosted ERP for small businesses"
+description = "Personal ERP - a self-hosted ERP for small businesses"
 # Pinned to the 3.13 series (see .python-version). An upper bound keeps uv from
 # silently resolving to 3.14+, where parts of this stack are not yet validated.
 requires-python = ">=3.13,<3.14"
@@ -51,7 +51,7 @@ kafka = ["logifyx[kafka]>=1.1.2"]
 # operate this on a small VPS". Tesseract is a 30 MB system binary and reads a
 # GST invoice perfectly well.
 #
-# `pytesseract` also needs the `tesseract` binary on PATH — a pip install alone is
+# `pytesseract` also needs the `tesseract` binary on PATH - a pip install alone is
 # not enough, which is why the engine is probed at runtime rather than assumed.
 ocr = [
     "pytesseract>=0.3.13",
@@ -69,7 +69,7 @@ dev = [
 ]
 
 # =============================================================================
-# Ruff — linting + formatting
+# Ruff - linting + formatting
 # =============================================================================
 [tool.ruff]
 target-version = "py313"
@@ -82,7 +82,7 @@ select = [
     "E", "W",    # pycodestyle
     "F",         # pyflakes
     "I",         # isort
-    "A",         # flake8-builtins — see the note below
+    "A",         # flake8-builtins - see the note below
     "B",         # flake8-bugbear
     "C4",        # comprehensions
     "UP",        # pyupgrade

@@ -1,4 +1,4 @@
-"""Accounting services — chart, calendar, and the posting engine.
+"""Accounting services - chart, calendar, and the posting engine.
 
 The posting engine is the part worth reading carefully. Every rule it enforces
 exists because violating it produces books that cannot be corrected later:
@@ -183,7 +183,7 @@ class ChartOfAccountsService:
         expense categories arrived after the first organizations were created, and
         without this their owners would only see the original list.
 
-        Matching is by **code**, and existing rows are never touched — so an account
+        Matching is by **code**, and existing rows are never touched - so an account
         the user renamed keeps its name, and one they deactivated stays inactive.
         Adding is the only operation. Nothing is renamed, re-parented, or deleted,
         because a code already in use may have postings against it.
@@ -362,7 +362,7 @@ class ChartOfAccountsService:
 
         if data.is_active is False and account.is_system:
             raise BusinessRuleError(
-                "System accounts cannot be deactivated — later modules post to them."
+                "System accounts cannot be deactivated - later modules post to them."
             )
 
         await self.session.flush()
@@ -397,7 +397,7 @@ class ChartOfAccountsService:
         if await self.accounts.has_postings(account.id):
             raise BusinessRuleError(
                 "This account has journal entries and cannot be deleted. "
-                "Deactivate it instead — the history must remain intact."
+                "Deactivate it instead - the history must remain intact."
             )
 
         await self.accounts.soft_delete(account)
@@ -468,7 +468,7 @@ class FiscalCalendarService:
         """Tile the fiscal year with calendar months.
 
         Periods are clipped to the year's bounds, so a year starting mid-month
-        yields a short first period rather than one that overruns the year — which
+        yields a short first period rather than one that overruns the year - which
         would let an entry fall in two periods at once.
         """
         periods: list[AccountingPeriod] = []
@@ -503,8 +503,8 @@ class FiscalCalendarService:
     ) -> FiscalYear:
         """Create the fiscal year containing ``on``, if it does not exist.
 
-        Called when an organization is created. Without a fiscal year — and the
-        periods inside it — every posting fails, so a new organization would have
+        Called when an organization is created. Without a fiscal year - and the
+        periods inside it - every posting fails, so a new organization would have
         working books it could not write to. Seeding the current year makes the
         ledger usable immediately.
 
@@ -620,7 +620,7 @@ class FiscalCalendarService:
             raise NotFoundError("Accounting period")
         if period.status is PeriodStatus.LOCKED:
             raise BusinessRuleError(
-                "This period is locked. Locking is intended to be final — "
+                "This period is locked. Locking is intended to be final - "
                 "reopening requires a database-level override."
             )
         if period.status is PeriodStatus.OPEN:
@@ -706,7 +706,7 @@ class PostingService:
     ) -> dict[uuid.UUID, Account]:
         """Fetch and validate every account an entry references.
 
-        One query for all of them, then validate in Python — a per-line query
+        One query for all of them, then validate in Python - a per-line query
         would turn a 20-line entry into 20 round trips.
         """
         unique_ids = list(dict.fromkeys(account_ids))
@@ -752,7 +752,7 @@ class PostingService:
     ) -> JournalEntry:
         """Create a draft or posted entry.
 
-        ``source_type``/``source_id`` are for programmatic callers — Stage 3's
+        ``source_type``/``source_id`` are for programmatic callers - Stage 3's
         invoice posting passes them so the entry can be traced back to its
         originating document.
         """
@@ -831,7 +831,7 @@ class PostingService:
         if not entry.is_editable:
             raise BusinessRuleError(
                 f"This entry is {entry.status} and cannot be edited. "
-                "Post a reversing entry instead — the books are a record, not a draft.",
+                "Post a reversing entry instead - the books are a record, not a draft.",
                 details={"status": str(entry.status), "entry_number": entry.entry_number},
             )
 
@@ -904,7 +904,7 @@ class PostingService:
         )
 
         journal = await self.journals.get(entry.journal_id)
-        assert journal is not None  # noqa: S101 — FK guarantees it
+        assert journal is not None  # noqa: S101 - FK guarantees it
         fiscal_year = await self.calendar.calendar.year_containing(
             organization_id, entry.entry_date
         )
@@ -961,7 +961,7 @@ class PostingService:
         marked ``REVERSED``; both remain in the ledger and sum to zero, so the
         audit trail shows what happened *and* what corrected it.
 
-        The reversal may carry a later date than the original — if the original's
+        The reversal may carry a later date than the original - if the original's
         month has since closed, the correction belongs in an open one.
         """
         original = await self._get_entry(organization_id, entry_id)
@@ -1156,8 +1156,8 @@ async def provision_books(
     thing they saw on the billing screen was "no income accounts exist yet". Two call
     sites that must stay identical will eventually not be, so now there is one.
 
-    Idempotent on both halves — ``seed_defaults`` skips entirely if any account exists,
-    and ``ensure_year_for`` returns the existing year — so it is safe to call
+    Idempotent on both halves - ``seed_defaults`` skips entirely if any account exists,
+    and ``ensure_year_for`` returns the existing year - so it is safe to call
     defensively from anywhere that needs the books to be usable.
     """
     await ChartOfAccountsService(session).seed_defaults(organization_id)

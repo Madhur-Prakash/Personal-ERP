@@ -136,8 +136,8 @@ class RoleService:
     ) -> Role:
         """Update a role.
 
-        A system role's *permissions* are editable — an org may legitimately want
-        its accountants to approve invoices — but its name and slug are not,
+        A system role's *permissions* are editable - an org may legitimately want
+        its accountants to approve invoices - but its name and slug are not,
         because code and seed data refer to the slug.
         """
         role = await self.roles.get_scoped(organization_id, role_id)

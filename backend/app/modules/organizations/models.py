@@ -4,11 +4,11 @@ The organization is the tenant boundary: every business record in every later
 stage hangs off ``organization_id`` (via
 :class:`app.db.base.OrgScopedMixin`). Users are *global* accounts that join
 organizations through :class:`OrganizationMember`, so one person can be the
-accountant for three companies with a single login — the normal case for the
+accountant for three companies with a single login - the normal case for the
 small-business owners and part-time accountants this product targets.
 
 Enum columns go through :func:`app.db.types.enum_column`, never
-``sqlalchemy.Enum`` directly — see that function for why the obvious spelling
+``sqlalchemy.Enum`` directly - see that function for why the obvious spelling
 silently stores the member *name* and creates no constraint at all.
 """
 
@@ -60,7 +60,7 @@ class InvitationStatus(StrEnum):
 
 
 class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
-    """A tenant — one company's books.
+    """A tenant - one company's books.
 
     Soft-deleted rather than hard-deleted: statutory retention rules mean a
     company's ledger has to remain recoverable long after they stop paying.
@@ -155,7 +155,7 @@ class OrganizationMember(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
     )
 
-    #: The one member who cannot be removed or demoted — every org needs a
+    #: The one member who cannot be removed or demoted - every org needs a
     #: guaranteed administrator, or it can be locked out permanently.
     is_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
@@ -258,7 +258,7 @@ class Invitation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
         A property, not a method: ``InvitationRead`` exposes this field, and
         Pydantic's ``from_attributes`` would read a method object rather than
-        calling it — yielding a confusing "input should be a valid boolean"
+        calling it - yielding a confusing "input should be a valid boolean"
         error at the serialisation boundary.
         """
         return dt.datetime.now(dt.UTC) >= self.expires_at

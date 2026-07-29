@@ -32,7 +32,7 @@ class OcrCapabilities(ResponseSchema):
     engines: list[str]
     formats: list[DocumentFormat]
     max_bytes: int
-    #: False when the extra is installed but no engine is usable — almost always a
+    #: False when the extra is installed but no engine is usable - almost always a
     #: missing Tesseract binary.
     any_engine_available: bool
 
@@ -96,7 +96,7 @@ class DocumentRead(DocumentSummary):
 class DocumentText(ResponseSchema):
     """The recognised text, on its own endpoint.
 
-    Separate because it is large and rarely needed — but it is the only honest
+    Separate because it is large and rarely needed - but it is the only honest
     answer to "where did this number come from?", so it stays reachable.
     """
 
@@ -149,7 +149,7 @@ class ConfirmDocumentRequest(BaseSchema):
 
     **This is a ``BillCreate``, not a set of overrides on the extracted fields.**
     Confirming a document must be exactly as safe as typing the bill in by hand,
-    which means going through the same schema and the same service — duplicate
+    which means going through the same schema and the same service - duplicate
     invoice-number refusal, period locks, GST resolution, and ledger posting all
     included. Any parallel path would eventually diverge from the real one, and the
     divergence would be in the code that writes to the ledger.

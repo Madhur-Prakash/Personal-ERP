@@ -22,7 +22,7 @@ invoked, and data access does not know what it is for.
 
 What this buys, concretely:
 
-- A service can be unit-tested with a fake repository — no database.
+- A service can be unit-tested with a fake repository - no database.
 - The same services will back a CLI, a Celery worker, and a GraphQL surface in
   later stages with no changes.
 - Swapping PostgreSQL for something else touches repositories only.
@@ -84,10 +84,10 @@ deploys safe.
 | --- | --- | --- |
 | Users, organizations, roles, memberships, invitations, audit | PostgreSQL | Must be durable, relational, and queryable |
 | Session rows (refresh-token digests, device history) | PostgreSQL | Must survive restarts; users audit their own devices |
-| One-time tokens (verification, reset, magic link, OTP) | Redis | Naturally TTL'd — expiry as a feature, no cleanup job |
+| One-time tokens (verification, reset, magic link, OTP) | Redis | Naturally TTL'd - expiry as a feature, no cleanup job |
 | Failed-login counters and lockouts | Redis | Ephemeral by definition; losing them fails safe |
 | Token epoch counters | Redis | Read on every request; must be a single fast GET |
-| Revoked-session markers | Redis | Same — a per-request check cannot be a SQL query |
+| Revoked-session markers | Redis | Same - a per-request check cannot be a SQL query |
 | Rate-limit windows | Redis | High write volume, zero durability requirement |
 
 Losing Redis entirely degrades the service (users re-authenticate, rate limiting
@@ -132,7 +132,7 @@ sequenceDiagram
 
 Ordering rationale:
 
-- **Request id first**, so every later layer — including a rate-limit rejection —
+- **Request id first**, so every later layer - including a rate-limit rejection -
   can be correlated.
 - **Rate limiting before any handler work**, so a flood costs one Redis `INCR`
   rather than a database query.
@@ -141,8 +141,8 @@ Ordering rationale:
 
 ### Cost of authenticating one request
 
-1. JWT verification — no I/O.
-2. One pipelined Redis round trip — token epoch + revoked-session check.
+1. JWT verification - no I/O.
+2. One pipelined Redis round trip - token epoch + revoked-session check.
 3. One indexed primary-key lookup for the user row.
 
 Authorization itself is free: permissions were embedded in the token at issue
@@ -155,7 +155,7 @@ session, commits if the handler returns, rolls back if it raises. Services call
 `flush()`, never `commit()`.
 
 The payoff: a request that writes a journal entry and its audit row either
-persists both or neither. Partial writes are impossible by construction — which
+persists both or neither. Partial writes are impossible by construction - which
 matters more in accounting than anywhere else.
 
 ---
@@ -186,7 +186,7 @@ graph LR
 ```
 
 `core` depends on nothing in `modules`. Modules depend on `core` and, where a
-real domain relationship exists, on each other — `organizations` needs `rbac`
+real domain relationship exists, on each other - `organizations` needs `rbac`
 because a membership holds a role.
 
 Cross-module imports use string-based SQLAlchemy relationships
@@ -214,7 +214,7 @@ the cache on sign-out, so it must sit inside `QueryClientProvider`.
 **Auth state reaches route guards through router context, not React context.**
 Guards run in `beforeLoad`, before a protected component mounts, and React context
 is unreachable from there. Reading it inside the component would render the page
-first and redirect after — briefly flashing content the user is not entitled to.
+first and redirect after - briefly flashing content the user is not entitled to.
 
 `isLoading` is part of that context and matters: during the initial silent
 refresh we do not yet know whether a session exists, and redirecting on
@@ -223,9 +223,9 @@ reload.
 
 ### Server state vs client state
 
-- **Server state** — TanStack Query. Cached, deduplicated, invalidated by key.
+- **Server state** - TanStack Query. Cached, deduplicated, invalidated by key.
   Mutations never retry automatically: a retried POST can duplicate an invoice.
-- **Client state** — React state and two contexts. There is no Redux; nothing in
+- **Client state** - React state and two contexts. There is no Redux; nothing in
   Stage 1 needs a global store that Query and context do not already cover.
 
 ### Design tokens
@@ -236,7 +236,7 @@ reload.
 
 Consequences: dark mode is one set of variable overrides instead of a `dark:`
 variant on every element, and rebranding is a handful of lines. Dark mode is not
-an inversion — surfaces get *lighter* as they come forward, mirroring how light
+an inversion - surfaces get *lighter* as they come forward, mirroring how light
 behaves, and text contrast is stepped down because pure white on near-black
 vibrates.
 
@@ -257,13 +257,13 @@ One envelope for every failure, so the client has exactly one shape to parse:
 }
 ```
 
-`code` is a stable machine-readable slug — clients branch on it, never on the
+`code` is a stable machine-readable slug - clients branch on it, never on the
 human-facing `message`.
 
 Services raise semantic exceptions (`NotFoundError`, `BusinessRuleError`);
 handlers registered in [`core/exceptions.py`](../backend/app/core/exceptions.py)
 map them to responses. A `SQLAlchemyError` becomes an opaque 503 rather than
-leaking SQL, and an `IntegrityError` on a unique constraint becomes a 409 —
+leaking SQL, and an `IntegrityError` on a unique constraint becomes a 409 -
 because when two concurrent signups race past the application-level check, the
 database constraint is the real arbiter.
 
@@ -276,8 +276,8 @@ which is what makes a user's bug report actionable.
 
 Adding a module (say, invoices in Stage 3):
 
-1. `modules/invoices/models.py` — tables, using `OrgScopedMixin` for tenancy.
-2. Import them in `db/registry.py` — **the same commit**, or autogenerate
+1. `modules/invoices/models.py` - tables, using `OrgScopedMixin` for tenancy.
+2. Import them in `db/registry.py` - **the same commit**, or autogenerate
    silently omits them.
 3. Add permissions to the `Permission` enum and a `PermissionGroup`. The
    permission-group test asserts every permission belongs to exactly one group,

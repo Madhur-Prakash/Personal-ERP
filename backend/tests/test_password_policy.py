@@ -53,7 +53,7 @@ class TestAcceptedPasswords:
         Devanagari, Arabic, Chinese, Japanese, Hebrew, and Thai are caseless, so
         ``str.isupper()``/``str.islower()`` are both False for every character.
         A password written wholly in one of these scripts therefore cannot
-        satisfy an upper+lower requirement, no matter how long or strong it is —
+        satisfy an upper+lower requirement, no matter how long or strong it is -
         the user must mix in Latin characters.
 
         This is a consequence of the mandated composition rules, not a bug. The
@@ -172,8 +172,8 @@ class TestReporting:
     def test_reports_every_problem_at_once(self) -> None:
         """One round trip should tell the user everything that is wrong.
 
-        ``admin`` breaks three rules simultaneously — too short, no uppercase, no
-        special character, and blocklisted — so a policy that stopped at the
+        ``admin`` breaks three rules simultaneously - too short, no uppercase, no
+        special character, and blocklisted - so a policy that stopped at the
         first failure would report only one of them.
         """
         problems = problems_for("admin")

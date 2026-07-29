@@ -15,7 +15,7 @@ import { env } from '@/lib/env';
  * and a stolen token is valid until it expires. A module-scoped variable dies
  * with the tab, which is the point.
  *
- * That raises the obvious question — how does a page reload stay signed in? The
+ * That raises the obvious question - how does a page reload stay signed in? The
  * refresh token, which the server sets as an `HttpOnly; Secure; SameSite=Strict`
  * cookie that JavaScript cannot read at all. On boot the app calls
  * `/auth/refresh` once; the browser attaches the cookie, and a fresh access
@@ -23,7 +23,7 @@ import { env } from '@/lib/env';
  * the short-lived one never outlives the tab.
  *
  * **Refresh is single-flight.** When a token expires, every in-flight request
- * 401s at once. Naively each would trigger its own refresh — and because the
+ * 401s at once. Naively each would trigger its own refresh - and because the
  * server *rotates* refresh tokens and treats reuse as a breach, the second
  * refresh would present an already-rotated token and get the whole session
  * revoked. So the first 401 starts a refresh, the rest await that same promise,
@@ -65,8 +65,8 @@ export interface ApiErrorBody {
 /**
  * A normalised API failure.
  *
- * Every call site gets the same shape — machine-readable `code`, a displayable
- * `message`, and `fieldErrors` ready to hand to react-hook-form — instead of
+ * Every call site gets the same shape - machine-readable `code`, a displayable
+ * `message`, and `fieldErrors` ready to hand to react-hook-form - instead of
  * each one having to unwrap `error.response.data.error.details.fields`.
  */
 export class ApiError extends Error {
@@ -122,7 +122,7 @@ export class ApiError extends Error {
     return this.status === 404;
   }
 
-  /** True for conditions a retry might resolve — offline, timeout, 5xx. */
+  /** True for conditions a retry might resolve - offline, timeout, 5xx. */
   get isRetryable(): boolean {
     return this.status === 0 || this.status >= 500;
   }
@@ -171,7 +171,7 @@ export const http: AxiosInstance = axios.create({
   baseURL: `${env.apiBaseUrl}${env.apiPrefix}`,
   timeout: 30_000,
   // Required for the HttpOnly refresh cookie to be sent cross-origin. Paired
-  // with an explicit CORS allow-list server-side — a wildcard origin is
+  // with an explicit CORS allow-list server-side - a wildcard origin is
   // forbidden by browsers alongside credentials.
   withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
@@ -239,7 +239,7 @@ http.interceptors.response.use(
     config._retried = true;
 
     try {
-      // Concurrent 401s share one refresh — see the module docstring on why
+      // Concurrent 401s share one refresh - see the module docstring on why
       // parallel refreshes would get the session revoked.
       refreshPromise ??= refreshAccessToken().finally(() => {
         refreshPromise = null;
@@ -288,7 +288,7 @@ export const api = {
  * Restore a session on app boot.
  *
  * Exchanges the HttpOnly refresh cookie for an access token. Returns `false`
- * when there is no valid cookie, which simply means "not signed in" — the
+ * when there is no valid cookie, which simply means "not signed in" - the
  * normal first-visit path, not an error.
  */
 export async function bootstrapSession(): Promise<boolean> {

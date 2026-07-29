@@ -1,6 +1,6 @@
 """Sales services.
 
-The important part is :meth:`InvoiceService.post` — the seam where a commercial
+The important part is :meth:`InvoiceService.post` - the seam where a commercial
 document becomes accounting. An invoice for ₹1,180 (₹1,000 + 18% GST) posts:
 
 ===========================  ========  ========
@@ -12,7 +12,7 @@ GST Output Tax                             180.00
 ===========================  ========  ========
 
 Which is why the ledger had to exist first. This module never touches
-``JournalEntry`` directly — it calls :class:`PostingService`, so the double-entry
+``JournalEntry`` directly - it calls :class:`PostingService`, so the double-entry
 invariants (balance, open period, postable accounts) are enforced by the module
 that owns them rather than re-implemented here.
 
@@ -199,7 +199,7 @@ class CustomerService:
         customer = Customer(
             organization_id=organization_id,
             code=code,
-            # Derived from the GSTIN they supplied — it decides CGST/SGST vs IGST
+            # Derived from the GSTIN they supplied - it decides CGST/SGST vs IGST
             # on every future invoice, so it is resolved once here.
             state_code=state_code_from_gstin(data.gstin),
             **payload,
@@ -264,7 +264,7 @@ class CustomerService:
         if await self.invoices.exists(organization_id=organization_id, customer_id=customer_id):
             raise BusinessRuleError(
                 "This customer has invoices and cannot be deleted. "
-                "Deactivate them instead — the documents must remain intact."
+                "Deactivate them instead - the documents must remain intact."
             )
 
         await self.customers.soft_delete(customer)
@@ -734,7 +734,7 @@ class SalesOrderService(SalesDocumentService):
     ) -> SalesOrder:
         """Convert an accepted quotation into an order.
 
-        The quotation becomes ``CONVERTED``, which is terminal — so the same quote
+        The quotation becomes ``CONVERTED``, which is terminal - so the same quote
         cannot spawn two orders.
         """
         quotation = await self.quotations.get_with_lines(organization_id, quotation_id)

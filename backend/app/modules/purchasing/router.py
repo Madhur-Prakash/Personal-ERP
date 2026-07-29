@@ -526,7 +526,7 @@ async def stock_valuation(
     """Total inventory value.
 
     This must equal the Inventory account's ledger balance. `stock_value` is the
-    stored authority rather than `quantity * average_cost`, which cannot reconcile —
+    stored authority rather than `quantity * average_cost`, which cannot reconcile -
     see `app.modules.purchasing.valuation`.
     """
     clauses: list[Any] = [StockLevel.organization_id == organization_id, StockLevel.quantity > 0]
@@ -613,7 +613,7 @@ async def transfer_stock(
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.INVENTORY_WRITE))],
 ) -> list[StockMovementRead]:
-    """Posts nothing to the ledger — a transfer is not an economic event."""
+    """Posts nothing to the ledger - a transfer is not an economic event."""
     product = await products.get(organization_id, data.product_id)
     outbound, inbound = await stock.transfer(
         organization_id,
@@ -837,7 +837,7 @@ async def create_bill(
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.PURCHASE_WRITE))],
 ) -> BillRead:
-    """A duplicate `supplier_invoice_number` for the same supplier is refused —
+    """A duplicate `supplier_invoice_number` for the same supplier is refused -
     entering the same invoice twice is the most expensive error in payables."""
     bill = await service.create(organization_id, data, user, ctx)
     return bill_response(await service.get(organization_id, bill.id))

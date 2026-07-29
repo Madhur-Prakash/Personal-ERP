@@ -89,7 +89,7 @@ class Base(DeclarativeBase):
         return f"<{type(self).__name__} id={pk}>"
 
     def to_dict(self, exclude: set[str] | None = None) -> dict[str, Any]:
-        """Shallow column dump. For debugging and audit snapshots only —
+        """Shallow column dump. For debugging and audit snapshots only -
         API responses go through Pydantic schemas.
         """
         skip = exclude or set()
@@ -108,7 +108,7 @@ class UUIDPrimaryKeyMixin:
         default=uuid7,
         # Server-side fallback so raw SQL inserts (fixtures, data migrations)
         # still get a key. Built into PostgreSQL 13+, no extension needed. Note
-        # this yields a v4 — only ORM inserts get the time-ordered v7.
+        # this yields a v4 - only ORM inserts get the time-ordered v7.
         server_default=text("gen_random_uuid()"),
     )
 
@@ -137,7 +137,7 @@ class TimestampMixin:
 class SoftDeleteMixin:
     """Soft deletion via a nullable ``deleted_at``.
 
-    Accounting records must never truly disappear — an audit trail with holes in
+    Accounting records must never truly disappear - an audit trail with holes in
     it is not an audit trail. Repositories filter ``deleted_at IS NULL`` by
     default.
     """

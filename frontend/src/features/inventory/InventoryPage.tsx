@@ -1,5 +1,5 @@
 /**
- * Inventory and purchasing — stock, products, bills, and payables.
+ * Inventory and purchasing - stock, products, bills, and payables.
  *
  * The stock view leads with valuation, because the number that must reconcile to
  * the Inventory ledger account is the one worth showing first.
@@ -308,7 +308,7 @@ function ProductList() {
             {formatMoney(row.quantity_on_hand).replace('₹', '')}
           </span>
         ) : (
-          <span className="text-content-muted">—</span>
+          <span className="text-content-muted">-</span>
         ),
     },
   ];
@@ -540,7 +540,7 @@ function MovementLog() {
 // ---------------------------------------------------------------------------
 /**
  * Suppliers had no screen at all until now, which made two workflows unreachable:
- * entering a bill, and confirming a scanned invoice — both need a supplier on file
+ * entering a bill, and confirming a scanned invoice - both need a supplier on file
  * and neither offered a way to create one.
  */
 function SupplierList() {
@@ -569,10 +569,10 @@ function SupplierList() {
         row.gstin ? (
           <span className="font-mono text-[11px]">{row.gstin}</span>
         ) : (
-          <span className="text-content-muted">—</span>
+          <span className="text-content-muted">-</span>
         ),
     },
-    { header: 'City', hideOnMobile: true, cell: (row) => row.city ?? '—' },
+    { header: 'City', hideOnMobile: true, cell: (row) => row.city ?? '-' },
     { header: 'Terms', numeric: true, cell: (row) => `${row.payment_terms_days} days` },
   ];
 
@@ -675,7 +675,7 @@ function BillList() {
       numeric: true,
       cell: (row) =>
         isZeroMoney(row.outstanding) ? (
-          <span className="text-content-muted">—</span>
+          <span className="text-content-muted">-</span>
         ) : (
           formatMoney(row.outstanding)
         ),
@@ -700,7 +700,7 @@ function BillList() {
     <Card>
       <CardHeader
         title="Bills"
-        description="A duplicate supplier invoice number is refused — it is the most expensive error in payables."
+        description="A duplicate supplier invoice number is refused - it is the most expensive error in payables."
       />
       <DataTable
         columns={columns}

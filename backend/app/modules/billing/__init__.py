@@ -1,1 +1,1 @@
-"""Billing — simple money in / money out entries."""
+"""Billing - simple money in / money out entries."""

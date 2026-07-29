@@ -1,6 +1,6 @@
 """Accounting endpoints.
 
-Split into four routers by concern — chart, calendar, journals/entries, reports —
+Split into four routers by concern - chart, calendar, journals/entries, reports -
 so permissions map cleanly: reading a report is `report:read`, closing a period is
 `period:close`, and neither implies the other.
 """
@@ -381,7 +381,7 @@ async def create_entry(
 ) -> JournalEntryRead:
     """Creates a draft, or posts immediately with `post: true`.
 
-    The payload must balance — debits equal credits — or it is rejected with a
+    The payload must balance - debits equal credits - or it is rejected with a
     field-level error before anything is written.
     """
     entry = await posting.create_entry(organization_id, data, user, ctx)
@@ -483,7 +483,7 @@ async def trial_balance(
     from_date: Annotated[dt.date | None, Query()] = None,
     include_zero: Annotated[bool, Query()] = False,
 ) -> TrialBalance:
-    """Total debits must equal total credits — see `is_balanced`."""
+    """Total debits must equal total credits - see `is_balanced`."""
     return await reporting.trial_balance(
         organization_id,
         as_of=as_of or dt.date.today(),
@@ -510,7 +510,7 @@ async def balance_sheet(
     _: Annotated[None, Depends(require_permission(Permission.REPORT_READ))],
     as_of: Annotated[dt.date | None, Query()] = None,
 ) -> BalanceSheet:
-    """Assets must equal liabilities plus equity — see `is_balanced`.
+    """Assets must equal liabilities plus equity - see `is_balanced`.
 
     `current_period_earnings` carries this year's profit, which is not yet in
     retained earnings until the year is closed.

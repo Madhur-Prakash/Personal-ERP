@@ -1,8 +1,8 @@
-# Personal ERP — Backend
+# Personal ERP - Backend
 
 FastAPI + PostgreSQL + Redis. Python 3.13, managed with [uv](https://docs.astral.sh/uv/).
 
-All logging goes through [logifyx](https://pypi.org/project/logifyx/) — see
+All logging goes through [logifyx](https://pypi.org/project/logifyx/) - see
 [`app/core/logging.py`](app/core/logging.py). Nothing in this codebase calls
 `logging.getLogger` or `print` directly.
 
@@ -10,15 +10,15 @@ All logging goes through [logifyx](https://pypi.org/project/logifyx/) — see
 
 ```
 app/
-  core/          Cross-cutting concerns — config, logging, security, errors, middleware
+  core/          Cross-cutting concerns - config, logging, security, errors, middleware
   db/            Declarative base, mixins, session/engine, model registry
   modules/       One vertical slice per bounded context
     <module>/
       models.py        SQLAlchemy tables
       schemas.py       Pydantic request/response contracts
-      repository.py    Data access — the only layer that touches the session
-      service.py       Business rules — transport-agnostic, raises domain errors
-      router.py        HTTP surface — thin, delegates to the service
+      repository.py    Data access - the only layer that touches the session
+      service.py       Business rules - transport-agnostic, raises domain errors
+      router.py        HTTP surface - thin, delegates to the service
   api/v1/        Router aggregation and versioning
 migrations/      Alembic
 tests/           pytest
@@ -48,7 +48,7 @@ root is the easiest way to get both.
 
 Every setting lives in [`app/core/config.py`](app/core/config.py) and is read
 from the repo-root `.env` (copy `.env.example`). Application code must not read
-`os.environ` — import `get_settings()` instead.
+`os.environ` - import `get_settings()` instead.
 
 `LOG_*` variables belong to logifyx and are documented in `.env.example`.
 

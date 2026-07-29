@@ -1,7 +1,7 @@
 /**
  * Scanned documents API client.
  *
- * Money is a `string` throughout — see `features/accounting/api.ts` for why it is
+ * Money is a `string` throughout - see `features/accounting/api.ts` for why it is
  * never widened to `number`. Confidence is a string for the same reason: it is a
  * `Decimal` server-side, and JSON's only numeric type is a float.
  */
@@ -18,7 +18,7 @@ export type DocumentStatus = 'uploaded' | 'extracted' | 'confirmed' | 'rejected'
 /**
  * A confidence score, 0–1, as a decimal string.
  *
- * Compared with `Number()` only at the point of display — a threshold check for
+ * Compared with `Number()` only at the point of display - a threshold check for
  * "should this be highlighted?" does not need exact decimal arithmetic, unlike
  * money, which lands in the ledger.
  */

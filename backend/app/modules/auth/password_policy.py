@@ -12,7 +12,7 @@ change if that decision is revisited.
 
 One rule is enforced beyond the four above, and it is deliberate. Composition
 requirements are satisfied by exactly the passwords that cracking dictionaries
-enumerate first — ``Password@1`` clears every check here at ten characters. So a
+enumerate first - ``Password@1`` clears every check here at ten characters. So a
 blocklist runs as a backstop, matching on the letters-only root of the password
 (``P@ssword1`` → ``password`` → rejected). Without it the four rules above would
 admit the most-guessed credentials in existence. It is isolated in
@@ -47,7 +47,7 @@ REQUIRE_DIGIT: Final = False
 #: punctuation set: ``!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~``
 #:
 #: An explicit set rather than "anything not alphanumeric", because the latter
-#: silently accepts whitespace and invisible Unicode as the special character —
+#: silently accepts whitespace and invisible Unicode as the special character -
 #: which users cannot see, retype, or debug when login later fails.
 SPECIAL_CHARACTERS: Final[frozenset[str]] = frozenset(string.punctuation)
 
@@ -133,11 +133,11 @@ def _candidate_roots(password: str) -> set[str]:
     Three candidates are produced, because no single normalisation catches every
     way a weak root gets dressed up to pass the composition rules:
 
-    * **plain** — lowercase, non-letters stripped. Catches padding appended to
+    * **plain** - lowercase, non-letters stripped. Catches padding appended to
       satisfy the rules: ``Password@1`` → ``password``.
-    * **un-leeted** — leetspeak reversed first. Catches substitution *inside* the
+    * **un-leeted** - leetspeak reversed first. Catches substitution *inside* the
       word: ``P@ssw0rd`` → ``password``.
-    * **trimmed then un-leeted** — edge padding removed *before* reversing
+    * **trimmed then un-leeted** - edge padding removed *before* reversing
       leetspeak. Needed because leetspeak rewrites padding into letters and
       corrupts the root: ``Passw0rd!`` un-leets to ``passwordi`` (miss), but
       trimming the ``!`` first yields ``passw0rd`` → ``password`` (hit).
@@ -238,7 +238,7 @@ def describe_policy() -> dict[str, object]:
     """Machine-readable policy for the frontend's password field.
 
     Served from the API so the client's hints can never contradict what the
-    server actually enforces — the rules below are derived from the same
+    server actually enforces - the rules below are derived from the same
     constants :func:`validate_password` checks against.
     """
     rules = [f"At least {MIN_LENGTH} characters"]

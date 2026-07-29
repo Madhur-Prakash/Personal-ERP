@@ -1,5 +1,5 @@
 # =============================================================================
-# Personal ERP — frontend image
+# Personal ERP - frontend image
 #
 # `development` runs the Vite dev server. `production` builds static assets and
 # serves them from Nginx: the built output is plain files, so there is no reason
@@ -14,7 +14,7 @@ WORKDIR /app
 # Lockfile only, before the source, so this layer survives code changes.
 COPY package.json package-lock.json ./
 
-# `npm ci` installs exactly the lockfile — it fails if package.json and the
+# `npm ci` installs exactly the lockfile - it fails if package.json and the
 # lockfile disagree, rather than quietly resolving something else.
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
@@ -36,7 +36,7 @@ FROM deps AS build
 COPY . .
 
 # VITE_* values are inlined into the bundle at build time, so they must be
-# present now — supplying them at container start would have no effect.
+# present now - supplying them at container start would have no effect.
 ARG VITE_API_BASE_URL=http://localhost:8000
 ARG VITE_API_V1_PREFIX=/api/v1
 ARG VITE_APP_NAME="Personal ERP"

@@ -1,4 +1,4 @@
-"""Logging — backed entirely by `logifyx <https://pypi.org/project/logifyx/>`_.
+"""Logging - backed entirely by `logifyx <https://pypi.org/project/logifyx/>`_.
 
 Every log line in the backend goes through logifyx. Nothing calls
 ``logging.getLogger`` or ``print`` directly.
@@ -7,7 +7,7 @@ What logifyx gives us out of the box, and why we lean on it here:
 
 * coloured console output in dev, single-line JSON in production (``LOG_JSON``)
 * rotating files under ``LOG_DIR`` (multi-process safe)
-* automatic redaction of passwords/tokens/secrets (``LOG_MASK``) — this is the
+* automatic redaction of passwords/tokens/secrets (``LOG_MASK``) - this is the
   reason we can log request payload metadata without leaking credentials
 * optional HTTP / Kafka fan-out for aggregators, config-only
 
@@ -60,8 +60,8 @@ __all__ = [
 # distinct from third-party ones and gives us one prefix to filter on.
 LOGGER_NAMESPACE = "personalerp"
 
-# Third-party loggers we re-point at logifyx's handlers so that *all* output —
-# ours and the framework's — lands in the same file/stream with one format.
+# Third-party loggers we re-point at logifyx's handlers so that *all* output -
+# ours and the framework's - lands in the same file/stream with one format.
 _BRIDGED_LOGGERS = (
     "uvicorn",
     "uvicorn.error",
@@ -101,7 +101,7 @@ def _resolve_log_file() -> str:
 def configure_logging() -> None:
     """Register logifyx as the global logger class and bridge third parties.
 
-    Must run before any :func:`get_logger` call — ``get_logify_logger`` raises
+    Must run before any :func:`get_logger` call - ``get_logify_logger`` raises
     ``TypeError`` if ``setup_logify()`` has not registered the logger class
     first. The application lifespan calls this as its very first step.
 
@@ -170,14 +170,14 @@ class StructuredLogger(logging.LoggerAdapter):  # type: ignore[type-arg]
     the console formatter and ``CompactJsonFormatter`` build their output from a
     fixed set of record attributes (``timestamp``, ``level``, ``logger``,
     ``function``, ``line``, ``message``). Anything passed via ``extra=`` is
-    attached to the ``LogRecord`` and then **silently dropped** — the call
+    attached to the ``LogRecord`` and then **silently dropped** - the call
     succeeds, no error is raised, and the structured context simply never
     appears anywhere.
 
     Rather than rewrite several hundred call sites to interpolate their own
     values, the merge happens here, once. ``log.info("x", extra={"a": 1})``
-    renders as ``x | a=1``, which is visible, greppable, and — because logifyx
-    masks the final message string — still redacted.
+    renders as ``x | a=1``, which is visible, greppable, and - because logifyx
+    masks the final message string - still redacted.
 
     The trade-off is honest: in JSON mode these fields live inside ``message``
     rather than as separate keys, so a log aggregator cannot index them
@@ -209,7 +209,7 @@ def get_logger(name: str | None = None) -> StructuredLogger:
     ``personalerp.modules.auth.service``.
 
     Wrapped in :class:`StructuredLogger` so ``extra=`` actually reaches the
-    output — see that class for why it is necessary.
+    output - see that class for why it is necessary.
     """
     if not _configured:
         # Defensive: an import-time logger in a module loaded before lifespan
@@ -285,7 +285,7 @@ def get_context_logger(name: str | None = None) -> StructuredLogger:
 def flush_logs(timeout: float = 5.0) -> bool:
     """Drain queued async (remote/Kafka) log records without tearing down.
 
-    Correct call for a running server — unlike :func:`shutdown_logging`, the
+    Correct call for a running server - unlike :func:`shutdown_logging`, the
     logger stays usable afterwards.
 
     ``bool(...)`` because logifyx ships ``.pyi`` stubs but no ``py.typed``

@@ -3,7 +3,7 @@
 Services raise semantic exceptions (:class:`NotFoundError`,
 :class:`PermissionDeniedError`) and never touch HTTP concerns. A single set of
 handlers registered in :mod:`app.main` maps them to responses. This keeps the
-domain layer transport-agnostic — the same services will back a CLI, a worker,
+domain layer transport-agnostic - the same services will back a CLI, a worker,
 and a GraphQL surface without carrying ``HTTPException`` into the core.
 
 Every error response shares one envelope, so the frontend has exactly one shape
@@ -18,7 +18,7 @@ to parse::
       }
     }
 
-``code`` is a stable machine-readable slug — clients branch on it, never on the
+``code`` is a stable machine-readable slug - clients branch on it, never on the
 human-facing ``message``.
 """
 
@@ -90,7 +90,7 @@ class AppError(Exception):
 
 
 # =============================================================================
-# 4xx — client errors
+# 4xx - client errors
 # =============================================================================
 class ValidationError(AppError):
     """Semantic validation failure that Pydantic cannot express."""
@@ -111,7 +111,7 @@ class NotFoundError(AppError):
 
 
 class ConflictError(AppError):
-    """State conflict — a duplicate, or an illegal transition."""
+    """State conflict - a duplicate, or an illegal transition."""
 
     status_code = status.HTTP_409_CONFLICT
     code = "conflict"
@@ -127,7 +127,7 @@ class BusinessRuleError(AppError):
 
 
 # =============================================================================
-# Authentication — 401
+# Authentication - 401
 # =============================================================================
 class AuthenticationError(AppError):
     status_code = status.HTTP_401_UNAUTHORIZED
@@ -178,7 +178,7 @@ class AccountLockedError(AuthenticationError):
 class TwoFactorRequiredError(AppError):
     """Password was correct, but a second factor is outstanding.
 
-    Not a failure — a continuation. Carries the challenge id the client must
+    Not a failure - a continuation. Carries the challenge id the client must
     echo back with the TOTP code.
     """
 
@@ -192,7 +192,7 @@ class TwoFactorRequiredError(AppError):
 
 
 # =============================================================================
-# Authorization — 403
+# Authorization - 403
 # =============================================================================
 class PermissionDeniedError(AppError):
     status_code = status.HTTP_403_FORBIDDEN
@@ -234,7 +234,7 @@ class ServiceUnavailableError(AppError):
 # Handlers
 # =============================================================================
 async def _app_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, AppError)  # noqa: S101 — registered per-type
+    assert isinstance(exc, AppError)  # noqa: S101 - registered per-type
 
     # 5xx from our own hierarchy still deserves a stack trace.
     if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:

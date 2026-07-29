@@ -57,7 +57,7 @@ class RoleRepository(BaseRepository[Role]):
 
         Each org gets its own copy (see :class:`app.modules.rbac.models.Role`), so
         one tenant editing "Accountant" cannot affect another. ``viewer`` is the
-        default for invitees — least privilege, and easy to escalate deliberately.
+        default for invitees - least privilege, and easy to escalate deliberately.
         """
         created: dict[SystemRole, Role] = {}
 

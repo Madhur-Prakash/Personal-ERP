@@ -20,7 +20,7 @@ import type {
  *
  * Note that none of these URLs carry an organization id. The active
  * organization comes from the signed access token, so `/organizations/current`
- * always means "the one this session is operating in" — there is no id in the
+ * always means "the one this session is operating in" - there is no id in the
  * URL for a client to tamper with, which is what makes cross-tenant access
  * structurally impossible rather than merely checked.
  */
@@ -66,7 +66,7 @@ export const organizationsApi = {
   revokeInvitation: (invitationId: string) =>
     api.delete<MessageResponse>(`/organizations/current/invitations/${invitationId}`),
 
-  /** Unauthenticated — the recipient has not signed in yet. */
+  /** Unauthenticated - the recipient has not signed in yet. */
   previewInvitation: (token: string) => api.get<InvitationPreview>(`/invitations/${token}`),
 
   acceptInvitation: (token: string) => api.post<MessageResponse>('/invitations/accept', { token }),
@@ -93,7 +93,7 @@ export const organizationsApi = {
   auditActions: () => api.get<string[]>('/audit/actions'),
 };
 
-/** Profile bindings — scoped to the caller's own record. */
+/** Profile bindings - scoped to the caller's own record. */
 export const usersApi = {
   me: () => api.get<UserProfile>('/users/me'),
   updateProfile: (body: {

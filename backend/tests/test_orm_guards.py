@@ -103,7 +103,7 @@ class TestRequestSchemasKeepEnums:
     """Guards the second bug: enum fields becoming plain strings.
 
     `use_enum_values=True` on the *request* base turned every validated enum into
-    a `str`, so `data.method.is_cash` raised AttributeError — the enum helpers
+    a `str`, so `data.method.is_cash` raised AttributeError - the enum helpers
     vanished exactly where services use them.
     """
 

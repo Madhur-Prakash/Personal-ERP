@@ -103,7 +103,7 @@ function ProfileCard() {
           label="Email"
           value={user?.email ?? ''}
           disabled
-          // Changing an email requires re-verification, which is its own flow —
+          // Changing an email requires re-verification, which is its own flow -
           // Stage 9. Disabling with an explanation beats a field that silently
           // fails.
           hint="Email changes need re-verification and arrive in a later stage."
@@ -176,7 +176,7 @@ function TwoFactorCard() {
       <Card>
         <CardHeader
           title="Save your recovery codes"
-          description="Each code works once. Store them somewhere safe — they are the only way in if you lose your authenticator."
+          description="Each code works once. Store them somewhere safe - they are the only way in if you lose your authenticator."
         />
         <CardBody className="space-y-4">
           <div className="bg-surface-sunken border-border grid grid-cols-2 gap-2 rounded-lg border p-4 font-mono text-[13px] sm:grid-cols-5">
@@ -336,7 +336,7 @@ function PasswordCard() {
   const [next, setNext] = useState('');
   const [error, setError] = useState<string>();
 
-  // Fetched, not hard-coded — the server owns the rules.
+  // Fetched, not hard-coded - the server owns the rules.
   const { data: policy } = usePasswordPolicy();
 
   const change = useMutation({
@@ -463,7 +463,7 @@ function SessionsCard() {
                     </p>
                   </div>
 
-                  {/* The current session is not offered — signing out is the
+                  {/* The current session is not offered - signing out is the
                       dedicated action for that, and revoking yourself here
                       would look like a bug. */}
                   {!session.is_current && (
@@ -627,17 +627,17 @@ function AccountCard({ onRefresh }: { onRefresh: () => Promise<void> }) {
       <CardHeader title="Account" />
       <CardBody className="space-y-4">
         <dl className="space-y-2.5 text-[13px]">
-          <Row label="Organizations" value={stats ? String(stats.organizations) : '—'} />
-          <Row label="Active sessions" value={stats ? String(stats.active_sessions) : '—'} />
+          <Row label="Organizations" value={stats ? String(stats.organizations) : '-'} />
+          <Row label="Active sessions" value={stats ? String(stats.active_sessions) : '-'} />
           {user?.is_two_factor_enabled && (
             <Row
               label="Recovery codes left"
-              value={stats ? String(stats.recovery_codes_remaining) : '—'}
+              value={stats ? String(stats.recovery_codes_remaining) : '-'}
             />
           )}
           <Row
             label="Last sign-in"
-            value={user?.last_login_at ? formatRelative(user.last_login_at) : '—'}
+            value={user?.last_login_at ? formatRelative(user.last_login_at) : '-'}
           />
         </dl>
 

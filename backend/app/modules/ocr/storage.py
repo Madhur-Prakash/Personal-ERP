@@ -11,7 +11,7 @@ bytes, and nowhere else. Three things follow for free:
 
 **Writes are atomic.** The bytes go to a temporary file that is then renamed into
 place. ``rename`` within a filesystem is atomic, so a crash or a full disk mid-write
-leaves either nothing or a complete blob — never a truncated file sitting at an
+leaves either nothing or a complete blob - never a truncated file sitting at an
 address that asserts what its contents hash to.
 
 **File I/O runs in a worker thread.** ``open().write()`` blocks, and a 15 MB write to
@@ -68,7 +68,7 @@ def relative_path_for(organization_id: object, digest: str, fmt: DocumentFormat)
     """The storage path for a blob, relative to the upload directory.
 
     Sharded on the first two hex characters. A single directory holding every blob
-    is fine at a hundred documents and pathological at a hundred thousand — some
+    is fine at a hundred documents and pathological at a hundred thousand - some
     filesystems degrade to linear scans, and ``ls`` becomes unusable for the operator
     who has to look. Two characters give 256 buckets, which is the right order of
     magnitude for a self-hosted install.
@@ -83,7 +83,7 @@ def _absolute(relative: str) -> Path:
     """Resolve a relative blob path, refusing anything that escapes the root.
 
     Defence in depth. Paths here are built from a hex digest and a UUID, so none of
-    them *can* contain ``..`` today — but this function is the only place that turns
+    them *can* contain ``..`` today - but this function is the only place that turns
     a stored string into a filesystem path, and a stored string is exactly what a
     future bug or a tampered row would poison.
     """
@@ -112,7 +112,7 @@ class DocumentStore:
 
         try:
             # Same directory as the target, so the rename stays within one
-            # filesystem — `os.replace` across devices is not atomic and raises.
+            # filesystem - `os.replace` across devices is not atomic and raises.
             handle, temporary = tempfile.mkstemp(dir=target.parent, suffix=".part")
             try:
                 with os.fdopen(handle, "wb") as stream:
@@ -120,7 +120,7 @@ class DocumentStore:
                     stream.flush()
                     # Force the bytes to disk before the rename publishes the name.
                     # Without this, a power loss can leave a correctly-named, empty
-                    # file — worse than a missing one, because it looks valid.
+                    # file - worse than a missing one, because it looks valid.
                     os.fsync(stream.fileno())
                 os.replace(temporary, target)
             except BaseException:
@@ -169,7 +169,7 @@ class DocumentStore:
         """Remove a blob.
 
         Only for a hard purge. Soft-deleting a :class:`~app.modules.ocr.models.Document`
-        deliberately leaves its blob alone — a document that turned into a posted bill
+        deliberately leaves its blob alone - a document that turned into a posted bill
         is the evidence for a ledger entry, and destroying it because someone tidied
         the review queue would leave the books unsupportable.
         """
@@ -185,13 +185,13 @@ async def read_within_limit(stream: object, *, limit: int | None = None) -> byte
 
     **Chunked, not ``await file.read()``.** Reading the whole body first and checking
     its length afterwards means a 2 GB upload is a 2 GB allocation before the check
-    runs — the size limit becomes a way to *report* the memory exhaustion it was
+    runs - the size limit becomes a way to *report* the memory exhaustion it was
     supposed to prevent. Stopping at the first chunk that crosses the line caps the
     damage at one chunk.
     """
     ceiling = limit if limit is not None else settings.max_upload_bytes
     read = getattr(stream, "read", None)
-    if read is None:  # pragma: no cover — guarded by the router's typing
+    if read is None:  # pragma: no cover - guarded by the router's typing
         raise StorageError("Upload stream is not readable")
 
     chunks: list[bytes] = []

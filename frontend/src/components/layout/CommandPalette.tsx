@@ -28,7 +28,7 @@ import { useTheme } from '@/features/theme/ThemeProvider';
  * actions to the same surface, which is why it is built as an extensible list of
  * groups rather than a fixed menu.
  *
- * Permission-gated entries are filtered out, not disabled — offering a command
+ * Permission-gated entries are filtered out, not disabled - offering a command
  * that will 403 is worse than not offering it.
  */
 export function CommandPalette({

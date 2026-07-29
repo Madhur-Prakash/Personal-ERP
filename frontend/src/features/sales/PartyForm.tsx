@@ -9,7 +9,7 @@
  * Only `name` is required. Everything else is optional on the server too, and asking
  * a shopkeeper for a GSTIN and a credit limit before they can raise their first
  * invoice is how software gets abandoned at step one. The GSTIN is worth prompting
- * for, though — it is what derives the place of supply, so **without it every invoice
+ * for, though - it is what derives the place of supply, so **without it every invoice
  * is treated as intra-state** and the CGST/SGST vs IGST split may be wrong.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -49,8 +49,8 @@ const GSTIN_LENGTH = 15;
 /**
  * The part of the response this form uses.
  *
- * `Customer` and `Supplier` are not assignable to one another — a supplier has `city`
- * where a customer has `billing_city` — so the mutation is typed to what both
+ * `Customer` and `Supplier` are not assignable to one another - a supplier has `city`
+ * where a customer has `billing_city` - so the mutation is typed to what both
  * genuinely share rather than to a union that every consumer would have to narrow.
  */
 interface CreatedParty {
@@ -91,7 +91,7 @@ export function PartyFormModal({
       // **The city field is named differently on each side.** A customer has a
       // billing address and a separate shipping one, so its column is
       // `billing_city`; a supplier has one address and uses `city`. Both request
-      // schemas are `extra="forbid"`, so sending the wrong key is a 422 — and
+      // schemas are `extra="forbid"`, so sending the wrong key is a 422 - and
       // TypeScript cannot catch it here, because excess-property checking does not
       // see through a conditional spread.
       return kind === 'customer'
@@ -177,7 +177,7 @@ export function PartyFormModal({
           error={fieldErrors['gstin']}
           hint={
             gstinLooksWrong
-              ? `A GSTIN is ${GSTIN_LENGTH} characters — this is ${gstin.length}.`
+              ? `A GSTIN is ${GSTIN_LENGTH} characters - this is ${gstin.length}.`
               : 'Optional. Its first two digits are the state, which decides CGST/SGST versus IGST.'
           }
           onChange={(event) => setDraft({ ...draft, gstin: event.target.value.toUpperCase() })}

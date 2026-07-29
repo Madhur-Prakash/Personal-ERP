@@ -1,4 +1,4 @@
-# Personal ERP — master specification
+# Personal ERP - master specification
 
 The requirements document for this project. It lived in a chat prompt for the first
 two modules; it lives here now so it is versioned alongside the code it describes.
@@ -11,7 +11,7 @@ A **self-hosted ERP for small businesses**. Simple to run, yours to keep.
 
 Small businesses get offered two bad options: cloud SaaS that rents you your own
 books and raises the price once you depend on it, or legacy desktop software that
-lives on one machine and dies with its hard drive. This is the third option — one
+lives on one machine and dies with its hard drive. This is the third option - one
 server, your own PostgreSQL, no vendor between you and your accounts.
 
 The design constraint is **restraint**. Deliberately not an enterprise-scale
@@ -30,12 +30,12 @@ previous one has signed off. There is no stage gate.
 What is *not* negotiable, because it is arithmetic rather than process:
 
 - **The dependency graph.** Sales and purchasing post into the ledger, so the
-  ledger's posting contract must exist before they can call it. It does now —
-  `PostingService.post_simple()` — and it is stable.
+  ledger's posting contract must exist before they can call it. It does now -
+  `PostingService.post_simple()` - and it is stable.
 
   Document intelligence is the exception, and deliberately so: **it never posts.**
   Extraction produces a suggestion a human confirms, and confirming calls
-  `BillService.create()` — the same entry point `POST /bills` uses — so every rule
+  `BillService.create()` - the same entry point `POST /bills` uses - so every rule
   that protects a hand-entered bill protects a scanned one. A second posting path
   for machine-read figures would eventually diverge from the real one, and the
   divergence would be in the code that writes to the ledger.
@@ -44,7 +44,7 @@ What is *not* negotiable, because it is arithmetic rather than process:
   does not meet this is not done, regardless of how much of it exists.
 
 The rationale for the second point is empirical rather than theoretical. Two
-defects in the ledger were found only by running it — a `RequestContext` type
+defects in the ledger were found only by running it - a `RequestContext` type
 mismatch that would have crashed every write endpoint, and an enum-storage bug
 that had silently disabled a Stage 1 unique index since it was written. Neither
 was visible by reading the code. Parallel build-out multiplies throughput; it does
@@ -58,22 +58,22 @@ Ordered by dependency, not by priority. `✔` = built and verified.
 
 | Module | Depends on | Status |
 | --- | --- | --- |
-| Foundation — auth, orgs, RBAC, audit, design system, CI/CD | — | ✔ |
-| Accounting — chart, journals, ledger, trial balance, P&L, balance sheet, cash flow | Foundation | ✔ |
-| Billing — record money in and out with no customer or supplier; posts real double-entry | Accounting | ✔ |
-| Sales — CRM, leads, quotations, sales orders, invoices, payments | Accounting | ✔ (PDF pending) |
-| Purchasing & inventory — suppliers, POs, goods receipt, warehouses, stock moves, barcodes | Accounting | ✔ |
-| OCR & document intelligence — invoice extraction, per-field confidence, duplicate detection, review UI | Purchasing | ✔ |
-| Analytics — dashboard figures, period comparison, trends, rankings, control-account reconciliation | Accounting | ✔ (report builder pending) |
-| AI assistant — conversational interface, RAG over business data, forecasting | Sales, Purchasing | — |
-| Automation — workflow builder, triggers, scheduled jobs, approvals, messaging | Sales | — |
-| Enterprise — API keys, webhooks, SSO, passkeys, compliance | Foundation | — |
-| Production hardening — security review, monitoring, load testing, tuning | all | — |
+| Foundation - auth, orgs, RBAC, audit, design system, CI/CD | - | ✔ |
+| Accounting - chart, journals, ledger, trial balance, P&L, balance sheet, cash flow | Foundation | ✔ |
+| Billing - record money in and out with no customer or supplier; posts real double-entry | Accounting | ✔ |
+| Sales - CRM, leads, quotations, sales orders, invoices, payments | Accounting | ✔ (PDF pending) |
+| Purchasing & inventory - suppliers, POs, goods receipt, warehouses, stock moves, barcodes | Accounting | ✔ |
+| OCR & document intelligence - invoice extraction, per-field confidence, duplicate detection, review UI | Purchasing | ✔ |
+| Analytics - dashboard figures, period comparison, trends, rankings, control-account reconciliation | Accounting | ✔ (report builder pending) |
+| AI assistant - conversational interface, RAG over business data, forecasting | Sales, Purchasing | - |
+| Automation - workflow builder, triggers, scheduled jobs, approvals, messaging | Sales | - |
+| Enterprise - API keys, webhooks, SSO, passkeys, compliance | Foundation | - |
+| Production hardening - security review, monitoring, load testing, tuning | all | - |
 
 Every remaining module is unblocked: none has a hard dependency on another. They are
 still built one at a time, because each edits the same shared files
 (`db/registry.py`, `api/v1/router.py`, `audit/models.py`) and Alembic migrations form
-a linear chain — two generated from the same parent produce two heads and
+a linear chain - two generated from the same parent produce two heads and
 `alembic upgrade head` fails.
 
 ### Why the dependency column matters
@@ -118,13 +118,13 @@ stray `print` bypasses credential masking.
 
 ## Stack
 
-**Frontend** — React 19, TypeScript, Vite, Tailwind, TanStack Router/Query/Table,
+**Frontend** - React 19, TypeScript, Vite, Tailwind, TanStack Router/Query/Table,
 React Hook Form, Zod, Recharts, Lucide, Sonner.
 
-**Backend** — FastAPI, Python 3.13 (uv), SQLAlchemy 2, Alembic, PostgreSQL 17,
+**Backend** - FastAPI, Python 3.13 (uv), SQLAlchemy 2, Alembic, PostgreSQL 17,
 Redis 7, Pydantic v2, logifyx.
 
-**Billing** — no new dependencies and no new tables either, and for the same reason.
+**Billing** - no new dependencies and no new tables either, and for the same reason.
 Entries post through `PostingService.create_entry` and are read back from the ledger,
 tagged `source_type="billing"`. A table holding "the user's simple view" alongside the
 journal entry that view describes is a cache that can disagree with the books, and this
@@ -133,28 +133,28 @@ rather than heuristic: every entry has precisely two lines, one on a cash-equiva
 account and one on an income or expense account, so direction and amount follow from
 the shape with no guessing.
 
-**Analytics** — no new dependencies and no new tables. The dashboard composes the
+**Analytics** - no new dependencies and no new tables. The dashboard composes the
 existing `ReportingService` rather than aggregating the ledger a second way: a tile
 that disagrees with the P&L it summarises destroys trust in both, and nobody can tell
 which is right. A materialised metrics table was considered and rejected for the same
-reason — a cache that can disagree with the ledger is a liability, and at
+reason - a cache that can disagree with the ledger is a liability, and at
 small-business scale two `SUM`s over a few thousand journal lines cost nothing.
 
-**Document intelligence** — pypdf (text layer) and Tesseract via pytesseract,
+**Document intelligence** - pypdf (text layer) and Tesseract via pytesseract,
 both in an optional `ocr` extra. This deviates from the original plan of "PaddleOCR
 with EasyOCR/Tesseract fallback + OpenCV", and the reason is the product goal above:
 PaddlePaddle is ~500 MB of wheels and torch is ~2 GB, which is incompatible with
-"one person can run this on a small VPS". The order was also inverted — the PDF
+"one person can run this on a small VPS". The order was also inverted - the PDF
 *text layer* is tried before any OCR, because most invoices arrive as digital PDFs
 whose characters are already in the file, and recognising a picture of text you
 already have can only be worse. OpenCV was dropped: without it, preprocessing is
 limited to grayscale and upscaling, and aggressive binarisation helps some scans
 while destroying others, so there was nothing safe to add.
 
-**Planned per module** — Celery + Redis Streams (automation),
+**Planned per module** - Celery + Redis Streams (automation),
 Ollama/OpenAI-compatible + Sentence Transformers + Qdrant + LangGraph (AI).
 
-**Infrastructure** — Docker Compose, Nginx, GitHub Actions, Prometheus, Grafana,
+**Infrastructure** - Docker Compose, Nginx, GitHub Actions, Prometheus, Grafana,
 Loki, Sentry, MinIO. Self-hosted on one VPS.
 
 Deferred deliberately: Kafka, Temporal, and Kubernetes. All three are in the

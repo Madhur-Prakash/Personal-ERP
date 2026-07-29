@@ -67,7 +67,7 @@ export function RegisterPage() {
         email: parsed.data.email,
         password: parsed.data.password,
         full_name: parsed.data.full_name,
-        // Send only one of these — the server rejects both together.
+        // Send only one of these - the server rejects both together.
         ...(search.invitation
           ? { invitation_token: search.invitation }
           : parsed.data.organization_name

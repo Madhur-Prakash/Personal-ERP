@@ -1,8 +1,8 @@
-"""OCR engine layer — format sniffing, dispatch, and the Tesseract adapter.
+"""OCR engine layer - format sniffing, dispatch, and the Tesseract adapter.
 
 Split from ``test_ocr_extraction.py`` by what they need: extraction is pure, this
 touches Pillow, pypdf, and a system binary. The Tesseract tests skip when the binary
-is absent, because a contributor without it should still get a green suite — but
+is absent, because a contributor without it should still get a green suite - but
 where it *is* installed they run for real, against an image generated here. Mocking
 the engine would test the mock.
 """
@@ -116,7 +116,7 @@ def digital_pdf() -> bytes:
 def _write_simple_pdf(buffer: io.BytesIO, text: str) -> None:
     """Emit a minimal one-page PDF with a text layer.
 
-    Hand-assembled because the point is to produce a *digital* PDF — one whose
+    Hand-assembled because the point is to produce a *digital* PDF - one whose
     characters are in the file rather than drawn as pixels. A library that rasterises
     would defeat the test it exists for.
     """
@@ -235,7 +235,7 @@ class TestPdfTextLayerEngine:
     ) -> None:
         """The end-to-end claim for a digital PDF: every field, and totals that add up.
 
-        This is why the text layer is tried before OCR — the result is not
+        This is why the text layer is tried before OCR - the result is not
         "better", it is exact.
         """
         result = engine.recognise(digital_pdf, DocumentFormat.PDF)
@@ -286,7 +286,7 @@ class TestTesseractEngine:
     def test_availability_is_a_probe_not_an_import_check(self) -> None:
         """``is_available`` must survive being called when the binary is missing.
 
-        It returns a bool either way — never raises. A probe that throws is useless
+        It returns a bool either way - never raises. A probe that throws is useless
         for deciding whether to offer the feature.
         """
         assert isinstance(tesseract.is_available(), bool)
@@ -320,7 +320,7 @@ class TestTesseractEngine:
         """The strongest available signal that recognition worked end to end.
 
         A GSTIN is 15 characters with a strict shape, so matching one means the OCR
-        got all 15 right — a single substituted character would fail the pattern.
+        got all 15 right - a single substituted character would fail the pattern.
         """
         result = tesseract.recognise(invoice_png, DocumentFormat.PNG)
         parsed = extract_document(result.text)
@@ -337,8 +337,8 @@ class TestTesseractEngine:
     def test_flattens_transparency_instead_of_blackening_it(self) -> None:
         """White text on a transparent background must not become black on black.
 
-        Grayscale conversion turns an alpha channel into black, so an RGBA export —
-        which is what "save as PNG" produces in most tools — would otherwise read as
+        Grayscale conversion turns an alpha channel into black, so an RGBA export -
+        which is what "save as PNG" produces in most tools - would otherwise read as
         a blank page.
         """
         from PIL import Image, ImageDraw
@@ -368,7 +368,7 @@ class TestDispatch:
         assert "pdf-text-layer" in names
 
     def test_prefers_the_text_layer_for_a_pdf(self, digital_pdf: bytes) -> None:
-        """Dispatch order is the accuracy decision — assert it, do not assume it."""
+        """Dispatch order is the accuracy decision - assert it, do not assume it."""
         result = recognise_sync(digital_pdf, DocumentFormat.PDF)
         assert result.engine == "pdf-text-layer"
 

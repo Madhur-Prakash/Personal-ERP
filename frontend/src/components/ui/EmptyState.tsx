@@ -8,7 +8,7 @@ import { cn } from '@/lib/cn';
  *
  * A real component, not an afterthought, because "no data" is the *first* thing
  * every user of a new ERP sees. It should explain what belongs here and offer
- * the action that creates it — an empty grid with no explanation reads as a bug.
+ * the action that creates it - an empty grid with no explanation reads as a bug.
  */
 export function EmptyState({
   icon: Icon,

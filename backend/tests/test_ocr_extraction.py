@@ -1,6 +1,6 @@
 """OCR field-extraction tests.
 
-Pure text in, structured fields out — no OCR engine, no database. That is the point
+Pure text in, structured fields out - no OCR engine, no database. That is the point
 of keeping extraction pure: the product logic can be tested exhaustively without a
 model download or a scanner.
 
@@ -141,7 +141,7 @@ class TestGstinExtraction:
         assert result is not None
 
     def test_does_not_match_a_bare_pan(self) -> None:
-        """A PAN is 10 characters and embedded in every GSTIN — it must not be
+        """A PAN is 10 characters and embedded in every GSTIN - it must not be
         mistaken for one."""
         assert extract_gstin("PAN: AABCU9603R") is None
 
@@ -159,7 +159,7 @@ class TestGstinExtraction:
     def test_tolerates_spaces_the_engine_inserted(self, recognised: str) -> None:
         """Tesseract really does split a printed GSTIN.
 
-        Reading a rendered invoice returns `27 AABCU9603R1ZM` — engines break long
+        Reading a rendered invoice returns `27 AABCU9603R1ZM` - engines break long
         alphanumeric runs at wide letter spacing. Missing those would cost the
         reviewer the one field that auto-matches the supplier.
         """
@@ -168,7 +168,7 @@ class TestGstinExtraction:
         assert result.value == "27AABCU9603R1ZM"
 
     def test_a_despaced_match_scores_slightly_lower(self) -> None:
-        """It rests on an extra assumption — that the spaces were not printed."""
+        """It rests on an extra assumption - that the spaces were not printed."""
         clean = extract_gstin("GSTIN: 27AABCU9603R1ZM")
         spaced = extract_gstin("GSTIN: 27 AABCU9603R1ZM")
         assert clean is not None and spaced is not None
@@ -178,7 +178,7 @@ class TestGstinExtraction:
     def test_despacing_still_enforces_the_shape(self) -> None:
         """Relaxing contiguity must not relax the format.
 
-        15 spaced characters that are not GSTIN-shaped are not a GSTIN — otherwise
+        15 spaced characters that are not GSTIN-shaped are not a GSTIN - otherwise
         this would match any long reference number on the page.
         """
         assert extract_gstin("REF: AB CDEFG 1234 X 1 Y 2") is None
@@ -287,7 +287,7 @@ class TestWholeDocument:
 
     def test_reconciling_totals_raise_confidence(self, parsed) -> None:
         """Arithmetic agreeing is strong independent evidence that all three
-        numbers were read correctly — a single wrong digit would break it."""
+        numbers were read correctly - a single wrong digit would break it."""
         assert parsed.total_amount is not None
         assert parsed.total_amount.confidence >= HIGH_CONFIDENCE
 

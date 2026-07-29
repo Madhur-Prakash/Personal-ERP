@@ -1,19 +1,19 @@
 """Financial statements.
 
-Five reports, all derived from the same source — posted journal lines — so they
+Five reports, all derived from the same source - posted journal lines - so they
 cannot disagree with each other:
 
-* **Trial balance** — every account's debits and credits. Total debits must equal
+* **Trial balance** - every account's debits and credits. Total debits must equal
   total credits; if they do not, the ledger is corrupt and every other report is
   meaningless.
-* **General ledger** — one account's movements with a running balance.
-* **Profit & loss** — income minus expenses over a *period*.
-* **Balance sheet** — assets, liabilities, and equity *as at a date*.
-* **Cash flow** — movement in cash and bank accounts over a period.
+* **General ledger** - one account's movements with a running balance.
+* **Profit & loss** - income minus expenses over a *period*.
+* **Balance sheet** - assets, liabilities, and equity *as at a date*.
+* **Cash flow** - movement in cash and bank accounts over a period.
 
 **The one subtlety that makes a balance sheet balance.** P&L accounts reset each
 fiscal year; their net result rolls into retained earnings only when the year is
-closed. So mid-year, ``assets != liabilities + equity`` — the difference is
+closed. So mid-year, ``assets != liabilities + equity`` - the difference is
 exactly the profit earned so far. This module computes that figure and presents it
 as a distinct equity line, ``current_period_earnings``. Omitting it is the classic
 reason a hand-rolled balance sheet fails to balance.
@@ -108,8 +108,8 @@ class ReportingService:
         Only postable (leaf) accounts appear: including groups would double-count,
         since a group's balance is its children's.
 
-        A balance is reported on the side it naturally falls on — a net debit
-        balance in the debit column — which is what makes the two column totals
+        A balance is reported on the side it naturally falls on - a net debit
+        balance in the debit column - which is what makes the two column totals
         equal.
         """
         accounts = await self.accounts.list_for_org(
@@ -163,7 +163,7 @@ class ReportingService:
             # If it happens, something has written to the database outside the
             # application, and that is worth shouting about.
             log.critical(
-                "trial balance does not balance — ledger integrity compromised",
+                "trial balance does not balance - ledger integrity compromised",
                 extra={
                     "organization_id": str(organization_id),
                     "total_debit": str(total_debit),
@@ -285,7 +285,7 @@ class ReportingService:
         """Income and expenses for a period.
 
         Cost of goods sold is separated from operating expenses so gross profit is
-        meaningful — for a trading business that is the number that matters, and it
+        meaningful - for a trading business that is the number that matters, and it
         cannot be recovered from a single lumped expense total.
         """
         if to_date < from_date:
@@ -353,7 +353,7 @@ class ReportingService:
 
         Balance-sheet balances are cumulative since inception, so no ``from_date``
         is passed. Current-year P&L is computed separately over the fiscal year and
-        surfaced as an equity line — see the module docstring for why that is what
+        surfaced as an equity line - see the module docstring for why that is what
         makes the statement balance.
         """
         accounts = await self.accounts.list_for_org(
@@ -446,7 +446,7 @@ class ReportingService:
         **Direct method**, built from actual cash-account movements and grouped by
         the counter-account they came from or went to. The indirect method (net
         profit adjusted for non-cash items and working-capital changes) is the
-        statutory presentation for larger entities and is deferred — for a small
+        statutory presentation for larger entities and is deferred - for a small
         business, "where did the money actually go" is both more useful and
         verifiable line by line against the bank statement.
         """
@@ -483,7 +483,7 @@ class ReportingService:
             )
 
         # Walk each cash account's movements and attribute them to the other side
-        # of the same entry — that counter-account is the reason the cash moved.
+        # of the same entry - that counter-account is the reason the cash moved.
         inflow_totals: dict[uuid.UUID, Decimal] = defaultdict(lambda: ZERO)
         outflow_totals: dict[uuid.UUID, Decimal] = defaultdict(lambda: ZERO)
         total_inflows = ZERO

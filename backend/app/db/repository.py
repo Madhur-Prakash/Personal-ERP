@@ -37,7 +37,7 @@ def rows_affected(result: Result[Any]) -> int:
     """Row count from a bulk ``UPDATE``/``DELETE``.
 
     ``AsyncSession.execute`` is typed as returning ``Result``, which exposes no
-    ``rowcount`` — but a DML statement actually returns a ``CursorResult``, which
+    ``rowcount`` - but a DML statement actually returns a ``CursorResult``, which
     does. The cast records that fact in one place instead of at every bulk-write
     call site.
 
@@ -96,7 +96,7 @@ class BaseRepository[ModelT: Base]:
     # Reads
     # -------------------------------------------------------------------------
     async def get(self, entity_id: uuid.UUID, *, include_deleted: bool = False) -> ModelT | None:
-        """Fetch by primary key. ``None`` when absent — the service decides
+        """Fetch by primary key. ``None`` when absent - the service decides
         whether that is a :class:`~app.core.exceptions.NotFoundError`."""
         query = self._base_query(include_deleted=include_deleted).where(
             self.model.id == entity_id  # type: ignore[attr-defined]
@@ -197,8 +197,8 @@ class BaseRepository[ModelT: Base]:
         """Stage an insert and flush it.
 
         Flush, not commit: it assigns the primary key and surfaces constraint
-        violations here — where the service can translate them into a domain
-        error — rather than at the end of the request.
+        violations here - where the service can translate them into a domain
+        error - rather than at the end of the request.
         """
         self.session.add(entity)
         await self.session.flush()
@@ -228,6 +228,6 @@ class BaseRepository[ModelT: Base]:
 
     async def hard_delete(self, entity: ModelT) -> None:
         """Physically remove the row. Reserved for genuinely transient data
-        (expired tokens, stale sessions) — never for business records."""
+        (expired tokens, stale sessions) - never for business records."""
         await self.session.delete(entity)
         await self.session.flush()

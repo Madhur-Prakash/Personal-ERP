@@ -3,7 +3,7 @@
 This file exists because of a gap it would have caught: `with_computed` validated
 the ORM object *before* overlaying computed fields, so every response helper using
 it raised `ValidationError` on a required computed field. Sales and accounting
-routers had 10 such call sites and **no test ever executed one** — the module tests
+routers had 10 such call sites and **no test ever executed one** - the module tests
 called services directly. The bug surfaced only when purchasing got API tests.
 
 So: every response-assembly helper in sales and accounting is now exercised over
@@ -216,7 +216,7 @@ class TestAccountingApi:
         accounts = response.json()
 
         # Asserted by shape rather than by an exact count. `len(accounts) == 53` was here
-        # and had to be edited every time the template gained a category — a maintenance
+        # and had to be edited every time the template gained a category - a maintenance
         # tax that never caught a defect, because a wrong *number* of accounts is not a
         # failure mode. Every system role being resolvable is.
         keys = {a["system_key"] for a in accounts if a["system_key"]}

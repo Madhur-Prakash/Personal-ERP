@@ -1,11 +1,11 @@
-"""Billing — record money in and money out, without naming anyone.
+"""Billing - record money in and money out, without naming anyone.
 
 The simple path through this product. A shopkeeper types a date, an amount, and what
 it was for; the ledger gets a correct double-entry posting and every report picks it
 up. No customer, no supplier, no invoice.
 
 **A bill with nobody's name on it is an expense, not a payable.** That is not a
-shortcut — it is the correct treatment. A payable exists because you owe a specific
+shortcut - it is the correct treatment. A payable exists because you owe a specific
 party a specific amount; if the money has already left your hand, there is nothing
 owed and nobody to owe it to. So money out is ``debit expense, credit cash`` and money
 in is ``debit cash, credit income``. Two lines, and the accounting equation holds
@@ -82,7 +82,7 @@ class MoneyKind(StrEnum):
 
     Both are cash-equivalent for the cash flow statement. They are separate because
     they are checked differently: cash against a physical count, a bank against a
-    statement — and a UPI wallet or card-settlement account behaves like a bank.
+    statement - and a UPI wallet or card-settlement account behaves like a bank.
     """
 
     CASH = "cash"
@@ -92,9 +92,9 @@ class MoneyKind(StrEnum):
 class Direction(StrEnum):
     """Which way the money went."""
 
-    #: Money received — a sale, a refund, an owner contribution.
+    #: Money received - a sale, a refund, an owner contribution.
     IN = "in"
-    #: Money spent — a bill, an expense, a purchase.
+    #: Money spent - a bill, an expense, a purchase.
     OUT = "out"
 
     @property
@@ -124,7 +124,7 @@ class Category:
 
 @dataclass(frozen=True, slots=True)
 class MoneyAccount:
-    """Where the money sat or landed — a cash box or a bank account."""
+    """Where the money sat or landed - a cash box or a bank account."""
 
     id: uuid.UUID
     code: str
@@ -191,7 +191,7 @@ class BillingService:
     async def categories(self, organization_id: uuid.UUID) -> list[Category]:
         """Income and expense accounts, as a flat pick-list.
 
-        Groups are excluded — you cannot post to a heading. Returned flat rather than
+        Groups are excluded - you cannot post to a heading. Returned flat rather than
         as a tree because this form has one dropdown, and a shopkeeper choosing
         "Rent" does not care that it sits under "Operating Expenses".
         """
@@ -237,7 +237,7 @@ class BillingService:
     ) -> Category:
         """Add a category of the user's own.
 
-        The template cannot anticipate every business, so this is the escape hatch —
+        The template cannot anticipate every business, so this is the escape hatch -
         and it is deliberately the *only* account-creation path exposed on this screen.
         The user supplies a name and a direction; the code, the parent group, the
         subtype, and the depth are all derived. Asking a shopkeeper to choose an account
@@ -269,7 +269,7 @@ class BillingService:
             None,
         ) or next((a for a in every if a.is_group and a.account_type is wanted), None)
 
-        if parent is None:  # pragma: no cover — ensure_books guarantees a group exists
+        if parent is None:  # pragma: no cover - ensure_books guarantees a group exists
             raise BusinessRuleError(
                 "The chart of accounts has no group to file this under.",
                 code="no_parent_group",
@@ -316,14 +316,14 @@ class BillingService:
         The seeded chart gives one of each, which covers a business with a till and a
         current account and nobody else. A second bank, a UPI wallet, a partner's
         petty cash, or the card machine's settlement account are all ordinary, and
-        without this the only choices are "Cash on Hand" and "Primary Bank Account" —
+        without this the only choices are "Cash on Hand" and "Primary Bank Account" -
         so money that moved through a wallet gets filed as cash and the balances stop
         matching anything real.
 
         Only a name and whether it behaves like cash or a bank. The subtype is what
         matters to the software: both are cash-equivalent for the cash flow statement,
-        but they reconcile differently — cash against a physical count, a bank against
-        a statement — so they are separate subtypes rather than one.
+        but they reconcile differently - cash against a physical count, a bank against
+        a statement - so they are separate subtypes rather than one.
         """
         await self.ensure_books(organization_id)
 
@@ -351,7 +351,7 @@ class BillingService:
             anchor = "1110"
             subtype = AccountSubtype.CASH
 
-        if parent is None:  # pragma: no cover — ensure_books guarantees the group
+        if parent is None:  # pragma: no cover - ensure_books guarantees the group
             raise BusinessRuleError(
                 "The chart of accounts has no current-assets group.", code="no_parent_group"
             )
@@ -397,7 +397,7 @@ class BillingService:
             candidate = str(candidate_int)
             if candidate not in taken:
                 return candidate
-        raise BusinessRuleError(  # pragma: no cover — 1000 codes exhausted
+        raise BusinessRuleError(  # pragma: no cover - 1000 codes exhausted
             "No account code is free near this group.", code="no_free_code"
         )
 
@@ -440,7 +440,7 @@ class BillingService:
 
         ``category_id`` and ``money_account_id`` are optional: omitted, they fall back
         to the defaults, so the minimum viable entry really is a date, an amount, and
-        a note — which is what was asked for.
+        a note - which is what was asked for.
         """
         if amount <= 0:
             raise ValidationError(
@@ -567,8 +567,8 @@ class BillingService:
         forward. Seeding on demand fixes those accounts the moment someone opens the
         screen, with no migration and nothing for the user to do.
 
-        Both halves are idempotent — ``seed_defaults`` skips entirely when any account
-        exists, ``ensure_year_for`` returns the existing year — so the common case costs
+        Both halves are idempotent - ``seed_defaults`` skips entirely when any account
+        exists, ``ensure_year_for`` returns the existing year - so the common case costs
         one cheap existence check.
         """
         start_month = (
@@ -581,7 +581,7 @@ class BillingService:
 
         # `sync_template` rather than `seed_defaults`: it seeds when there is nothing,
         # and tops up by code when there is. Organizations created against an earlier
-        # template would otherwise never see categories added since — which is exactly
+        # template would otherwise never see categories added since - which is exactly
         # what happened when the household and expanded expense lists landed.
         await self.chart.sync_template(organization_id)
         await self.calendar.ensure_year_for(
@@ -596,7 +596,7 @@ class BillingService:
 
         ``reverse_entry`` copies ``source_type`` onto the mirror entry it creates, so
         without the ``reverses_id`` filter a cancelled ₹5,000 expense shows up here
-        twice: once struck through, and once as a phantom ₹5,000 *receipt* — because
+        twice: once struck through, and once as a phantom ₹5,000 *receipt* - because
         reversing a payment debits cash. Two rows that cancel each other is precisely
         the wrong thing to show the audience this screen exists for.
 
@@ -634,7 +634,7 @@ class BillingService:
         to_date: dt.date | None = None,
         q: str | None = None,
     ) -> tuple[list[Entry], int]:
-        """Most recent first — a day book is read backwards from today."""
+        """Most recent first - a day book is read backwards from today."""
         query = self._entry_query(organization_id)
 
         if from_date is not None:
@@ -686,7 +686,7 @@ class BillingService:
         under this ``source_type`` would be corrupt data, so it fails loudly rather
         than guessing.
         """
-        if len(row.lines) != 2:  # pragma: no cover — only reachable via manual SQL
+        if len(row.lines) != 2:  # pragma: no cover - only reachable via manual SQL
             raise BusinessRuleError(
                 f"Entry {row.entry_number} does not have the two lines a billing entry "
                 "must have. It may have been edited outside the application.",
@@ -736,7 +736,7 @@ class BillingService:
         """Money in, money out, and the net, for a window.
 
         Counts only what this module recorded, so it answers "what have I logged"
-        rather than "what did the business earn" — the second question is the P&L's,
+        rather than "what did the business earn" - the second question is the P&L's,
         and it includes invoices too.
         """
         entries, _ = await self.paginate(
@@ -772,7 +772,7 @@ class BillingService:
         """Cancel an entry by posting its mirror image.
 
         Not a delete, and not an edit. A posted ledger entry is immutable in this
-        system, so the only honest undo is an opposite entry that nets it to zero —
+        system, so the only honest undo is an opposite entry that nets it to zero -
         which is also what an auditor expects to see. Both rows survive.
         """
         entry = await self.get(organization_id, entry_id)

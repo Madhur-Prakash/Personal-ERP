@@ -35,7 +35,7 @@ class UserUpdate(BaseSchema):
 
     Every field a user is allowed to change, and nothing else. ``is_active``,
     ``is_superuser``, ``email``, and ``email_verified_at`` are deliberately absent
-    — a permissive update schema is how privilege escalation happens. Email
+    - a permissive update schema is how privilege escalation happens. Email
     changes need a re-verification flow of their own, which lands with the
     account-settings work in Stage 9.
     """

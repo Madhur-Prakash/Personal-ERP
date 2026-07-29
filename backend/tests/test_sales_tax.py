@@ -1,6 +1,6 @@
 """GST engine tests.
 
-Pure arithmetic, no database — so the cases can be exhaustive. This is the module
+Pure arithmetic, no database - so the cases can be exhaustive. This is the module
 most likely to be wrong in a way nobody notices until a customer adds up a column
 and finds it does not reconcile.
 

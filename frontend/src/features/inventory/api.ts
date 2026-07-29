@@ -217,7 +217,7 @@ export interface PayablesAgeing {
 export const inventoryApi = {
   suppliers: (params?: PageQuery) => api.get<Page<Supplier>>('/suppliers', { params }),
   /**
-   * The body mirrors `SupplierCreate`, which is `extra="forbid"` — an unrecognised
+   * The body mirrors `SupplierCreate`, which is `extra="forbid"` - an unrecognised
    * field is a 422, so this type is deliberately explicit rather than
    * `Partial<Supplier>`. Note `city`, not `billing_city`: a supplier has one address,
    * unlike a customer.

@@ -101,7 +101,7 @@ async def capabilities(
 ) -> OcrCapabilities:
     """Report the engines actually available.
 
-    Unauthenticated clients get nothing here — the response names installed
+    Unauthenticated clients get nothing here - the response names installed
     software, which is reconnaissance. Any member with `document:read` can see it,
     because the UI needs it to decide whether to offer an upload button at all.
     """
@@ -135,7 +135,7 @@ async def upload_document(
 ) -> UploadResult:
     """Store a file, read it, and return candidate field values.
 
-    Recognition happens inline, so this request takes as long as the engine does —
+    Recognition happens inline, so this request takes as long as the engine does -
     typically under a second for a digital PDF and a few seconds for a photograph.
     That is a deliberate trade for a self-hosted product: a job queue would mean
     Celery, a broker, and a worker process to supervise, and the honest response to
@@ -241,12 +241,12 @@ async def download_document(
     Three headers earn their place here, because this endpoint returns bytes a
     stranger uploaded:
 
-    * ``Content-Disposition: attachment`` — the browser saves rather than renders.
+    * ``Content-Disposition: attachment`` - the browser saves rather than renders.
       Without it, an uploaded file that a viewer chooses to interpret as HTML runs
       script on this origin, with the user's session cookie.
-    * ``X-Content-Type-Options: nosniff`` — stops the browser from second-guessing
+    * ``X-Content-Type-Options: nosniff`` - stops the browser from second-guessing
       the declared type and reaching that conclusion anyway.
-    * ``Content-Security-Policy: sandbox`` — a final backstop for viewers that
+    * ``Content-Security-Policy: sandbox`` - a final backstop for viewers that
       inline the response regardless.
 
     The declared content type is the *sniffed* one recorded at upload, never the one
@@ -290,7 +290,7 @@ async def reextract_document(
 ) -> DocumentRead:
     """Re-run field extraction on text already on file.
 
-    Cheap — no engine, no file read. Exists so an improvement to the parser can be
+    Cheap - no engine, no file read. Exists so an improvement to the parser can be
     applied to documents uploaded before it, which is otherwise impossible once the
     original files have been archived.
     """
@@ -322,7 +322,7 @@ async def confirm_document(
     machine-read total into money owed is not, and one permission covering both would
     quietly grant the second to everyone who has the first.
 
-    The posted bill uses the submitted values, not the extracted ones — extraction
+    The posted bill uses the submitted values, not the extracted ones - extraction
     fills a form, a human approves it. Everything else, including the refusal to
     accept the same supplier invoice number twice, is `BillService`'s existing
     behaviour rather than a second implementation of it.
@@ -330,7 +330,7 @@ async def confirm_document(
     document, bill = await service.confirm(organization_id, document_id, data.bill, user, ctx)
 
     # Re-read through the purchasing service and assemble with `bill_response`, the
-    # same function that serves `POST /bills` — one shape for a bill, not two.
+    # same function that serves `POST /bills` - one shape for a bill, not two.
     return ConfirmResult(
         document=_detail(document),
         bill=bill_response(await service.bills.get(organization_id, bill.id)),
@@ -373,7 +373,7 @@ async def delete_document(
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.DOCUMENT_WRITE))],
 ) -> MessageResponse:
-    """Soft-delete a document. Refused once it has become a bill — the file is the
+    """Soft-delete a document. Refused once it has become a bill - the file is the
     evidence behind an immutable ledger entry."""
     await service.delete(organization_id, document_id, user, ctx)
     return MessageResponse(message="Document deleted")

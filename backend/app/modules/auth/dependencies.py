@@ -2,14 +2,14 @@
 
 The per-request cost of authenticating is deliberately budgeted:
 
-1. **Decode and verify the JWT** — no I/O.
+1. **Decode and verify the JWT** - no I/O.
 2. **One Redis round trip** (pipelined) checking the user's token epoch and
    whether this specific session was revoked. This is what makes revocation
    effective within milliseconds instead of within the token's TTL.
 3. **One indexed primary-key lookup** for the user row, so a deactivated or
    deleted account cannot keep acting on a still-valid token.
 
-Permissions are read from the token, not the database — they were embedded at
+Permissions are read from the token, not the database - they were embedded at
 issue time, so authorization itself costs nothing. Staleness is bounded by the
 15-minute access-token TTL, and anything that must take effect immediately
 (role change, suspension) bumps the epoch.
@@ -96,7 +96,7 @@ TokenClaims = Annotated[dict[str, Any], Depends(get_token_claims)]
 async def _assert_token_still_valid(claims: dict[str, Any]) -> None:
     """Reject tokens invalidated after issue.
 
-    Both checks go out in one pipeline — two sequential round trips would double
+    Both checks go out in one pipeline - two sequential round trips would double
     the Redis latency on the hot path of every request.
     """
     user_id = claims["sub"]
@@ -107,7 +107,7 @@ async def _assert_token_still_valid(claims: dict[str, Any]) -> None:
     pipe.exists(RedisKey.revoked_session(str(session_id)))
     stored_epoch, session_revoked = await pipe.execute()
 
-    # A token minted before the epoch was bumped is stale — password change,
+    # A token minted before the epoch was bumped is stale - password change,
     # "sign out everywhere", role change, or deactivation.
     if int(stored_epoch or 0) != int(claims.get("epoch", 0)):
         log.info(
@@ -242,7 +242,7 @@ def require_permission(
     """Build a dependency enforcing one or more permissions.
 
     ``require_all=True`` (the default) demands every listed permission;
-    ``False`` accepts any one of them. Defaulting to AND is the safe direction —
+    ``False`` accepts any one of them. Defaulting to AND is the safe direction -
     a misread of the call site then denies access rather than granting it.
 
     Depends on :func:`get_current_user` rather than the raw claims so that
@@ -305,7 +305,7 @@ async def get_optional_user(
     """Resolve the user if a valid token is present, else ``None``.
 
     For endpoints that behave differently when signed in but do not require it.
-    Any token problem yields ``None`` rather than an error — the caller opted into
+    Any token problem yields ``None`` rather than an error - the caller opted into
     "might be anonymous".
     """
     if credentials is None or not credentials.credentials:

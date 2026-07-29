@@ -1,4 +1,4 @@
-"""Session data access — refresh-token lookup, rotation, and revocation."""
+"""Session data access - refresh-token lookup, rotation, and revocation."""
 
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ class SessionRepository(BaseRepository[UserSession]):
         """Revoke every session descended from a compromised one.
 
         Called on refresh-token reuse: the whole chain is suspect, because we
-        cannot tell which party holds the current token — the legitimate user or
+        cannot tell which party holds the current token - the legitimate user or
         the attacker. Revoking the lineage forces a fresh, verified sign-in.
         """
         revoked = 0
@@ -157,7 +157,7 @@ class SessionRepository(BaseRepository[UserSession]):
     async def purge_expired(self, *, older_than_days: int = 30) -> int:
         """Delete long-dead sessions.
 
-        The only place :meth:`hard_delete` semantics are correct — an expired
+        The only place :meth:`hard_delete` semantics are correct - an expired
         session has no evidentiary value, and the audit log already records the
         logins. Intended for a scheduled job in Stage 7.
         """

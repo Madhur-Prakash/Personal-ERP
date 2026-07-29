@@ -6,8 +6,8 @@
  * visibly different heights and the labels sat at different baselines. Sharing one
  * component is the only way that stays fixed.
  *
- * It also carries the accessibility wiring `Input` has — label association,
- * `aria-invalid`, `aria-describedby` — and a native chevron, since a `<select>` with
+ * It also carries the accessibility wiring `Input` has - label association,
+ * `aria-invalid`, `aria-describedby` - and a native chevron, since a `<select>` with
  * `appearance-none` and no replacement indicator looks like a text field.
  *
  * `optgroup` is supported through `groups`, because a flat list of sixty categories is
@@ -37,7 +37,7 @@ export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement
   groups?: SelectGroup[];
   /** Leading entry for "nothing chosen". Omit when a value is always required. */
   placeholder?: string;
-  /** Rendered to the right of the label — an "add new" affordance, usually. */
+  /** Rendered to the right of the label - an "add new" affordance, usually. */
   action?: ReactNode;
 }
 

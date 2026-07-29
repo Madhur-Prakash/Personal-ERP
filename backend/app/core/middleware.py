@@ -9,7 +9,7 @@ reversed relative to execution. The stack is arranged so that:
 * rate limiting runs before any handler work, so a flood costs a Redis
   ``INCR`` rather than a database query;
 * security headers are applied last on the way out, so they are present on *every*
-  response — including errors produced deeper in the stack.
+  response - including errors produced deeper in the stack.
 """
 
 from __future__ import annotations
@@ -97,14 +97,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     These are cheap and each closes a specific class of attack:
 
-    * ``X-Content-Type-Options: nosniff`` — stops a browser from reinterpreting a
+    * ``X-Content-Type-Options: nosniff`` - stops a browser from reinterpreting a
       JSON response as HTML and executing it.
-    * ``X-Frame-Options: DENY`` — no framing, so clickjacking has nothing to load.
-    * ``Referrer-Policy`` — keeps tokens in URLs (magic links) out of the
+    * ``X-Frame-Options: DENY`` - no framing, so clickjacking has nothing to load.
+    * ``Referrer-Policy`` - keeps tokens in URLs (magic links) out of the
       ``Referer`` header sent to third parties.
-    * ``Content-Security-Policy`` — the API returns only JSON, so a policy of
+    * ``Content-Security-Policy`` - the API returns only JSON, so a policy of
       "load nothing, frame nothing" is both correct and maximally strict.
-    * ``Strict-Transport-Security`` — production only; sending it over plain HTTP
+    * ``Strict-Transport-Security`` - production only; sending it over plain HTTP
       in development would pin localhost to HTTPS in the developer's browser and
       break every other local project on that port.
     """
@@ -124,7 +124,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         #
         # A route that already set its own policy keeps it. The document-download
         # endpoint returns bytes a stranger uploaded and adds `sandbox`, which the
-        # blanket policy below does not carry — overwriting it here would silently
+        # blanket policy below does not carry - overwriting it here would silently
         # remove a deliberate hardening measure, which is exactly the kind of
         # regression a middleware that clobbers headers causes.
         if (
@@ -149,7 +149,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     A fixed window (rather than a sliding log or token bucket) is one ``INCR``
     plus one ``EXPIRE`` per request, which keeps the limiter cheap enough to sit
     in front of everything. Its known weakness is burst tolerance at a window
-    boundary — up to twice the limit across two adjacent windows. Acceptable here:
+    boundary - up to twice the limit across two adjacent windows. Acceptable here:
     this is abuse protection, not billing, and auth endpoints get a much tighter
     budget where that matters.
 
@@ -161,7 +161,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     protective layer.
     """
 
-    #: Never rate-limited — orchestrator probes must not be throttled.
+    #: Never rate-limited - orchestrator probes must not be throttled.
     EXEMPT_PATHS: Final = ("/health",)
 
     #: Tighter budget: credential-guessing and enumeration surfaces.
@@ -197,7 +197,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         try:
             count, reset_in = await self._hit(scope, identifier, window)
         except Exception as exc:
-            log.error("rate limiter unavailable — allowing request", extra={"error": str(exc)})
+            log.error("rate limiter unavailable - allowing request", extra={"error": str(exc)})
             return await call_next(request)
 
         if count > limit:
@@ -267,5 +267,5 @@ def _parse_rate(spec: str) -> tuple[int, int]:
         count, unit = spec.split("/", 1)
         return int(count), units[unit.strip().lower().rstrip("s")]
     except (ValueError, KeyError):
-        log.error("malformed rate limit spec — using 200/minute", extra={"spec": spec})
+        log.error("malformed rate limit spec - using 200/minute", extra={"spec": spec})
         return 200, 60

@@ -61,7 +61,7 @@ class UserRepository(BaseRepository[User]):
     async def active_memberships(self, user_id: uuid.UUID) -> Sequence[OrganizationMember]:
         """The user's usable memberships, with org and role loaded.
 
-        Excludes suspended memberships and soft-deleted organizations — a
+        Excludes suspended memberships and soft-deleted organizations - a
         suspended member must not be able to switch into that org.
         """
         from app.modules.organizations.models import Organization

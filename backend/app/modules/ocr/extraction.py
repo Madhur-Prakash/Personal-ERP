@@ -1,4 +1,4 @@
-"""Field extraction — turning OCR text into a structured document.
+"""Field extraction - turning OCR text into a structured document.
 
 **This module is pure.** No OCR engine, no database, no network. It takes a string
 of recognised text and returns candidate field values with confidence scores. That
@@ -29,7 +29,7 @@ from typing import Final
 # ---------------------------------------------------------------------------
 #: Above this, the review UI pre-fills the field without flagging it.
 HIGH_CONFIDENCE: Final = Decimal("0.85")
-#: Below this, the field is presented blank rather than pre-filled — a wrong
+#: Below this, the field is presented blank rather than pre-filled - a wrong
 #: default is worse than none, because a reviewer skims past a plausible value.
 LOW_CONFIDENCE: Final = Decimal("0.50")
 
@@ -84,7 +84,7 @@ class ExtractedDocument:
     def overall_confidence(self) -> Decimal:
         """Mean confidence across the fields that were found.
 
-        A summary for sorting a review queue — never a substitute for the per-field
+        A summary for sorting a review queue - never a substitute for the per-field
         scores, which are what the reviewer actually acts on.
         """
         found = [
@@ -149,7 +149,7 @@ GSTIN_PATTERN: Final = re.compile(r"\b(\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]Z[0-9A-Z])
 #: The same 15 characters, tolerating spaces OCR inserted between them.
 #:
 #: **Not a hypothetical.** Tesseract reads a printed ``27AABCU9603R1ZM`` as
-#: ``27 AABCU9603R1ZM`` — engines break long alphanumeric runs where the letter
+#: ``27 AABCU9603R1ZM`` - engines break long alphanumeric runs where the letter
 #: spacing widens, and an invoice's GSTIN is set in exactly that kind of type. The
 #: strict pattern above misses every one of those, and the GSTIN is the field
 #: supplier matching depends on, so losing it costs the reviewer the one thing the
@@ -228,8 +228,8 @@ def parse_amount(raw: str) -> Decimal | None:
     """Parse an amount, tolerating both digit-grouping conventions.
 
     Indian grouping (``1,20,000``) and Western (``120,000``) both appear, sometimes
-    on the same invoice. Since commas are only ever separators here — never a
-    decimal point in this locale — stripping them handles both without having to
+    on the same invoice. Since commas are only ever separators here - never a
+    decimal point in this locale - stripping them handles both without having to
     guess which convention is in play.
     """
     cleaned = raw.strip().replace(",", "").replace("₹", "").strip()
@@ -295,7 +295,7 @@ def extract_gstin(text: str) -> ExtractedField[str] | None:
 
     Two passes. The contiguous form is tried first and scores highest. Failing that,
     a run of 15 alphanumerics separated by single spaces is de-spaced and checked
-    against the same strict shape — scored marginally lower, because it rests on the
+    against the same strict shape - scored marginally lower, because it rests on the
     additional assumption that those spaces were not in the printed document.
     """
     if match := GSTIN_PATTERN.search(text):
@@ -334,7 +334,7 @@ def extract_invoice_number(text: str) -> ExtractedField[str] | None:
     if len(candidate) < 2:
         return None
 
-    # A candidate that is only digits is weaker — it could be a date fragment or a
+    # A candidate that is only digits is weaker - it could be a date fragment or a
     # page number that happened to follow the label.
     confidence = Decimal("0.70") if candidate.isdigit() else Decimal("0.88")
     return ExtractedField(
@@ -374,7 +374,7 @@ def extract_supplier_name(text: str) -> ExtractedField[str] | None:
 
     A heuristic, and scored accordingly. The supplier's name is normally the most
     prominent line in the letterhead, which after OCR means "near the top and not
-    obviously something else". Low confidence on purpose — the review UI should ask.
+    obviously something else". Low confidence on purpose - the review UI should ask.
     """
     skip = re.compile(
         r"^(?:tax\s+invoice|invoice|bill|gstin|gst|pan|phone|tel|email|www|http|date|"
@@ -407,7 +407,7 @@ def extract_document(text: str, *, today: dt.date | None = None) -> ExtractedDoc
 
     Confidence is raised when ``subtotal + tax == total``, because that arithmetic
     agreeing is strong independent evidence that all three numbers were read
-    correctly — a single misrecognised digit would break it.
+    correctly - a single misrecognised digit would break it.
     """
     document = ExtractedDocument(
         supplier_name=extract_supplier_name(text),
@@ -437,7 +437,7 @@ def _boost_reconciled_amounts(document: ExtractedDocument) -> ExtractedDocument:
     """Raise confidence on the three amounts when they add up.
 
     Capped at 0.97 rather than 1.0: arithmetic agreement is powerful evidence but
-    not proof — a consistently misread column could still reconcile.
+    not proof - a consistently misread column could still reconcile.
     """
     for name in ("subtotal", "tax_amount", "total_amount"):
         current: ExtractedField[Decimal] | None = getattr(document, name)

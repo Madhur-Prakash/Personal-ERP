@@ -225,7 +225,7 @@ async def delete_customer(
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.CUSTOMER_WRITE))],
 ) -> MessageResponse:
-    """Refused if the customer has invoices — deactivate instead."""
+    """Refused if the customer has invoices - deactivate instead."""
     await service.delete(organization_id, customer_id, user, ctx)
     return MessageResponse(message="Customer deleted")
 
@@ -680,7 +680,7 @@ async def update_invoice(
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.INVOICE_WRITE))],
 ) -> InvoiceRead:
-    """Drafts only. A posted invoice is a statutory record — cancel it instead."""
+    """Drafts only. A posted invoice is a statutory record - cancel it instead."""
     await service.update(organization_id, invoice_id, data, user, ctx)
     return _invoice_response(await service.get(organization_id, invoice_id))
 
@@ -809,7 +809,7 @@ async def allocate_payment(
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.PAYMENT_WRITE))],
 ) -> PaymentRead:
-    """Records which invoices the receipt settles. No further ledger posting —
+    """Records which invoices the receipt settles. No further ledger posting -
     the receipt already cleared receivables in aggregate."""
     await service.allocate(organization_id, payment_id, data, user, ctx)
     return _payment_response(await service.get(organization_id, payment_id))

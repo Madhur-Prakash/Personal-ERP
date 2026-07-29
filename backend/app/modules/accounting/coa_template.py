@@ -1,6 +1,6 @@
 """The default chart of accounts seeded into a new organization.
 
-A blank chart is useless to a small business — nobody starting a bakery knows they
+A blank chart is useless to a small business - nobody starting a bakery knows they
 need an "Accumulated Depreciation" contra-asset. So a working chart is seeded and
 the owner prunes it, which is far easier than building one from nothing.
 
@@ -16,13 +16,13 @@ without explanation:
 ===========  ==================
 
 Content is India-oriented (GST input/output, TDS payable) because that is the
-default locale — ``Organization.currency`` defaults to INR and the fiscal year
+default locale - ``Organization.currency`` defaults to INR and the fiscal year
 starts in April. The structure is locale-neutral, so an alternate template is a
 matter of adding a second list, not changing any logic.
 
 ``system_key`` marks the single default account for a role. Later stages resolve
-by that key — an invoice credits ``sales_revenue`` and debits
-``accounts_receivable`` — so this template is the contract between the ledger and
+by that key - an invoice credits ``sales_revenue`` and debits
+``accounts_receivable`` - so this template is the contract between the ledger and
 every module that posts into it.
 """
 
@@ -61,7 +61,7 @@ class SystemAccount:
 class AccountSpec(NamedTuple):
     """One line of the template.
 
-    ``parent`` is a *code*, not an id — the seeder resolves codes to ids as it
+    ``parent`` is a *code*, not an id - the seeder resolves codes to ids as it
     walks the list, so the template stays readable and reorderable.
     """
 
@@ -75,10 +75,10 @@ class AccountSpec(NamedTuple):
     reconcilable: bool = False
 
 
-#: Parents must appear before their children — the seeder inserts in order.
+#: Parents must appear before their children - the seeder inserts in order.
 DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
     # =========================================================================
-    # 1xxx — Assets
+    # 1xxx - Assets
     # =========================================================================
     AccountSpec("1000", "Assets", Type.ASSET, Sub.OTHER_ASSET, is_group=True),
     AccountSpec("1100", "Current Assets", Type.ASSET, Sub.OTHER_CURRENT_ASSET, "1000", True),
@@ -138,7 +138,7 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
         "1290", "Accumulated Depreciation", Type.ASSET, Sub.ACCUMULATED_DEPRECIATION, "1200"
     ),
     # =========================================================================
-    # 2xxx — Liabilities
+    # 2xxx - Liabilities
     # =========================================================================
     AccountSpec("2000", "Liabilities", Type.LIABILITY, Sub.OTHER_CURRENT_LIABILITY, is_group=True),
     AccountSpec(
@@ -178,7 +178,7 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
     ),
     AccountSpec("2210", "Bank Loans", Type.LIABILITY, Sub.LONG_TERM_LIABILITY, "2200"),
     # =========================================================================
-    # 3xxx — Equity
+    # 3xxx - Equity
     # =========================================================================
     AccountSpec("3000", "Equity", Type.EQUITY, Sub.CAPITAL, is_group=True),
     AccountSpec(
@@ -202,7 +202,7 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
         system_key=SystemAccount.RETAINED_EARNINGS,
     ),
     # =========================================================================
-    # 4xxx — Income
+    # 4xxx - Income
     # =========================================================================
     AccountSpec("4000", "Income", Type.INCOME, Sub.OPERATING_REVENUE, is_group=True),
     AccountSpec(
@@ -240,7 +240,7 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
     AccountSpec("4550", "Pension", Type.INCOME, Sub.OTHER_INCOME, "4500"),
     AccountSpec("4900", "Miscellaneous Income", Type.INCOME, Sub.OTHER_INCOME, "4400"),
     # =========================================================================
-    # 5xxx — Expenses
+    # 5xxx - Expenses
     # =========================================================================
     AccountSpec("5000", "Expenses", Type.EXPENSE, Sub.OPERATING_EXPENSE, is_group=True),
     AccountSpec(
@@ -252,7 +252,7 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
         system_key=SystemAccount.COST_OF_GOODS_SOLD,
     ),
     # What a shopkeeper calls buying stock. Deliberately separate from Cost of Goods
-    # Sold, which the inventory module posts automatically when stock is *sold* — a
+    # Sold, which the inventory module posts automatically when stock is *sold* - a
     # business not tracking stock records the purchase here and never touches COGS.
     AccountSpec("5150", "Purchases", Type.EXPENSE, Sub.COST_OF_GOODS_SOLD, "5000"),
     AccountSpec("5160", "Freight & Cartage Inward", Type.EXPENSE, Sub.COST_OF_GOODS_SOLD, "5000"),
@@ -288,7 +288,7 @@ DEFAULT_CHART: Final[tuple[AccountSpec, ...]] = (
     # mixes groceries into operating expenses tells you nothing about the business.
     #
     # A note on the accounting. For a *registered* business, money the owner spends on
-    # themselves is **drawings** — a reduction of equity — not an expense, and treating
+    # themselves is **drawings** - a reduction of equity - not an expense, and treating
     # it as one understates profit and therefore tax. These accounts are here because
     # this product is also used to keep a household's books, where they genuinely are
     # expenses. If both are being tracked in one set of books, reclassify personal
@@ -361,7 +361,7 @@ def validate_template() -> None:
 
     Called by a test rather than at import: a malformed chart should fail the
     build, not every request. Catches the mistakes that are easy to make when
-    hand-editing a 60-line table — a duplicate code, a parent that does not
+    hand-editing a 60-line table - a duplicate code, a parent that does not
     exist, a parent defined after its child, a child whose type contradicts its
     parent's, or two accounts claiming the same system key.
     """

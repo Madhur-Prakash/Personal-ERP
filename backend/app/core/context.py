@@ -1,7 +1,7 @@
 """Request context passed from the HTTP layer into services.
 
 Services need the caller's IP and user agent for audit rows and device history,
-but they must not import :class:`~fastapi.Request` to get them — that would tie
+but they must not import :class:`~fastapi.Request` to get them - that would tie
 business logic to HTTP and make every service test construct a fake request.
 
 This small value object is the seam. The router builds one; the service consumes

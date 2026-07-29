@@ -2,11 +2,11 @@
  * Date-range control for the financial statements.
  *
  * Presets for the windows people actually ask for, plus two date inputs for anything
- * else — an accountant reconciling one week, or a landlord checking a single day.
+ * else - an accountant reconciling one week, or a landlord checking a single day.
  *
  * **The fiscal-year start comes from the server.** The previous version hardcoded
  * `today.getMonth() >= 3` for April, which is right for India and wrong for an
- * organization set to a January year — and it duplicated a rule the backend already
+ * organization set to a January year - and it duplicated a rule the backend already
  * owns, so the two could disagree with nothing to catch it. `/analytics/periods`
  * reports the organization's own start month and its own idea of today, in its own
  * timezone.
@@ -63,7 +63,7 @@ function resolve(preset: PresetKey, today: Date, fiscalStartMonth: number): Date
     case 'fiscal_year':
       // **The whole financial year**, which in India is 1 April to 31 March of the
       // following year. Previously this label showed year-to-date, which is a different
-      // figure — and on 29 July it read "1 Apr to 29 Jul" under a heading that claims to
+      // figure - and on 29 July it read "1 Apr to 29 Jul" under a heading that claims to
       // be the financial year. Day 0 of the start month gives the last day of the month
       // before it, so the end is 31 March without hardcoding the length.
       return {
@@ -79,7 +79,7 @@ function resolve(preset: PresetKey, today: Date, fiscalStartMonth: number): Date
 }
 
 /**
- * ``FY 2026-27`` — how an Indian financial year is actually written and spoken.
+ * ``FY 2026-27`` - how an Indian financial year is actually written and spoken.
  *
  * A year that spans two calendar years cannot be labelled with one of them without
  * being ambiguous, which is exactly what made the old "Financial year" button unclear.
@@ -100,7 +100,7 @@ export function useReportRange(): {
   });
 
   const fiscalStartMonth = periods?.fiscal_year_start_month ?? 4;
-  // The server's today, in the organization's timezone — not the browser's.
+  // The server's today, in the organization's timezone - not the browser's.
   const today = periods?.today ? new Date(`${periods.today}T00:00:00`) : new Date();
 
   // Year-to-date is the default: it is the figure someone checking on the business

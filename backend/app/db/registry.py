@@ -1,10 +1,10 @@
-"""Model registry — imports every ORM class exactly once.
+"""Model registry - imports every ORM class exactly once.
 
 Two things depend on this module existing:
 
 1. **Alembic autogenerate.** ``Base.metadata`` only knows about tables whose
    classes have been imported. Anything missing here is silently omitted from
-   migrations — the single most common cause of "the migration is empty".
+   migrations - the single most common cause of "the migration is empty".
 2. **Mapper configuration.** Relationships are declared with string targets
    (``"OrganizationMember"``) to avoid circular imports between modules. They
    resolve on first use, which fails unless every class is registered.

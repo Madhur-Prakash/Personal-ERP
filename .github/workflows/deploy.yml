@@ -1,5 +1,5 @@
 # =============================================================================
-# Deploy — publishes images and rolls them out to the VPS.
+# Deploy - publishes images and rolls them out to the VPS.
 #
 # Triggered by a version tag, or manually. Not on every push to main: a deploy
 # should be a deliberate act with an identifiable version, not a side effect of
@@ -24,7 +24,7 @@ on:
         default: staging
 
 concurrency:
-  # Never two deploys at once — a partial rollout racing another is how a stack
+  # Never two deploys at once - a partial rollout racing another is how a stack
   # ends up in a state nobody can reason about.
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -140,7 +140,7 @@ jobs:
                 break
               fi
               if [ "$attempt" -eq 30 ]; then
-                echo "Readiness check failed — dumping logs and aborting"
+                echo "Readiness check failed - dumping logs and aborting"
                 docker compose -f docker-compose.prod.yml logs --tail=80 backend
                 exit 1
               fi

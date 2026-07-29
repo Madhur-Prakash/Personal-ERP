@@ -1,8 +1,8 @@
-"""Scanned documents over HTTP — upload, review, and confirm into a bill.
+"""Scanned documents over HTTP - upload, review, and confirm into a bill.
 
 The whole safety claim of this module is that **OCR cannot post to the ledger**: it
 fills a form, and a human approves it. That claim is only worth anything if it is
-tested, so the confirm path here asserts both halves — the bill carries the
+tested, so the confirm path here asserts both halves - the bill carries the
 *reviewer's* figures, and the books still balance afterwards.
 
 Digital PDFs are used as fixtures rather than images. They exercise the same
@@ -52,7 +52,7 @@ def isolated_upload_dir(tmp_path) -> Iterator[None]:
     Autouse and mandatory: without it the suite writes real files into
     ``backend/var/uploads`` and leaves them there, because the outer transaction
     rollback undoes the database row but cannot undo a filesystem write. That
-    asymmetry is worth naming — soft-deleting a document deliberately keeps its blob,
+    asymmetry is worth naming - soft-deleting a document deliberately keeps its blob,
     so nothing in production cleans up after a test either.
     """
     original = settings.upload_dir
@@ -78,7 +78,7 @@ def invoice_pdf(
 
     ``marker`` changes the bytes without changing the invoice, which is how the
     duplicate-detection tests produce two *different files* describing the *same
-    invoice* — the case that actually causes a supplier to be paid twice.
+    invoice* - the case that actually causes a supplier to be paid twice.
     """
     lines = [
         supplier,
@@ -251,7 +251,7 @@ class TestUpload:
     async def test_matches_the_supplier_by_gstin(
         self, authed_client: AsyncClient, api: str
     ) -> None:
-        """GSTIN, not name — it is unique and government-issued."""
+        """GSTIN, not name - it is unique and government-issued."""
         created = await authed_client.post(
             f"{api}/suppliers", json={"name": "Mumbai Wholesale Traders", "gstin": SUPPLIER_GSTIN}
         )
@@ -279,8 +279,8 @@ class TestDuplicateDetection:
     ) -> None:
         """The case that causes a supplier to be paid twice.
 
-        A re-sent invoice is rarely byte-identical — it is re-generated, re-scanned, or
-        forwarded — so the file hash does not catch it. Matching on
+        A re-sent invoice is rarely byte-identical - it is re-generated, re-scanned, or
+        forwarded - so the file hash does not catch it. Matching on
         ``(GSTIN, invoice number)`` does.
         """
         first = await upload(authed_client, api, invoice_pdf(marker="A"), filename="first.pdf")
@@ -392,7 +392,7 @@ class TestReads:
         """`sandbox` must reach the browser.
 
         `SecurityHeadersMiddleware` sets an app-wide CSP on every response, and it
-        used to overwrite this one — silently removing the directive that neutralises
+        used to overwrite this one - silently removing the directive that neutralises
         script in a document a browser decides to render inline. A JSON endpoint is
         checked alongside it, so the app-wide default is not weakened in the process.
         """
@@ -446,7 +446,7 @@ class TestReads:
 # ---------------------------------------------------------------------------
 class TestReextract:
     async def test_rereads_the_stored_text(self, authed_client: AsyncClient, api: str) -> None:
-        """No engine, no file read — the point is that a parser improvement can be
+        """No engine, no file read - the point is that a parser improvement can be
         applied to documents that predate it."""
         document = (await upload(authed_client, api, invoice_pdf()))["document"]
 
@@ -482,7 +482,7 @@ class TestReextract:
 
 
 # ---------------------------------------------------------------------------
-# Confirm — the path that touches money
+# Confirm - the path that touches money
 # ---------------------------------------------------------------------------
 class TestConfirm:
     async def _prepare(self, client: AsyncClient, api: str) -> tuple[str, str]:
@@ -543,7 +543,7 @@ class TestConfirm:
     ) -> None:
         """The core safety property of the whole module.
 
-        The document says the total is 60,180. The reviewer corrects it — because the
+        The document says the total is 60,180. The reviewer corrects it - because the
         supplier's own arithmetic was wrong, or the engine misread a digit. What lands
         in the books must be the corrected figure, and the extracted one must survive
         only as a record of what the machine thought.
@@ -602,7 +602,7 @@ class TestConfirm:
     ) -> None:
         """Because confirming goes through `BillService`, not around it.
 
-        Two different scans of the same invoice cannot both become bills — and the
+        Two different scans of the same invoice cannot both become bills - and the
         rule enforcing that is the one `POST /bills` already had, not a second copy.
         """
         supplier_id, first_id = await self._prepare(authed_client, api)

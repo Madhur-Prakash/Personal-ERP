@@ -1,4 +1,4 @@
-"""Sales — customers, leads, quotations, orders, invoices, payments.
+"""Sales - customers, leads, quotations, orders, invoices, payments.
 
 The document chain is **quotation → sales order → invoice → payment**, and each
 step links back to its predecessor without requiring it. A shop that just raises
@@ -13,8 +13,8 @@ rate, rounding rule, or price changes. The arithmetic lives in
 :mod:`app.modules.tax.gst` and its results are persisted here.
 
 **Posting to the ledger is a separate, explicit act.** A draft invoice has no
-accounting effect. Posting it creates the journal entry — debit receivables,
-credit revenue, credit tax — and stores that entry's id on the invoice. From then
+accounting effect. Posting it creates the journal entry - debit receivables,
+credit revenue, credit tax - and stores that entry's id on the invoice. From then
 on the invoice is immutable, for the same reason the entry is: it is a statutory
 record, and correction means a credit note, not an edit.
 """
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 # Enumerations
 # =============================================================================
 class LeadStatus(StrEnum):
-    """Pipeline stages. Deliberately short — a small business does not run a
+    """Pipeline stages. Deliberately short - a small business does not run a
     fourteen-stage enterprise funnel, and every extra stage is one more thing
     nobody updates."""
 
@@ -92,7 +92,7 @@ class InvoiceStatus(StrEnum):
     """An invoice's life.
 
     ``DRAFT`` has no accounting effect. Everything from ``POSTED`` onward does, and
-    is therefore immutable — payment moves it between paid states, and a mistake is
+    is therefore immutable - payment moves it between paid states, and a mistake is
     corrected with a credit note.
     """
 
@@ -126,7 +126,7 @@ class PaymentMethod(StrEnum):
 
     @property
     def is_cash(self) -> bool:
-        """Whether it lands in cash rather than bank — decides which ledger
+        """Whether it lands in cash rather than bank - decides which ledger
         account the payment posts against."""
         return self is PaymentMethod.CASH
 
@@ -154,7 +154,7 @@ class Customer(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
     gstin: Mapped[str | None] = mapped_column(String(15), index=True)
     pan: Mapped[str | None] = mapped_column(String(10))
     #: First two digits of the GSTIN. Denormalised because it decides CGST/SGST
-    #: versus IGST on every line of every invoice — deriving it per line would
+    #: versus IGST on every line of every invoice - deriving it per line would
     #: mean parsing the GSTIN thousands of times per report.
     state_code: Mapped[str | None] = mapped_column(String(2))
     is_tax_exempt: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -629,7 +629,7 @@ class Payment(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDel
 
     payment_date: Mapped[LedgerDate] = mapped_column(nullable=False, index=True)
     amount: Mapped[Money] = mapped_column(nullable=False)
-    #: Not yet applied to an invoice — a payment on account.
+    #: Not yet applied to an invoice - a payment on account.
     unallocated_amount: Mapped[Money] = mapped_column(nullable=False, default=ZERO)
 
     method: Mapped[PaymentMethod] = mapped_column(
@@ -641,7 +641,7 @@ class Payment(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDel
     currency: Mapped[CurrencyCode] = mapped_column(nullable=False, default="INR")
     notes: Mapped[str | None] = mapped_column(Text)
 
-    #: Which account the money landed in — cash or a specific bank account.
+    #: Which account the money landed in - cash or a specific bank account.
     deposit_account_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("account.id", ondelete="RESTRICT")
     )

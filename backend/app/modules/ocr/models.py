@@ -1,25 +1,25 @@
-"""Scanned documents — the inbox between a supplier's PDF and the ledger.
+"""Scanned documents - the inbox between a supplier's PDF and the ledger.
 
 **A document is a suggestion, never a posting.** Extraction produces candidate
 values that a human confirms; confirming hands them to the existing
 :class:`~app.modules.purchasing.receiving.BillService`, which applies every rule it
 already applies to a hand-entered bill. Nothing here writes to the ledger. An engine
 that reads ``8`` as ``3`` would otherwise book a ₹3,000 bill as ₹8,000, and the
-resulting journal entry is immutable — correctable only by a reversal that is now
+resulting journal entry is immutable - correctable only by a reversal that is now
 part of the permanent record.
 
 **Extracted values are typed columns, not one JSONB blob.** They have to be
 queryable: duplicate detection looks up ``(supplier_gstin, invoice_number)``, and
 the review queue sorts by amount and date. Per-field *confidence* is JSONB, because
-nothing queries it — it is read once, by the screen that decides which fields to
+nothing queries it - it is read once, by the screen that decides which fields to
 highlight.
 
 **Duplicate detection warns; it does not block.** Two axes, and they behave
 differently on purpose:
 
-* *Byte-identical file* — a hard uniqueness constraint. The same bytes are the same
+* *Byte-identical file* - a hard uniqueness constraint. The same bytes are the same
   document, full stop, and re-uploading them is an accident worth intercepting.
-* *Same supplier and invoice number* — a warning with a link, never a rejection.
+* *Same supplier and invoice number* - a warning with a link, never a rejection.
   Paying one supplier invoice twice is the most expensive clerical error in
   purchasing, so it must be surfaced loudly; but the values it compares were read by
   an OCR engine, and refusing a genuine invoice because a digit was misread would
@@ -63,12 +63,12 @@ class DocumentKind(StrEnum):
 
     Declared by the user rather than inferred. Classifying a document type from its
     text is a coin flip on a bad scan, and guessing wrong sends an invoice down the
-    wrong workflow — whereas the person uploading it already knows.
+    wrong workflow - whereas the person uploading it already knows.
     """
 
     #: A supplier's bill. The only kind that can currently be turned into a Bill.
     PURCHASE_INVOICE = "purchase_invoice"
-    #: Proof of payment — a card slip, a UPI screenshot.
+    #: Proof of payment - a card slip, a UPI screenshot.
     RECEIPT = "receipt"
     #: A supplier's quotation, kept for reference.
     QUOTATION = "quotation"
@@ -84,14 +84,14 @@ class DocumentStatus(StrEnum):
     """Where a document is in the review pipeline."""
 
     #: Stored, not yet read. Recognition is synchronous today, so this is
-    #: short-lived — but it is the state a background worker would consume, so it
+    #: short-lived - but it is the state a background worker would consume, so it
     #: exists now and no schema change is needed to add one.
     UPLOADED = "uploaded"
     #: Read successfully; candidate fields are on the row awaiting a human.
     EXTRACTED = "extracted"
     #: A human accepted the values and an accounting document was created.
     CONFIRMED = "confirmed"
-    #: A human decided it is not usable — a duplicate, or the wrong file.
+    #: A human decided it is not usable - a duplicate, or the wrong file.
     REJECTED = "rejected"
     #: The engine or the parse failed. ``failure_code`` says why.
     FAILED = "failed"
@@ -109,7 +109,7 @@ class Document(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
     """An uploaded file, what was read out of it, and what became of it."""
 
     # --- The file -----------------------------------------------------------
-    #: As supplied by the client. Display only — never used to build a path.
+    #: As supplied by the client. Display only - never used to build a path.
     #: A filename is attacker-controlled text; joining it onto a directory is
     #: how ``../../etc/passwd`` becomes a write target.
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -120,7 +120,7 @@ class Document(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
 
     #: Lowercase hex SHA-256 of the file. Both the storage address and the
-    #: duplicate key — content addressing means identical uploads cannot occupy
+    #: duplicate key - content addressing means identical uploads cannot occupy
     #: two blobs, and it is a checksum for free.
     sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
@@ -170,7 +170,7 @@ class Document(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
     extracted_tax_amount: Mapped[Money | None] = mapped_column(default=None)
     extracted_total_amount: Mapped[Money | None] = mapped_column(default=None)
 
-    #: ``{"total_amount": "0.97", ...}`` — per-field confidence, as strings so the
+    #: ``{"total_amount": "0.97", ...}`` - per-field confidence, as strings so the
     #: Decimals survive the JSON round trip without becoming floats.
     field_confidence: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb"), default=dict
@@ -205,7 +205,7 @@ class Document(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
         ForeignKey("bill.id", ondelete="RESTRICT"), nullable=True, index=True
     )
 
-    #: An earlier document that appears to be the same invoice. Advisory — see the
+    #: An earlier document that appears to be the same invoice. Advisory - see the
     #: module docstring on why this is not a constraint.
     duplicate_of_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("document.id", ondelete="SET NULL"), nullable=True
@@ -274,7 +274,7 @@ class Document(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
         """Field names the review UI should highlight.
 
         Read from the stored map rather than recomputed, so what a reviewer sees is
-        what the extractor actually concluded at the time — a later parser
+        what the extractor actually concluded at the time - a later parser
         improvement must not silently rewrite the history of a document someone
         already signed off.
         """
@@ -283,6 +283,6 @@ class Document(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
             try:
                 if Decimal(str(raw)) < HIGH_CONFIDENCE:
                     flagged.append(name)
-            except ArithmeticError:  # pragma: no cover — malformed stored value
+            except ArithmeticError:  # pragma: no cover - malformed stored value
                 flagged.append(name)
         return sorted(flagged)

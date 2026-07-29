@@ -16,7 +16,7 @@ const STORAGE_KEY = 'personalerp-theme';
 interface ThemeContextValue {
   /** The user's choice, including `system`. */
   theme: Theme;
-  /** What is actually rendered — `system` resolved against the OS setting. */
+  /** What is actually rendered - `system` resolved against the OS setting. */
   resolvedTheme: 'light' | 'dark';
   setTheme: (theme: Theme) => void;
   /** Cycles light -> dark -> system, for the toolbar button. */
@@ -48,7 +48,7 @@ function systemPrefersDark(): boolean {
  * the choice, and the app would stop following the OS at sunset.
  *
  * The flash of the wrong theme on load is prevented by an inline script in
- * `index.html` that applies the class before first paint — React mounts too late
+ * `index.html` that applies the class before first paint - React mounts too late
  * to do it here.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -94,7 +94,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
-// The hook lives beside its provider on purpose — they are one unit, and
+// The hook lives beside its provider on purpose - they are one unit, and
 // splitting them across files to satisfy fast-refresh granularity would make the
 // context harder to follow for no runtime benefit.
 // eslint-disable-next-line react-refresh/only-export-components

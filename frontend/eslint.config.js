@@ -8,7 +8,7 @@ import tseslint from 'typescript-eslint';
  * ESLint flat config.
  *
  * Type-aware linting (`recommendedTypeChecked`) is enabled deliberately. It is
- * slower, but it is what catches the class of bug TypeScript alone misses — a
+ * slower, but it is what catches the class of bug TypeScript alone misses - a
  * floating promise whose rejection is never handled, an `await` on a
  * non-thenable. In an app where every mutation is async, those matter.
  */

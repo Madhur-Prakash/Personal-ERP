@@ -3,7 +3,7 @@
  *
  * **Money is a `string` in every type here, never a `number`.** The backend
  * serialises `Decimal` as a decimal string because a JSON number is an IEEE-754
- * double in JavaScript — `1234567.89` would arrive as `1234567.8899999999`.
+ * double in JavaScript - `1234567.89` would arrive as `1234567.8899999999`.
  * Typing these as `number` would make TypeScript happily let `Number()` creep in.
  * Format with `formatMoney`, compare with `compareMoney`.
  */
@@ -33,7 +33,7 @@ export interface PageQuery {
 }
 
 // ---------------------------------------------------------------------------
-// Accounting — chart of accounts
+// Accounting - chart of accounts
 // ---------------------------------------------------------------------------
 export type AccountType = 'asset' | 'liability' | 'equity' | 'income' | 'expense';
 
@@ -85,7 +85,7 @@ export interface FiscalYear {
 }
 
 // ---------------------------------------------------------------------------
-// Accounting — journal entries
+// Accounting - journal entries
 // ---------------------------------------------------------------------------
 export type EntryStatus = 'draft' | 'posted' | 'reversed';
 
@@ -105,7 +105,7 @@ export interface JournalEntry {
    * Whether cash actually moved, and which way.
    *
    * An entry always has both a debit and a credit, so "debited or credited" has no
-   * single answer — the useful question is whether money came in or went out, decided
+   * single answer - the useful question is whether money came in or went out, decided
    * by which side the cash account sits on. Null when no cash was involved, or when the
    * entry only moved money between your own accounts.
    */
@@ -146,11 +146,11 @@ export interface JournalEntryCreate {
 }
 
 // ---------------------------------------------------------------------------
-// Accounting — reports
+// Accounting - reports
 // ---------------------------------------------------------------------------
 export interface TrialBalanceRow {
   /** Movement through the account before netting. Non-zero with a nil net means the
-   *  activity cancelled out — usually a reversal. */
+   *  activity cancelled out - usually a reversal. */
   gross_debit: Money;
   gross_credit: Money;
   account_id: string;

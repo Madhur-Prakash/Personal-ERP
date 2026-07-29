@@ -1,4 +1,4 @@
-"""Billing — record money in and out, and prove it reaches every screen.
+"""Billing - record money in and out, and prove it reaches every screen.
 
 The requirement was "manually add the money that came in and goes out, and it should
 be reflected on the dashboard and the whole UI". The second half is the part worth
@@ -7,7 +7,7 @@ any report.
 
 So these tests post through the real endpoint and then assert the figure appears in
 the dashboard, the P&L, the trial balance, the cash flow statement, and the analytics
-trend — without any of those being told about billing. That works because a billing
+trend - without any of those being told about billing. That works because a billing
 entry *is* a journal entry, which is the whole reason there is no billing table.
 """
 
@@ -100,7 +100,7 @@ class TestOptions:
     async def test_offers_no_group_headings(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        """You cannot post to "Operating Expenses" — only to a leaf under it."""
+        """You cannot post to "Operating Expenses" - only to a leaf under it."""
         body = (await authed_client.get(f"{api}/billing/options")).json()
         names = {c["name"] for c in body["categories"]}
         assert "Expenses" not in names
@@ -219,7 +219,7 @@ class TestRecording:
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
         """Filing an expense against a revenue account would inflate income and
-        understate costs — the books would still balance, and be wrong."""
+        understate costs - the books would still balance, and be wrong."""
         options = (await authed_client.get(f"{api}/billing/options")).json()
         income = next(c for c in options["categories"] if c["direction"] == "in")
 
@@ -262,7 +262,7 @@ class TestReflectedAcrossTheApp:
     """The half of the requirement that is easy to get wrong.
 
     None of these reports know billing exists. They pick the entries up because a
-    billing entry is a journal entry — which is the entire justification for not
+    billing entry is a journal entry - which is the entire justification for not
     having a billing table.
     """
 
@@ -504,7 +504,7 @@ class TestAddingCategoriesAndAccounts:
 
 
 class TestParty:
-    """Who the money came from or went to — free text, no master record."""
+    """Who the money came from or went to - free text, no master record."""
 
     async def test_records_who_it_came_from(
         self, authed_client: AsyncClient, api: str, books: Organization
@@ -535,7 +535,7 @@ class TestParty:
     async def test_is_optional(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        """The three-field entry has to keep working — that is the whole premise."""
+        """The three-field entry has to keep working - that is the whole premise."""
         entry = await record(authed_client, api, direction="out", amount="50", description="Chai")
         assert entry["party"] is None
 
@@ -655,7 +655,7 @@ class TestListing:
         """A manual journal entry is not a billing entry.
 
         The list is tagged by source, so an accountant's adjusting entry does not
-        appear in the shopkeeper's day book — and cannot break the two-line
+        appear in the shopkeeper's day book - and cannot break the two-line
         reconstruction.
         """
         # `POST /journal-entries` does not create the fiscal year on demand; only
@@ -713,7 +713,7 @@ class TestReversal:
     ) -> None:
         """The only honest undo of a posted entry.
 
-        Not a delete and not an edit — an opposite entry that nets it to zero, which
+        Not a delete and not an edit - an opposite entry that nets it to zero, which
         is what an auditor expects to find.
         """
         entry = await record(
@@ -788,7 +788,7 @@ class TestReversalIsVisibleInTheReports:
 
     Both entries stay in the ledger and sum to zero, so nothing in the *net* figures
     records that anything happened. The journal then shows two entries the trial balance
-    cannot account for — and an account whose only movement was cancelled disappeared
+    cannot account for - and an account whose only movement was cancelled disappeared
     from the report entirely, which is indistinguishable from never having been touched.
     """
 
@@ -844,7 +844,7 @@ class TestReversalIsVisibleInTheReports:
         """The bug this fixes: the expense account vanished entirely.
 
         Its ₹100 charge and the ₹100 reversal net to zero, and the report dropped every
-        zero-net row — so the only trace of the whole episode was in the journal.
+        zero-net row - so the only trace of the whole episode was in the journal.
         """
         options = (await authed_client.get(f"{api}/billing/options")).json()
         category = next(

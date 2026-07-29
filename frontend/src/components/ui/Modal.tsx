@@ -8,7 +8,7 @@
  * pseudo-element rather than a sibling div with a z-index guess.
  *
  * The one thing it does not give for free is a backdrop click, because the
- * `::backdrop` is not a hit-testable child — so that is computed from the click
+ * `::backdrop` is not a hit-testable child - so that is computed from the click
  * coordinates against the dialog's own box.
  */
 import { useEffect, useRef, type ReactNode } from 'react';
@@ -49,7 +49,7 @@ export function Modal({
     <dialog
       ref={ref}
       // `cancel` fires for Escape. Prevented and routed through `onClose` so the
-      // parent's state always agrees with whether the dialog is actually open —
+      // parent's state always agrees with whether the dialog is actually open -
       // letting the browser close it directly leaves `open` true and the dialog
       // impossible to reopen.
       onCancel={(event) => {

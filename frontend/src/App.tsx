@@ -11,7 +11,7 @@ import { router } from '@/routes/router';
 /**
  * The query client.
  *
- * Built once at module scope, not inside a component — a client recreated on
+ * Built once at module scope, not inside a component - a client recreated on
  * render would discard the whole cache on every state change.
  */
 const queryClient = new QueryClient({

@@ -8,7 +8,7 @@ saw on the billing screen was "No income accounts exist yet" above two empty dro
 with no way forward.
 
 Both paths now call `provision_books`. These tests assert both, because the failure mode
-is silent — the organization is created successfully and looks fine until the moment
+is silent - the organization is created successfully and looks fine until the moment
 someone tries to record money.
 
 The second class covers the repair path: organizations that already exist without a
@@ -187,7 +187,7 @@ class TestRegistrationProvisionsBooks:
     async def test_creating_an_organization_later_also_seeds_books(
         self, authed_client: AsyncClient, api: str, db: AsyncSession
     ) -> None:
-        """The path that was already correct — asserted so the shared helper cannot
+        """The path that was already correct - asserted so the shared helper cannot
         regress it while fixing the other one."""
         created = await authed_client.post(f"{api}/organizations", json={"name": "Another Co"})
         assert created.status_code == 201, created.text
@@ -206,7 +206,7 @@ class TestBillingRepairsExistingOrganizations:
 
     @pytest.fixture
     async def bookless_org(self, db: AsyncSession, user: User) -> Organization:
-        """An organization with roles and a member but no chart — exactly the state the
+        """An organization with roles and a member but no chart - exactly the state the
         old registration path left behind."""
         organization = Organization(name="Bookless Shop", slug=f"bookless-{uuid.uuid4().hex[:6]}")
         db.add(organization)

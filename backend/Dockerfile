@@ -1,5 +1,5 @@
 # =============================================================================
-# Personal ERP — backend image
+# Personal ERP - backend image
 #
 # Multi-stage, with `development` and `production` targets sharing one dependency
 # layer. Compose selects the target; CI builds `production`.
@@ -55,7 +55,7 @@ EXPOSE 8000
 
 # `--reload` watches the bind-mounted source. `--proxy-headers` with a trusted
 # host list is what makes `request.client.host` the real client IP behind Nginx
-# rather than the proxy's — IP-based lockout depends on it.
+# rather than the proxy's - IP-based lockout depends on it.
 CMD ["uvicorn", "app.main:app", \
      "--host", "0.0.0.0", "--port", "8000", \
      "--reload", "--reload-dir", "app", \
@@ -65,7 +65,7 @@ CMD ["uvicorn", "app.main:app", \
 FROM base AS production
 
 # Runs unprivileged. A container process that does not need root should not have
-# it — this is the cheapest possible mitigation for a container escape.
+# it - this is the cheapest possible mitigation for a container escape.
 RUN groupadd --gid 1001 personalerp \
     && useradd --uid 1001 --gid personalerp --create-home --shell /bin/bash personalerp
 
@@ -82,7 +82,7 @@ USER personalerp
 
 EXPOSE 8000
 
-# Hits the liveness probe, which deliberately touches no dependencies — a
+# Hits the liveness probe, which deliberately touches no dependencies - a
 # database blip must not cause the orchestrator to kill healthy containers.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:8000/health/live || exit 1

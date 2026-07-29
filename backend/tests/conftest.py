@@ -1,6 +1,6 @@
 """Shared pytest fixtures.
 
-Isolation strategy — **one transaction per test, always rolled back**:
+Isolation strategy - **one transaction per test, always rolled back**:
 
 Each test gets a session bound to a connection with an open transaction.
 ``join_transaction_mode="create_savepoint"`` means the application's own
@@ -8,7 +8,7 @@ Each test gets a session bound to a connection with an open transaction.
 rather than real commits, so production code runs its normal transaction
 boundaries while the outer rollback still erases everything afterwards.
 
-The alternative — truncating tables between tests — is slower, races when tests
+The alternative - truncating tables between tests - is slower, races when tests
 run in parallel, and quietly leaves sequences and cached plans behind. Rollback
 gives byte-identical starting state every time.
 
@@ -85,8 +85,8 @@ TEST_DOMAIN = "example.com"
 # =============================================================================
 #: Requesting any of these means the test talks to Postgres or Redis.
 #:
-#: Much of this codebase is deliberately pure — the password policy, inventory
-#: valuation, GST resolution, OCR extraction — and those tests should run with
+#: Much of this codebase is deliberately pure - the password policy, inventory
+#: valuation, GST resolution, OCR extraction - and those tests should run with
 #: nothing installed but Python. When the database and Redis fixtures were
 #: `autouse`, a stopped container failed all 56 pure tests with a connection
 #: error, which hides real failures behind an environment problem.
@@ -164,7 +164,7 @@ class LazyLoadDetected(AssertionError):
     Async SQLAlchemy **cannot** lazy-load: emitting IO from an attribute access
     outside a greenlet context fails with ``MissingGreenlet``, whose message says
     nothing about which relationship was at fault. That error has already cost real
-    debugging time in this codebase — traversing ``payment.customer`` and
+    debugging time in this codebase - traversing ``payment.customer`` and
     ``payment.allocations`` on freshly-constructed rows.
 
     This turns that class of bug into an immediate, named failure at the exact
@@ -183,7 +183,7 @@ def _fail_on_lazy_load(orm_execute_state: Any) -> None:
     through untouched.
 
     ``in_greenlet()`` distinguishes a bug from a legitimate load. Some async ORM
-    operations are coroutines *precisely so* they can lazy-load safely —
+    operations are coroutines *precisely so* they can lazy-load safely -
     ``await session.delete(obj)`` has to load the relationship collections to
     apply cascade rules, and it runs inside greenlet context where that works.
     Flagging those was the first version of this hook and it produced seven false
@@ -201,12 +201,12 @@ def _fail_on_lazy_load(orm_execute_state: Any) -> None:
     if orm_execute_state.lazy_loaded_from is None:
         return
     if in_greenlet():
-        # Inside an awaited ORM operation — the load will complete normally.
+        # Inside an awaited ORM operation - the load will complete normally.
         return
 
     state = orm_execute_state.lazy_loaded_from
     raise LazyLoadDetected(
-        f"Implicit lazy load on {state.class_.__name__} outside greenlet context — "
+        f"Implicit lazy load on {state.class_.__name__} outside greenlet context - "
         f"this raises MissingGreenlet in production.\n"
         f"Fix it by eager-loading the relationship (selectinload) in the "
         f"repository, or by using an object you already hold rather than "
@@ -221,7 +221,7 @@ async def db(connection: AsyncConnection) -> AsyncGenerator[AsyncSession]:
     ``create_savepoint`` is what lets production code commit normally while the
     outer rollback still discards everything.
 
-    A ``do_orm_execute`` listener makes any accidental lazy load fail loudly — see
+    A ``do_orm_execute`` listener makes any accidental lazy load fail loudly - see
     :class:`LazyLoadDetected`.
     """
     session = AsyncSession(
@@ -243,7 +243,7 @@ async def _clean_redis(request: pytest.FixtureRequest) -> AsyncGenerator[None]:
     """Flush the test Redis index around every test that touches infrastructure.
 
     Auth state (lockout counters, one-time tokens, token epochs) lives in Redis,
-    so leakage between tests would make them order-dependent — the worst kind of
+    so leakage between tests would make them order-dependent - the worst kind of
     flake to debug.
 
     Skipped for pure tests. That is a gate on the *fixture closure*, not on
@@ -282,9 +282,9 @@ async def client(db: AsyncSession) -> AsyncGenerator[AsyncClient]:
     them. Modelling it faithfully requires a session per request, and two
     sessions on one connection break savepoint visibility for the fixtures.
 
-    Consequence: any behaviour that depends on surviving a failing request —
+    Consequence: any behaviour that depends on surviving a failing request -
     today, only refresh-reuse revocation, which commits explicitly for exactly
-    this reason — must be verified against a real deployment, not only here.
+    this reason - must be verified against a real deployment, not only here.
     """
     app = create_app()
 

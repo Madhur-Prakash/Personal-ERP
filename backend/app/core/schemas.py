@@ -2,8 +2,8 @@
 
 Naming: the API speaks ``snake_case`` end to end. Auto-aliasing to ``camelCase``
 is the usual reflex for a TypeScript client, but it means every field exists
-under two names — one in the database and Python, another in the JSON and the
-frontend — and every debugging session pays for the translation. One name
+under two names - one in the database and Python, another in the JSON and the
+frontend - and every debugging session pays for the translation. One name
 everywhere is worth more than matching JavaScript convention, and the generated
 TS types are handed to the frontend anyway.
 
@@ -48,7 +48,7 @@ SlugStr = Annotated[
     ),
 ]
 
-#: Raw password. Never validated for strength here — that is
+#: Raw password. Never validated for strength here - that is
 #: :mod:`app.modules.auth.password_policy`, which produces actionable messages
 #: rather than a regex mismatch.
 PasswordStr = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -62,8 +62,8 @@ def _stringify_ip(value: object) -> object:
 
     PostgreSQL ``INET`` columns come back from asyncpg as
     :class:`ipaddress.IPv4Address` / :class:`~ipaddress.IPv6Address`, not ``str``.
-    ``INET`` is still the right column type — it validates on write, indexes
-    properly, and supports subnet containment queries later — so the conversion
+    ``INET`` is still the right column type - it validates on write, indexes
+    properly, and supports subnet containment queries later - so the conversion
     belongs here at the serialisation boundary rather than by weakening the
     column to ``VARCHAR``.
     """
@@ -81,7 +81,7 @@ class BaseSchema(BaseModel):
 
     **``use_enum_values`` is deliberately absent here**, unlike on
     :class:`ResponseSchema`. With it enabled, a validated enum field becomes a
-    plain ``str``, so ``data.method.is_cash`` raises ``AttributeError`` — the enum
+    plain ``str``, so ``data.method.is_cash`` raises ``AttributeError`` - the enum
     helpers that make the domain readable stop existing precisely where services
     reach for them. It caused exactly that bug in payment posting.
 
@@ -130,7 +130,7 @@ class IdentifiedSchema(ResponseSchema):
 class MessageResponse(ResponseSchema):
     """A human-readable acknowledgement.
 
-    Used by endpoints whose only meaningful output is "done" — and, importantly,
+    Used by endpoints whose only meaningful output is "done" - and, importantly,
     by the ones that must stay deliberately vague (password reset, magic link) to
     avoid confirming whether an account exists.
     """
@@ -149,7 +149,7 @@ class HealthStatus(ResponseSchema):
 def with_computed[SchemaT: BaseModel](schema: type[SchemaT], obj: Any, **computed: Any) -> SchemaT:
     """Build a response schema from an ORM object plus server-computed fields.
 
-    Response schemas routinely need a value the ORM row cannot supply — a
+    Response schemas routinely need a value the ORM row cannot supply - a
     ``member_count`` from a separate aggregate, a ``customer_name`` reached through
     a relationship, an ``outstanding`` derived from two columns.
 
@@ -165,7 +165,7 @@ def with_computed[SchemaT: BaseModel](schema: type[SchemaT], obj: Any, **compute
 
     Fields present in ``computed`` are never read from the object. That matters
     beyond efficiency: a relationship collection passed in explicitly must not also
-    be touched here, or it would trigger a lazy load — see the ``LazyLoadDetected``
+    be touched here, or it would trigger a lazy load - see the ``LazyLoadDetected``
     guard in the test suite.
     """
     data: dict[str, Any] = {}

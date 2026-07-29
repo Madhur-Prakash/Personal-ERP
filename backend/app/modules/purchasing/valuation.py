@@ -1,4 +1,4 @@
-"""Inventory valuation — weighted average cost.
+"""Inventory valuation - weighted average cost.
 
 **The choice.** Three methods are standard: FIFO, weighted average, and specific
 identification. This uses **moving weighted average**, and the reason is
@@ -14,14 +14,14 @@ those is a place for the books to diverge from reality.
 Weighted average keeps two numbers per (product, warehouse): quantity and total
 value. There are no layers to consume and nothing to partially unwind.
 
-For a small business — the target here — the difference in reported profit between
+For a small business - the target here - the difference in reported profit between
 FIFO and weighted average is immaterial, while the difference in ways the system
 can silently break is not. Indian accounting standards (AS 2 / Ind AS 2) permit
 either.
 
 **Total value is authoritative; unit cost is derived.** This is the important
 implementation decision, and the reverse of the obvious one. Storing the average
-cost and multiplying by quantity does not reconcile against the ledger — see
+cost and multiplying by quantity does not reconcile against the ledger - see
 :class:`ValuationState` for the worked example where 9,000 of stock reports as
 8,999.9999. Carrying the total instead means ``value`` changes only by amounts that
 were actually posted, so the stock report and the Inventory account cannot diverge.
@@ -37,7 +37,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Final, NamedTuple
 
 #: Cost is carried at higher precision than a printed amount. A unit cost of
-#: ₹3.333333 across 10,000 units differs from ₹3.3333 by ₹0.33 — small, but it
+#: ₹3.333333 across 10,000 units differs from ₹3.3333 by ₹0.33 - small, but it
 #: accumulates across every issue and shows up as an unexplained inventory
 #: variance.
 COST_QUANTUM: Final = Decimal("0.000001")
@@ -69,7 +69,7 @@ class ValuationState(NamedTuple):
 
     Carrying the total instead makes the identity exact by construction: ``value``
     only ever changes by the amount actually posted to the ledger, so the two can
-    never diverge. The unit cost — which is what an issue is costed at — is computed
+    never diverge. The unit cost - which is what an issue is costed at - is computed
     from it on demand.
     """
 
@@ -97,7 +97,7 @@ class ReceiptOutcome(NamedTuple):
 
 class IssueOutcome(NamedTuple):
     state: ValuationState
-    #: Cost of goods sold for this issue — the figure posted to the P&L.
+    #: Cost of goods sold for this issue - the figure posted to the P&L.
     cost_of_goods_sold: Decimal
 
 
@@ -107,7 +107,7 @@ class NegativeStockError(ValueError):
     Permitting negative stock is a real option in some systems (it lets a sale
     proceed before the paperwork catches up), but it makes average cost undefined:
     the divisor goes negative and the next receipt produces a nonsensical average.
-    Refusing is the honest behaviour — the fix is to record the receipt.
+    Refusing is the honest behaviour - the fix is to record the receipt.
     """
 
 
@@ -121,9 +121,9 @@ def apply_receipt(
 
     Handles the two edge cases that break a naive implementation:
 
-    * **Empty stock** — the divisor would be the received quantity alone, which is
+    * **Empty stock** - the divisor would be the received quantity alone, which is
       correct, but only if the existing average is ignored rather than averaged in.
-    * **Negative existing quantity** — cannot arise here, because
+    * **Negative existing quantity** - cannot arise here, because
       :func:`apply_issue` refuses to create it.
     """
     if quantity <= 0:
@@ -134,7 +134,7 @@ def apply_receipt(
     new_quantity = current.quantity + quantity
     value_added = round_value(quantity * unit_cost)
 
-    # Values add exactly. No division, so nothing to round away — this is why the
+    # Values add exactly. No division, so nothing to round away - this is why the
     # stock value can never drift from the ledger.
     return ReceiptOutcome(
         state=ValuationState(quantity=new_quantity, value=current.value + value_added),
@@ -152,12 +152,12 @@ def apply_issue(current: ValuationState, *, quantity: Decimal) -> IssueOutcome:
     if quantity <= 0:
         raise ValueError("Issue quantity must be positive")
     if quantity > current.quantity:
-        raise NegativeStockError(f"Cannot issue {quantity} — only {current.quantity} on hand")
+        raise NegativeStockError(f"Cannot issue {quantity} - only {current.quantity} on hand")
 
     remaining = current.quantity - quantity
 
     if remaining == 0:
-        # Depleting the position releases exactly what is left, with no rounding —
+        # Depleting the position releases exactly what is left, with no rounding -
         # otherwise a residue of a fraction of a paisa would sit against zero units
         # and never clear.
         cogs = current.value
@@ -182,7 +182,7 @@ def apply_adjustment(
 ) -> ReceiptOutcome | IssueOutcome:
     """Stock-take correction, in either direction.
 
-    A positive delta needs a cost — found stock has to be valued at something, and
+    A positive delta needs a cost - found stock has to be valued at something, and
     the current average is the only defensible default. A negative delta is written
     off at the current average, which is what a shrinkage loss is worth.
     """
@@ -201,7 +201,7 @@ def reverse_receipt(
     quantity: Decimal,
     unit_cost: Decimal,
 ) -> ValuationState:
-    """Undo a receipt — a cancelled goods receipt or a return to supplier.
+    """Undo a receipt - a cancelled goods receipt or a return to supplier.
 
     This is where weighted average is genuinely lossy, and it is worth being honest
     about: removing a receipt cannot perfectly restore the previous average, because
@@ -210,12 +210,12 @@ def reverse_receipt(
     receipt intervened and an approximation when one did.
 
     FIFO would restore precisely, by dropping the layer. That is the one real
-    advantage it has here, and the trade was made deliberately — see the module
+    advantage it has here, and the trade was made deliberately - see the module
     docstring.
     """
     remaining = current.quantity - quantity
     if remaining < 0:
-        raise NegativeStockError(f"Cannot reverse {quantity} — only {current.quantity} on hand")
+        raise NegativeStockError(f"Cannot reverse {quantity} - only {current.quantity} on hand")
     if remaining == 0:
         return ValuationState(quantity=ZERO, value=ZERO)
 

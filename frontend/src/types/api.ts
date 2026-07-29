@@ -7,7 +7,7 @@
  * generation from `/openapi.json` once the API surface is large enough that
  * drift becomes the bigger risk.
  *
- * Field names are `snake_case` because the API is `snake_case` end to end — one
+ * Field names are `snake_case` because the API is `snake_case` end to end - one
  * name for each field everywhere, rather than a translation layer.
  */
 
@@ -97,7 +97,7 @@ export interface PasswordPolicy {
 export interface TwoFactorSetup {
   secret: string;
   provisioning_uri: string;
-  /** PNG `data:` URI — inline so the secret never becomes a fetchable URL. */
+  /** PNG `data:` URI - inline so the secret never becomes a fetchable URL. */
   qr_code: string;
 }
 
@@ -248,7 +248,7 @@ export interface Role {
   name: string;
   slug: string;
   description: string | null;
-  /** As stored — may contain wildcards such as `invoice:*`. */
+  /** As stored - may contain wildcards such as `invoice:*`. */
   permissions: string[];
   is_system: boolean;
   is_default: boolean;

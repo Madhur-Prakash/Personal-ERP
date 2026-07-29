@@ -1,5 +1,5 @@
 # =============================================================================
-# Personal ERP — task runner
+# Personal ERP - task runner
 #
 #   make help          list every target
 #   make setup         first-time setup
@@ -18,13 +18,13 @@
 SHELL := bash
 
 # On Windows, `SHELL := bash` is silently ignored. Native GNU Make cannot find a
-# bare `bash` (Git Bash is not on PATH — only `git` is), falls back to `cmd.exe`,
+# bare `bash` (Git Bash is not on PATH - only `git` is), falls back to `cmd.exe`,
 # and every recipe dies with "'grep' is not recognized as an internal or external
 # command". So the shell is resolved explicitly here.
 #
 # **Not via `where bash`.** On a machine with WSL that returns
 # `C:\Windows\System32\bash.exe`, and recipes would then run inside the WSL
-# filesystem namespace — wrong working directory, and `uv`/`npm`/`docker` either
+# filesystem namespace - wrong working directory, and `uv`/`npm`/`docker` either
 # missing or pointing at a different install. Silently running in the wrong place
 # is far worse than failing loudly.
 #
@@ -45,7 +45,7 @@ ifeq ($(OS),Windows_NT)
   # Without this, `API_V1_PREFIX=/api/v1` reaches Python as
   # `C:/Program Files/Git/api/v1`, and the app dies at import with
   # "A path prefix must start with '/'". The translation is correct for real paths
-  # and wrong for everything else — and every value this project puts in the
+  # and wrong for everything else - and every value this project puts in the
   # environment is a config string, not a path the MSYS layer should touch.
   #
   # `PATH` is special-cased by MSYS and still translated, so recipes continue to
@@ -68,7 +68,7 @@ help: ## Show this help
 # -----------------------------------------------------------------------------
 .PHONY: setup
 setup: ## First-time setup: env file, dependencies, database
-	@test -f .env || { cp .env.example .env; echo "Created .env — review it before continuing."; }
+	@test -f .env || { cp .env.example .env; echo "Created .env - review it before continuing."; }
 	$(MAKE) install
 	$(COMPOSE) up -d postgres redis mailpit
 	@echo "Waiting for PostgreSQL..."

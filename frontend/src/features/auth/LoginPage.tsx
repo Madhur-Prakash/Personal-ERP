@@ -77,7 +77,7 @@ export function LoginPage() {
       return;
     }
 
-    // An unverified account is a recoverable state, not a credential failure —
+    // An unverified account is a recoverable state, not a credential failure -
     // route the user to the fix rather than showing a dead end.
     if (error.code === 'email_not_verified') {
       toast.error('Verify your email to continue', {
@@ -276,7 +276,7 @@ export function LoginPage() {
 
       {/* Passwordless is offered as an equal path, not a fallback: for an
           accountant who signs in monthly, a magic link is often the faster route.
-          Rendered as links, not buttons — they navigate, so they must be `<a>`. */}
+          Rendered as links, not buttons - they navigate, so they must be `<a>`. */}
       <div className="grid gap-2">
         <Link to="/magic-link" className={buttonClasses('secondary', 'md', 'w-full')}>
           <Sparkles className="mr-2 h-4 w-4" aria-hidden />

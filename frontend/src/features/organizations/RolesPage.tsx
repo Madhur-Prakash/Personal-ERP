@@ -68,7 +68,7 @@ export function RolesPage() {
     },
     onError: (err) => {
       // The server refuses to delete a role people still hold, and its message
-      // names the count — surface it verbatim rather than paraphrasing.
+      // names the count - surface it verbatim rather than paraphrasing.
       toast.error(err instanceof ApiError ? err.message : 'Could not delete the role');
     },
   });

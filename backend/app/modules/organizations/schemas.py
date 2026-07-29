@@ -36,7 +36,7 @@ UpperStr21 = Annotated[str, StringConstraints(**_Upper, max_length=21)]
 # =============================================================================
 class OrganizationCreate(BaseSchema):
     name: ShortStr
-    #: Optional — derived from the name, uniquely, when omitted.
+    #: Optional - derived from the name, uniquely, when omitted.
     slug: SlugStr | None = None
     legal_name: ShortStr | None = None
     country: CountryCode = "IN"
@@ -176,7 +176,7 @@ class MemberRead(ResponseSchema):
 class MemberUpdate(BaseSchema):
     """Change a member's role or job title.
 
-    ``status`` is not here — suspend and reactivate are separate endpoints, so the
+    ``status`` is not here - suspend and reactivate are separate endpoints, so the
     audit trail records the intent rather than an opaque field diff.
     """
 

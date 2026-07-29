@@ -115,7 +115,7 @@ class MemberRepository(BaseRepository[OrganizationMember]):
         """Fetch a membership with its role and user loaded.
 
         This is the hot path for authorization on every request, so the role is
-        eager-loaded — the permission check needs it immediately.
+        eager-loaded - the permission check needs it immediately.
         """
         query = (
             select(OrganizationMember)

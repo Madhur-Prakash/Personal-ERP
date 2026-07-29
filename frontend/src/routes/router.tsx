@@ -35,8 +35,8 @@ import { RouteErrorPage } from '@/routes/RouteErrorPage';
  * Routing.
  *
  * Code-based rather than file-based: the route tree is small, and having it in
- * one file makes the auth boundary — which routes are public and which are
- * guarded — reviewable at a glance instead of inferred from a directory layout.
+ * one file makes the auth boundary - which routes are public and which are
+ * guarded - reviewable at a glance instead of inferred from a directory layout.
  *
  * Auth state is threaded through the router `context` so guards can run in
  * `beforeLoad`, before a protected component mounts. Reading it from a hook
@@ -46,7 +46,7 @@ import { RouteErrorPage } from '@/routes/RouteErrorPage';
 
 /*
  * `throw redirect(...)` is TanStack Router's documented way to redirect from a
- * `beforeLoad` guard — the router catches the thrown descriptor as control flow.
+ * `beforeLoad` guard - the router catches the thrown descriptor as control flow.
  * It is not an Error subclass, so `only-throw-error` is disabled for this file
  * rather than working around the framework's intended API.
  */
@@ -170,7 +170,7 @@ const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'app',
   beforeLoad: ({ context, location }) => {
-    // Do nothing until the session restore settles — see the note above.
+    // Do nothing until the session restore settles - see the note above.
     if (context.isLoading) return;
 
     if (!context.isAuthenticated) {
@@ -222,7 +222,7 @@ const settingsRoute = createRoute({
  *
  * **It must not act while the session is still loading**, and that is the whole reason
  * this is a shared helper rather than six inline checks. On a hard reload, permissions
- * have not arrived yet, so `hasPermission` answers `false` for everything — and a guard
+ * have not arrived yet, so `hasPermission` answers `false` for everything - and a guard
  * that redirects on that answer sends the user to the dashboard every single time they
  * refresh a page. Which is exactly what happened.
  *
@@ -256,7 +256,7 @@ const accountingRoute = createRoute({
   /**
    * The selected tab lives in the URL.
    *
-   * It was `useState`, so a reload dropped the user back on the first tab — they were
+   * It was `useState`, so a reload dropped the user back on the first tab - they were
    * reading the trial balance, refreshed, and landed on the chart of accounts. A tab is
    * a location as far as the user is concerned, so it belongs in the address, which also
    * makes it linkable and survivable across a browser restart.
@@ -277,7 +277,7 @@ const invoicesRoute = createRoute({
   /**
    * The selected tab lives in the URL.
    *
-   * It was `useState`, so a reload dropped the user back on the first tab — they were
+   * It was `useState`, so a reload dropped the user back on the first tab - they were
    * reading the trial balance, refreshed, and landed on the chart of accounts. A tab is
    * a location as far as the user is concerned, so it belongs in the address, which also
    * makes it linkable and survivable across a browser restart.
@@ -298,7 +298,7 @@ const inventoryRoute = createRoute({
   /**
    * The selected tab lives in the URL.
    *
-   * It was `useState`, so a reload dropped the user back on the first tab — they were
+   * It was `useState`, so a reload dropped the user back on the first tab - they were
    * reading the trial balance, refreshed, and landed on the chart of accounts. A tab is
    * a location as far as the user is concerned, so it belongs in the address, which also
    * makes it linkable and survivable across a browser restart.

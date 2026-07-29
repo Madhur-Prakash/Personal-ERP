@@ -1,7 +1,7 @@
 """The role table.
 
 Roles are data; permissions are code (see :mod:`app.modules.rbac.permissions`).
-A role holds a JSONB array of grant slugs — concrete (``invoice:read``) or
+A role holds a JSONB array of grant slugs - concrete (``invoice:read``) or
 wildcard (``invoice:*``, ``*:*``).
 
 Why JSONB rather than a ``role_permission`` join table:

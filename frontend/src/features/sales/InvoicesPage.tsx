@@ -1,5 +1,5 @@
 /**
- * Sales — invoices, customers, and receivables.
+ * Sales - invoices, customers, and receivables.
  *
  * The invoice list is the default view because it is what a small business opens
  * this software to look at: who owes money, and how overdue.
@@ -175,7 +175,7 @@ function InvoiceList() {
       numeric: true,
       cell: (row) =>
         isZeroMoney(row.outstanding) ? (
-          <span className="text-content-muted">—</span>
+          <span className="text-content-muted">-</span>
         ) : (
           <span className="text-content font-medium">{formatMoney(row.outstanding)}</span>
         ),
@@ -265,7 +265,7 @@ function InvoiceComposer({ onClose }: { onClose: () => void }) {
 
   /**
    * A local preview only. The server recomputes every figure and its answer is
-   * authoritative — this exists so the user is not typing blind, not to be the
+   * authoritative - this exists so the user is not typing blind, not to be the
    * source of the totals.
    */
   const preview = useMemo(() => {
@@ -343,7 +343,7 @@ function InvoiceComposer({ onClose }: { onClose: () => void }) {
             </select>
             {/* Inline, because the alternative is abandoning a half-typed invoice
                 to go to another tab. On first use the list is empty, so this is the
-                only path forward — the button is emphasised in that case. */}
+                only path forward - the button is emphasised in that case. */}
             <Button
               variant={customers && customers.items.length === 0 ? 'primary' : 'secondary'}
               onClick={() => setAddingCustomer(true)}
@@ -355,7 +355,7 @@ function InvoiceComposer({ onClose }: { onClose: () => void }) {
           </div>
           {customers && customers.items.length === 0 && (
             <p className="text-content-muted mt-1.5 text-[12px]">
-              No customers yet — add one to raise your first invoice.
+              No customers yet - add one to raise your first invoice.
             </p>
           )}
         </div>
@@ -534,7 +534,7 @@ function CustomerList() {
         row.gstin ? (
           <span className="font-mono text-[11px]">{row.gstin}</span>
         ) : (
-          <span className="text-content-muted">—</span>
+          <span className="text-content-muted">-</span>
         ),
     },
     { header: 'Terms', hideOnMobile: true, cell: (row) => `${row.payment_terms_days} days` },
@@ -621,7 +621,7 @@ function PaymentList() {
       numeric: true,
       cell: (row) =>
         isZeroMoney(row.unallocated_amount) ? (
-          <span className="text-content-muted">—</span>
+          <span className="text-content-muted">-</span>
         ) : (
           <Badge tone="warning">{formatMoney(row.unallocated_amount)}</Badge>
         ),

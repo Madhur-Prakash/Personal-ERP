@@ -142,7 +142,7 @@ export function ResetPasswordPage() {
     defaultValues: { new_password: '', confirm_password: '' },
   });
 
-  // Declared above the early return below — hooks must run unconditionally.
+  // Declared above the early return below - hooks must run unconditionally.
   const { data: policy } = usePasswordPolicy();
 
   // A missing token means the user landed here directly or the link was
@@ -252,7 +252,7 @@ export function VerifyEmailPage() {
   // Verification is confirmed by an explicit click, not automatically on mount.
   //
   // The token is single-use, and mail clients and link scanners routinely
-  // prefetch URLs — an auto-verify would be consumed before the user ever sees
+  // prefetch URLs - an auto-verify would be consumed before the user ever sees
   // the page, leaving them with a dead link.
   async function verify() {
     if (!search.token) return;

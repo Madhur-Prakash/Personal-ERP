@@ -1,5 +1,5 @@
 /**
- * Billing — the fast path for recording money.
+ * Billing - the fast path for recording money.
  *
  * This is the screen most users will only ever open, so the design target is
  * **seconds, not minutes**: two buttons, an amount, a note, done. The date defaults to
@@ -76,7 +76,7 @@ export function BillingPage() {
         description="Record money coming in and going out. Each entry posts straight to your books, so the dashboard and reports update immediately."
       />
 
-      {/* The two actions, given the prominence they deserve — this is the reason the
+      {/* The two actions, given the prominence they deserve - this is the reason the
           screen exists, not a toolbar afterthought. */}
       <div className="mb-4 grid gap-3 sm:grid-cols-2">
         <DirectionButton
@@ -96,7 +96,7 @@ export function BillingPage() {
           /* Remounting on direction change is what keeps the category selection
              correct. Switching from money-out to money-in changes which categories are
              valid, and syncing that with an effect is the "you might not need an
-             effect" anti-pattern — a fresh mount just initialises it right. */
+             effect" anti-pattern - a fresh mount just initialises it right. */
           key={composing}
           direction={composing}
           options={options}
@@ -338,22 +338,22 @@ function EntryForm({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Input
-              /* Free text on purpose. Most parties a small business deals with — the
-                 auto driver, the electricity board, a walk-in buyer — are never worth a
+              /* Free text on purpose. Most parties a small business deals with - the
+                 auto driver, the electricity board, a walk-in buyer - are never worth a
                  customer record, and requiring one to note who paid you is the friction
                  this screen exists to remove. */
               label={direction === 'in' ? 'From' : 'To'}
               placeholder={direction === 'in' ? 'Walk-in customer' : 'Airtel'}
               value={party}
               onChange={(event) => setParty(event.target.value)}
-              hint="Optional — who the money came from or went to."
+              hint="Optional - who the money came from or went to."
             />
             <Input
               label="Reference"
               placeholder="Cheque or bill no."
               value={reference}
               onChange={(event) => setReference(event.target.value)}
-              hint="Optional — a cheque, UPI, or bill number."
+              hint="Optional - a cheque, UPI, or bill number."
             />
           </div>
 
@@ -376,7 +376,7 @@ function EntryForm({
                 </button>
               }
               hint={
-                categoryGroups.length === 0 ? 'No categories yet — add one to continue.' : undefined
+                categoryGroups.length === 0 ? 'No categories yet - add one to continue.' : undefined
               }
               error={categoryGroups.length === 0 ? ' ' : undefined}
             />
@@ -513,7 +513,7 @@ function NewCategoryRow({
  *
  * The seeded chart has one till and one current account, which covers a business with
  * exactly those. A second bank, a UPI wallet, a card-settlement account, or a partner's
- * petty cash are all ordinary — and without this, money that moved through a wallet gets
+ * petty cash are all ordinary - and without this, money that moved through a wallet gets
  * filed as cash and no balance matches anything real.
  */
 function NewMoneyAccountRow({
@@ -663,7 +663,7 @@ function EntryList({
             {formatMoney(row.amount, currency)}
           </span>
         ) : (
-          <span className="text-content-muted">—</span>
+          <span className="text-content-muted">-</span>
         ),
     },
     {
@@ -677,7 +677,7 @@ function EntryList({
             {formatMoney(row.amount, currency)}
           </span>
         ) : (
-          <span className="text-content-muted">—</span>
+          <span className="text-content-muted">-</span>
         ),
     },
     {
@@ -712,7 +712,7 @@ function EntryList({
     <Card>
       <CardHeader
         title="Your entries"
-        description="Newest first. Nothing is ever deleted — a correction is an opposite entry."
+        description="Newest first. Nothing is ever deleted - a correction is an opposite entry."
         action={
           <div className="flex flex-wrap items-center gap-2">
             <div className="border-border flex overflow-hidden rounded-lg border">
@@ -802,7 +802,7 @@ function TotalTile({
           tone === 'net' && 'text-content',
         )}
       >
-        {value ?? '—'}
+        {value ?? '-'}
       </p>
       {hint && <p className="text-content-muted mt-1.5 text-[11px]">{hint}</p>}
     </Card>

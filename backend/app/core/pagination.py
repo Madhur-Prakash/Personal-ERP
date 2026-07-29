@@ -2,10 +2,10 @@
 
 Two strategies, because they solve different problems:
 
-* **Offset pagination** (:class:`PageParams`) — supports "jump to page 7", which
+* **Offset pagination** (:class:`PageParams`) - supports "jump to page 7", which
   data tables need. Cost: ``OFFSET 10000`` still walks 10 000 rows, and a row
   inserted mid-browse shifts everything down a page.
-* **Cursor pagination** (:class:`CursorParams`) — constant cost at any depth and
+* **Cursor pagination** (:class:`CursorParams`) - constant cost at any depth and
   stable under concurrent inserts, at the price of no random page access. This
   is the right default for activity feeds, audit trails, and infinite scroll.
 
@@ -51,7 +51,7 @@ class SortParams(BaseModel):
     """Sorting query parameters.
 
     ``sort_by`` is validated against an allow-list at the repository, never
-    interpolated into SQL — otherwise it is an injection point.
+    interpolated into SQL - otherwise it is an injection point.
     """
 
     sort_by: Annotated[str | None, Query(description="Field to sort by")] = None
@@ -127,7 +127,7 @@ class CursorParams(BaseModel):
 def encode_cursor(value: str) -> str:
     """Base64url-encode a cursor value.
 
-    Encoded purely to signal opacity — clients that see a raw UUID inevitably
+    Encoded purely to signal opacity - clients that see a raw UUID inevitably
     start constructing cursors by hand, which locks in the implementation.
     """
     return base64.urlsafe_b64encode(value.encode()).decode()

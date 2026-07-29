@@ -1,4 +1,4 @@
-"""Document intelligence service — upload, read, review, confirm.
+"""Document intelligence service - upload, read, review, confirm.
 
 The pipeline, and why each step is where it is:
 
@@ -9,8 +9,8 @@ The pipeline, and why each step is where it is:
    that was never written is a broken link every reader has to defend against,
    whereas a blob with no row is unreferenced garbage that harms nothing.
 4. **Recognise and extract.** Failures are *recorded on the row*, not raised. An
-   upload that Tesseract cannot read is still a document the user needs — they will
-   type it in by hand and attach the scan to the bill — and throwing away their file
+   upload that Tesseract cannot read is still a document the user needs - they will
+   type it in by hand and attach the scan to the bill - and throwing away their file
    because the engine struggled is the worst possible response.
 5. **Match the supplier by GSTIN**, which is unique and government-issued, rather
    than by fuzzy name comparison.
@@ -53,7 +53,7 @@ from app.modules.users.models import User
 
 log = get_logger(__name__)
 
-#: Filename length kept for display. Truncated rather than rejected — an
+#: Filename length kept for display. Truncated rather than rejected - an
 #: inconveniently long name is not a reason to refuse someone's invoice.
 MAX_FILENAME_LENGTH = 255
 
@@ -120,7 +120,7 @@ class DocumentService:
         Every mutating method ends here, for two distinct reasons:
 
         * A row built in Python (a fresh upload) has *no* loaded relationships, and
-          ``Document``'s are ``lazy="raise"`` — so serialising the response would
+          ``Document``'s are ``lazy="raise"`` - so serialising the response would
           raise rather than silently emitting a query. Returning the queried object
           is the fix; the guard is doing its job.
         * ``populate_existing=True`` is required, not decorative. SQLAlchemy will not
@@ -135,7 +135,7 @@ class DocumentService:
             .execution_options(populate_existing=True)
         )
         document = (await self.session.execute(query)).scalar_one_or_none()
-        if document is None:  # pragma: no cover — it was just written
+        if document is None:  # pragma: no cover - it was just written
             raise NotFoundError("Document")
         return document
 
@@ -151,7 +151,7 @@ class DocumentService:
     ) -> tuple[list[Document], int]:
         """The review queue.
 
-        Ordered newest first, which is what someone clearing an inbox wants — not by
+        Ordered newest first, which is what someone clearing an inbox wants - not by
         confidence. Sorting the least trustworthy documents to the top sounds helpful
         and is not: it buries the invoice that arrived this morning under every bad
         scan ever uploaded.
@@ -367,7 +367,7 @@ class DocumentService:
     async def _flag_duplicate(self, document: Document) -> DuplicateMatch | None:
         """Look for an earlier document that is probably the same invoice.
 
-        Matched on ``(supplier GSTIN, invoice number)`` — the pair that uniquely
+        Matched on ``(supplier GSTIN, invoice number)`` - the pair that uniquely
         identifies a GST invoice. Both must be present: an invoice number on its own
         collides constantly, because every supplier numbers from 1.
         """
@@ -418,7 +418,7 @@ class DocumentService:
     ) -> Document:
         """Re-run field extraction against the text already on file.
 
-        No engine, no blob — the recognised text is stored precisely so a parser
+        No engine, no blob - the recognised text is stored precisely so a parser
         improvement can be applied to every document that predates it, without
         needing the original files still to be on disk.
 
@@ -485,7 +485,7 @@ class DocumentService:
         """Turn a reviewed document into a bill.
 
         The bill is created by :class:`BillService` from the values the *reviewer*
-        submitted — not the extracted ones. Extraction pre-fills a form; what gets
+        submitted - not the extracted ones. Extraction pre-fills a form; what gets
         posted is what a human approved. That distinction is the entire safety story
         of this module, and it is enforced here by never reading
         ``document.extracted_*`` on this path.
@@ -586,7 +586,7 @@ class DocumentService:
         """Soft-delete a document.
 
         Refused once it has become a bill. The blob is the evidence behind a ledger
-        entry, and that entry is immutable — deleting the document would leave a
+        entry, and that entry is immutable - deleting the document would leave a
         posted liability with nothing supporting it. The blob is never removed from
         disk here either, for the same reason.
         """

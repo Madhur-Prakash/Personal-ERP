@@ -70,16 +70,16 @@ def _set_refresh_cookie(response: Response, result: AuthResult) -> None:
 
     Each flag earns its place:
 
-    * ``httponly`` — unreachable from JavaScript, so XSS cannot exfiltrate a
+    * ``httponly`` - unreachable from JavaScript, so XSS cannot exfiltrate a
       long-lived credential. This is the single most important one.
-    * ``secure`` — HTTPS only. Relaxed in local development, where there is no
+    * ``secure`` - HTTPS only. Relaxed in local development, where there is no
       TLS and the cookie would otherwise never be set.
-    * ``samesite="strict"`` — the browser withholds the cookie on cross-site
+    * ``samesite="strict"`` - the browser withholds the cookie on cross-site
       requests, which is what makes CSRF against the refresh endpoint infeasible.
-    * ``path`` — scoped to the auth routes, so it is not attached to every API
+    * ``path`` - scoped to the auth routes, so it is not attached to every API
       call that has no use for it.
     """
-    # Measured from now, not from the access token's expiry — the two have
+    # Measured from now, not from the access token's expiry - the two have
     # entirely different lifetimes.
     max_age = int((result.refresh_expires_at - dt.datetime.now(dt.UTC)).total_seconds())
 
@@ -175,7 +175,7 @@ async def login(
 ) -> TokenResponse | TwoFactorChallengeResponse:
     """Authenticate with a password.
 
-    Returns either a token pair or — when 2FA is enabled — a challenge to be
+    Returns either a token pair or - when 2FA is enabled - a challenge to be
     completed at ``/auth/login/2fa``.
     """
     result = await service.login(data.email, data.password, ctx, remember_me=data.remember_me)

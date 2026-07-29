@@ -6,7 +6,7 @@ roll back too, or the trail describes events that never occurred.
 
 The audit row is *not* a substitute for the logifyx log, and vice versa. The log
 is operational and ephemeral (debugging, latency, stack traces); the audit trail
-is a durable, queryable business record — "who changed this customer's credit
+is a durable, queryable business record - "who changed this customer's credit
 limit, and when". They share a ``request_id`` so one can be pivoted to the other.
 """
 
@@ -120,7 +120,7 @@ class AuditService:
         """Append an event to the trail.
 
         Actor identity is denormalised onto the row (email and display name) so
-        the entry stays readable after the user is deleted — a foreign key alone
+        the entry stays readable after the user is deleted - a foreign key alone
         would leave "someone did this".
         """
         entry = AuditLog(

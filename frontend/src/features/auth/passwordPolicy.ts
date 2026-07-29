@@ -5,8 +5,8 @@
  * (`backend/app/modules/auth/password_policy.py`) and are fetched from
  * `GET /auth/password-policy`. Nothing here restates them.
  *
- * This module exists because the password field appears in three places —
- * registration, reset, and settings — and each one previously hard-coded its own
+ * This module exists because the password field appears in three places -
+ * registration, reset, and settings - and each one previously hard-coded its own
  * hint text. Three copies of a rule is three chances to contradict the server.
  */
 import { useQuery } from '@tanstack/react-query';
@@ -64,7 +64,7 @@ export interface PasswordStrength {
 /**
  * Lightweight strength meter for live feedback while typing.
  *
- * Advisory only — the server is the authority, and it also applies checks this
+ * Advisory only - the server is the authority, and it also applies checks this
  * cannot (a weak-password blocklist, and the user's own name and email). So a
  * password showing "Strong" here can still be rejected on submit; that is
  * correct, and the server's message is what the user sees.

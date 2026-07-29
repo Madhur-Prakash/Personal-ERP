@@ -1,7 +1,7 @@
 # Security
 
 Every control below exists for a stated reason. Where a common alternative was
-rejected, the reason is given — a control whose rationale nobody remembers is a
+rejected, the reason is given - a control whose rationale nobody remembers is a
 control that gets removed in the next refactor.
 
 ---
@@ -31,7 +31,7 @@ Stage 10.
 
 ## Authentication
 
-### Password storage — Argon2id
+### Password storage - Argon2id
 
 Parameters are configurable and recorded in the hash itself.
 
@@ -43,7 +43,7 @@ Because the parameters live in the stored hash, raising the cost later re-hashes
 users transparently on their next successful login (`password_needs_rehash`)
 rather than locking anyone out.
 
-### Password policy — composition rules, with a blocklist backstop
+### Password policy - composition rules, with a blocklist backstop
 
 Enforced rules ([`auth/password_policy.py`](../backend/app/modules/auth/password_policy.py)):
 
@@ -59,7 +59,7 @@ Enforced rules ([`auth/password_policy.py`](../backend/app/modules/auth/password
 Two rules apply beyond that composition set, and both are deliberate:
 
 **A blocklist backstop.** Composition requirements are satisfied by precisely the
-passwords cracking dictionaries enumerate first — `Password@1` clears every rule
+passwords cracking dictionaries enumerate first - `Password@1` clears every rule
 above at ten characters. So the password is reduced to its letters-only root and
 checked against a weak-root list. Three normalisations are compared, because none
 subsumes the others:
@@ -76,7 +76,7 @@ into letters, so `Password@1` would become `passwordai` and miss.
 **No personal information.** The user's own name and email local part are
 rejected, since targeted guessing starts there.
 
-**Known limitation — caseless scripts.** Requiring both letter cases means a
+**Known limitation - caseless scripts.** Requiring both letter cases means a
 password written wholly in Devanagari, Arabic, Chinese, Japanese, Hebrew, or Thai
 cannot satisfy the policy, since `str.isupper()`/`str.islower()` are both false
 for every character in those scripts. Affected users must mix in Latin
@@ -84,7 +84,7 @@ characters. This is an inherent consequence of mandating both cases, not a bug;
 a test in `tests/test_password_policy.py` pins the behaviour so it stays visible
 rather than being discovered by a locked-out user.
 
-Whitespace is not accepted as the special character — a space the user cannot see
+Whitespace is not accepted as the special character - a space the user cannot see
 is not usable variety, and a pasted password with stray spaces fails at login in a
 way nobody can diagnose.
 
@@ -101,7 +101,7 @@ same message whether or not the account exists.
 
 Login goes further: on a missing account it calls `dummy_password_verify()`,
 burning an equivalent Argon2 cycle. Without that, "no such user" returns in
-microseconds while a real user costs ~50 ms — a trivially measurable oracle. A
+microseconds while a real user costs ~50 ms - a trivially measurable oracle. A
 test asserts the two timings stay within the same order of magnitude.
 
 Registration is the deliberate exception: it *does* return 409 on a duplicate
@@ -113,10 +113,10 @@ appropriate control there instead.
 
 Two independent layers:
 
-- **Per-account lockout** (Redis) — 5 failures locks the account for 15 minutes.
+- **Per-account lockout** (Redis) - 5 failures locks the account for 15 minutes.
   Keyed on email, not IP: an attacker rotates IPs trivially, and IP-based locking
   punishes everyone behind one NAT.
-- **Per-IP rate limiting** — at the edge (Nginx, 2 r/s on auth paths) and in the
+- **Per-IP rate limiting** - at the edge (Nginx, 2 r/s on auth paths) and in the
   application. Fixed-window in the app, because one `INCR` plus one `EXPIRE` keeps
   it cheap enough to sit in front of everything.
 
@@ -124,9 +124,9 @@ Two independent layers:
 second factor is brute-forceable at leisure once the password is known.
 
 The application limiter **fails open** if Redis is unavailable. Fail-closed would
-turn a cache outage into a total outage — a worse trade for a protective layer.
+turn a cache outage into a total outage - a worse trade for a protective layer.
 
-### Two-factor authentication — TOTP
+### Two-factor authentication - TOTP
 
 Standard parameters (6 digits, 30-second step, SHA-1) because that is what every
 authenticator app actually implements. Deviating is cryptographically defensible
@@ -140,7 +140,7 @@ Two distinct replay defences:
   guessing surface.
 - **Single-use enforcement.** Because a code stays valid for up to 90 seconds, an
   attacker who observes one can replay it. Every accepted code is burned in Redis
-  via `SET NX` — atomic, so two concurrent requests cannot both win.
+  via `SET NX` - atomic, so two concurrent requests cannot both win.
 
 Enrolment requires proving a valid code before 2FA takes effect. A secret is
 written during setup but `totp_enabled_at` stays null until confirmed, so a
@@ -184,7 +184,7 @@ Every refresh mints a new token and revokes the old one, recording
 
 The stolen-token problem is that an attacker who copies a refresh token can
 refresh forever, and the server cannot tell them from the real user. Rotation does
-not prevent that — it makes it **detectable**. The first party to refresh
+not prevent that - it makes it **detectable**. The first party to refresh
 invalidates the other's copy, so a second use of an already-rotated token is
 reliable evidence that two parties hold it.
 
@@ -195,10 +195,10 @@ audit it as `critical`. Both parties must re-authenticate.
 
 Two mechanisms, because they answer different questions:
 
-- **Epoch counter** (`personalerp:auth:epoch:<user_id>`) — every token carries the
+- **Epoch counter** (`personalerp:auth:epoch:<user_id>`) - every token carries the
   user's epoch; incrementing it invalidates all of them at once. Used for password
   change, sign-out-everywhere, role change, suspension, and removal.
-- **Per-session marker** (`personalerp:auth:revoked-sid:<session_id>`) — revokes one
+- **Per-session marker** (`personalerp:auth:revoked-sid:<session_id>`) - revokes one
   device without signing the user out everywhere.
 
 Both are checked in a single pipelined Redis round trip. Entries only need to
@@ -242,7 +242,7 @@ current truth rather than what was true at issue time.
 ### Tenant isolation
 
 The active organization comes from the signed token. No API path contains an
-organization id, so there is nothing for a client to tamper with — cross-tenant
+organization id, so there is nothing for a client to tamper with - cross-tenant
 access is structurally impossible rather than merely checked.
 
 Defence in depth on top of that: `RoleRepository.get_scoped` puts the tenant
@@ -269,7 +269,7 @@ An organization must not be able to destroy its own administrability:
 - **Separate request and response schemas.** A response schema reused as a request
   schema is how `is_superuser` becomes mass-assignable.
 - **`extra="forbid"`** on every request schema. An unknown field is a 422, not a
-  silent ignore — a client's typo should be reported, not swallowed.
+  silent ignore - a client's typo should be reported, not swallowed.
 - **`exclude_unset`** on partial updates, so "field omitted" is distinguishable
   from "field set to null". Without it, a client sending only `theme` would blank
   the user's phone number.
@@ -289,7 +289,7 @@ log line, which is what makes it safe to log request metadata at all.
 
 The audit trail has an independent redaction backstop
 (`audit/service.py::redact`) covering `password`, `token`, `totp_secret`,
-`recovery_codes`, `api_key`, and more — recursively. A test drives a real password
+`recovery_codes`, `api_key`, and more - recursively. A test drives a real password
 change end to end and asserts neither the old nor the new password appears
 anywhere in the trail.
 
@@ -311,7 +311,7 @@ Response headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 geolocation, microphone, and camera.
 
 CSP on API responses is `default-src 'none'; frame-ancestors 'none'; base-uri
-'none'; form-action 'none'` — the API returns only JSON, so "load nothing, frame
+'none'; form-action 'none'` - the API returns only JSON, so "load nothing, frame
 nothing" is both correct and maximally strict.
 
 `Referrer-Policy` specifically protects magic-link and reset tokens, which appear
@@ -344,14 +344,14 @@ project on that port.
 
 Stated plainly rather than left implied:
 
-- **Passkeys / WebAuthn** — Stage 9.
-- **SSO / SAML** — Stage 9.
-- **Have I Been Pwned range check** — Stage 10. The local blocklist covers the
+- **Passkeys / WebAuthn** - Stage 9.
+- **SSO / SAML** - Stage 9.
+- **Have I Been Pwned range check** - Stage 10. The local blocklist covers the
   worst offenders with no network dependency; the k-anonymity API is the proper
   version.
-- **Database-level audit immutability** — Stage 9. A trigger denying
+- **Database-level audit immutability** - Stage 9. A trigger denying
   `UPDATE`/`DELETE` to the application role. Today it is enforced by the absence
   of any code that mutates the table.
-- **Secrets manager** — Stage 10. Currently environment variables.
-- **API keys and webhook signing** — Stage 9.
-- **Automated dependency scanning in CI** — Stage 10.
+- **Secrets manager** - Stage 10. Currently environment variables.
+- **API keys and webhook signing** - Stage 9.
+- **Automated dependency scanning in CI** - Stage 10.

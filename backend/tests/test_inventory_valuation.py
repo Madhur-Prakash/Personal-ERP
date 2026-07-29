@@ -109,7 +109,7 @@ class TestIssues:
         assert result.cost_of_goods_sold == D("21.0000")
 
     def test_over_issue_is_refused(self) -> None:
-        """Negative stock makes the average cost undefined — the divisor for the
+        """Negative stock makes the average cost undefined - the divisor for the
         next receipt would go negative."""
         state = apply_receipt(EMPTY, quantity=D("5"), unit_cost=D("10")).state
         with pytest.raises(NegativeStockError, match="only 5 on hand"):

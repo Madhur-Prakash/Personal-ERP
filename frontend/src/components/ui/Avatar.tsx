@@ -59,7 +59,7 @@ export function Avatar({
           className="h-full w-full object-cover"
         />
       ) : (
-        // The initials are decorative — the accessible name comes from the
+        // The initials are decorative - the accessible name comes from the
         // surrounding control, so announcing "PS" as well is just noise.
         <span aria-hidden>{fallback}</span>
       )}

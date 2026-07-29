@@ -77,8 +77,8 @@ class OrganizationService:
         """Create an organization with the caller as owner.
 
         Seeding roles and creating the owner membership happen in the same
-        transaction as the insert. A half-created organization — existing but with
-        no roles and no owner — would be permanently unusable and invisible to its
+        transaction as the insert. A half-created organization - existing but with
+        no roles and no owner - would be permanently unusable and invisible to its
         creator.
         """
         if data.slug:
@@ -364,7 +364,7 @@ class OrganizationService:
     ) -> None:
         """Remove a member from the organization.
 
-        The membership row is hard-deleted — it is a join record, not a business
+        The membership row is hard-deleted - it is a join record, not a business
         document, and the audit trail preserves the fact that they were here. The
         user account itself is untouched.
         """
@@ -478,7 +478,7 @@ class OrganizationService:
                 raise NotFoundError("Role")
         else:
             role = await self.roles.get_default(organization_id)
-            if role is None:  # pragma: no cover — seeding guarantees a default
+            if role is None:  # pragma: no cover - seeding guarantees a default
                 raise BusinessRuleError("This organization has no default role")
 
         token = generate_token()
@@ -570,7 +570,7 @@ class OrganizationService:
         """Re-send an invitation with a fresh token and a reset expiry.
 
         A new token is issued rather than resending the old one, because the
-        plaintext was never retained — only its digest.
+        plaintext was never retained - only its digest.
         """
         invitation = await self.invitations.get(invitation_id)
         if invitation is None or invitation.organization_id != organization_id:
@@ -580,7 +580,7 @@ class OrganizationService:
 
         organization = await self.get(organization_id)
         role = await self.roles.get_scoped(organization_id, invitation.role_id)
-        if role is None:  # pragma: no cover — FK is RESTRICT
+        if role is None:  # pragma: no cover - FK is RESTRICT
             raise NotFoundError("Role")
 
         token = generate_token()
@@ -659,7 +659,7 @@ class OrganizationService:
                 organization_id=invitation.organization_id,
                 user_id=user.id,
                 # `get_by_token` eager-loads the invitation's role, so passing the
-                # object populates the member's relationship with no extra IO —
+                # object populates the member's relationship with no extra IO -
                 # and lets the caller read `member.role.name` safely.
                 role=invitation.role,
                 status=MemberStatus.ACTIVE,

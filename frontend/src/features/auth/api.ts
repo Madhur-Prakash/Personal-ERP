@@ -15,7 +15,7 @@ import type {
  * Auth endpoint bindings.
  *
  * A thin, typed layer over the HTTP client. Keeping the URLs here means a route
- * rename touches one file, and components never contain string paths — so a typo
+ * rename touches one file, and components never contain string paths - so a typo
  * is a compile error at the binding rather than a 404 at runtime.
  */
 export const authApi = {

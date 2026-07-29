@@ -171,7 +171,7 @@ class TestDashboard:
     async def test_revenue_excludes_gst(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        """GST collected is not revenue — it is the government's money in transit.
+        """GST collected is not revenue - it is the government's money in transit.
 
         A ₹10,000 invoice at 18% bills ₹11,800. Reporting ₹11,800 as revenue overstates
         income by the tax and is the most common way a naive dashboard flatters the
@@ -199,7 +199,7 @@ class TestDashboard:
         await post_invoice(authed_client, api, customer, amount="10000", on=today)
 
         dashboard = (await authed_client.get(f"{api}/analytics/dashboard")).json()
-        # Receivable is the gross invoice, tax included — the customer owes all of it.
+        # Receivable is the gross invoice, tax included - the customer owes all of it.
         assert D(dashboard["receivables"]) == D("11800")
 
         sheet = (
@@ -294,7 +294,7 @@ class TestTrend:
 
         `AnalyticsService.trend` uses one grouped query instead of twelve P&L
         computations. That is only safe if the series adds up to the statement for the
-        same span — otherwise the chart and the tile above it tell different stories.
+        same span - otherwise the chart and the tile above it tell different stories.
         """
         today = dt.date.today()
         customer = await make_customer(authed_client, api, "Acme Buyer")
@@ -400,7 +400,7 @@ class TestRankings:
             )
         ).json()
 
-        # Ranked on taxable value, so the genuinely larger customer leads — even
+        # Ranked on taxable value, so the genuinely larger customer leads - even
         # though its invoice total is smaller.
         assert body["rows"][0]["label"] == "Staples Buyer"
 
@@ -426,7 +426,7 @@ class TestRankings:
     async def test_ranks_products_by_line_description(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        """Grouped by description because invoice lines are deliberately free-text —
+        """Grouped by description because invoice lines are deliberately free-text -
         a service with no product record must still be counted."""
         today = dt.date.today()
         customer = await make_customer(authed_client, api, "Acme Buyer")
@@ -538,7 +538,7 @@ class TestIsolation:
         """One organization's revenue must never appear in another's dashboard.
 
         Checked here rather than assumed, because analytics aggregates across every
-        table at once — it is the single easiest place to forget an org filter, and a
+        table at once - it is the single easiest place to forget an org filter, and a
         missing one shows up as someone else's revenue rather than as an error.
         """
         today = dt.date.today()

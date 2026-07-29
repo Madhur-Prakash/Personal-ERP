@@ -1,6 +1,6 @@
 """Period arithmetic tests.
 
-Pure dates in, pure dates out — no database. Worth testing exhaustively because
+Pure dates in, pure dates out - no database. Worth testing exhaustively because
 every misleading dashboard figure traces back to one of these functions, and the
 failures are silent: a wrong comparison window still renders a plausible number.
 
@@ -59,7 +59,7 @@ class TestFiscalYear:
         """15 Feb 2026 is in the year that began 1 April 2025.
 
         Getting this backwards shifts every year-to-date figure by up to twelve
-        months — and the wrong figure still looks like a plausible one.
+        months - and the wrong figure still looks like a plausible one.
         """
         assert fiscal_year_start(dt.date(2026, 2, 15), 4) == dt.date(2025, 4, 1)
 
@@ -147,7 +147,7 @@ class TestPreviousComparable:
         """The headline correctness property of this module.
 
         On the 3rd, "this month" is 3 days. Comparing it against a full 30-day month
-        reports a 90% collapse in revenue that never happened — and a dashboard that
+        reports a 90% collapse in revenue that never happened - and a dashboard that
         does this is wrong for most of every month.
         """
         current = resolve(Period.THIS_MONTH, dt.date(2026, 7, 3))
@@ -244,7 +244,7 @@ class TestPercentChange:
         assert percent_change(D("1000"), D("-1000")) is None
 
     def test_exactness_survives(self) -> None:
-        """Decimal in, Decimal out — no float anywhere in the path."""
+        """Decimal in, Decimal out - no float anywhere in the path."""
         result = percent_change(D("0.3"), D("0.1"))
         assert result == D("200.0")
         assert isinstance(result, Decimal)

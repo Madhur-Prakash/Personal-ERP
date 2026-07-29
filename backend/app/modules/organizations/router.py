@@ -130,7 +130,7 @@ async def leave_organization(
     service: OrgServiceDep,
     ctx: RequestCtx,
 ) -> MessageResponse:
-    """No permission required — anyone may leave, except the owner."""
+    """No permission required - anyone may leave, except the owner."""
     await service.leave(organization_id, user, ctx)
     return MessageResponse(message="You have left the organization.")
 
@@ -166,7 +166,7 @@ async def update_member(
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.MEMBER_UPDATE))],
 ) -> MemberRead:
-    """A role change takes effect immediately — the member's tokens are re-minted."""
+    """A role change takes effect immediately - the member's tokens are re-minted."""
     member = await service.update_member(organization_id, member_id, data, user, ctx)
     return MemberRead.model_validate(member)
 
@@ -307,7 +307,7 @@ invitations_router = APIRouter(prefix="/invitations", tags=["Invitations"])
     summary="Preview an invitation",
 )
 async def preview_invitation(token: str, service: OrgServiceDep) -> InvitationPreview:
-    """Unauthenticated — the recipient has not signed in yet.
+    """Unauthenticated - the recipient has not signed in yet.
 
     Returns only the organization name, role, and inviter. Anyone holding the link
     can read this, so it exposes nothing about the organization's members or data.

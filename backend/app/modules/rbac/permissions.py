@@ -1,4 +1,4 @@
-"""The permission catalogue — the single authoritative list of what can be done.
+"""The permission catalogue - the single authoritative list of what can be done.
 
 Design decision: **permissions are defined in code, not rows in a table.**
 
@@ -6,7 +6,7 @@ A permission is a capability the software actually implements. If
 ``invoice:approve`` exists as a database row but no endpoint checks it, the row
 is a lie; if an endpoint checks a permission absent from the table, authorization
 silently fails. Keeping the catalogue in code makes it impossible for the two to
-drift — the enum *is* the contract, it is greppable, it type-checks, and adding a
+drift - the enum *is* the contract, it is greppable, it type-checks, and adding a
 capability requires no data migration.
 
 Roles, by contrast, *are* data: each organization composes its own roles from
@@ -69,7 +69,7 @@ class Permission(StrEnum):
     JOURNAL_REVERSE = "journal:reverse"
     PERIOD_READ = "period:read"
     #: Closing a period freezes filed numbers. Deliberately not implied by
-    #: `journal:post` — a bookkeeper posts daily but should not be able to seal a
+    #: `journal:post` - a bookkeeper posts daily but should not be able to seal a
     #: quarter.
     PERIOD_CLOSE = "period:close"
     REPORT_READ = "report:read"
@@ -299,7 +299,7 @@ SYSTEM_ROLE_PERMISSIONS: Final[dict[SystemRole, tuple[str, ...]]] = {
 SYSTEM_ROLE_DESCRIPTIONS: Final[dict[SystemRole, str]] = {
     SystemRole.OWNER: "Full control, including billing and deleting the organization",
     SystemRole.ADMIN: "Manage people, settings, and all business data",
-    SystemRole.ACCOUNTANT: "Full books access — journals, invoices, payments, and reports",
+    SystemRole.ACCOUNTANT: "Full books access - journals, invoices, payments, and reports",
     SystemRole.SALES: "Manage customers and raise invoices",
     SystemRole.VIEWER: "Read-only access across modules",
 }
@@ -329,7 +329,7 @@ def expand_grants(grants: list[str] | tuple[str, ...]) -> frozenset[str]:
     """Resolve a role's grant list into the concrete permissions it implies.
 
     Wildcards are expanded eagerly so the resulting set can be embedded in an
-    access token and checked with a plain set membership test — no pattern
+    access token and checked with a plain set membership test - no pattern
     matching in the hot path of every request.
     """
     resolved: set[str] = set()

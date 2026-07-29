@@ -2,14 +2,14 @@
 
 Three endpoints, because orchestrators ask three different questions:
 
-* ``/health/live`` — "is the process up?" Never touches a dependency. If this
+* ``/health/live`` - "is the process up?" Never touches a dependency. If this
   checked PostgreSQL, a brief database blip would make Docker/Kubernetes kill and
   restart every healthy app container, turning a recoverable outage into a
   cascading one.
-* ``/health/ready`` — "can it serve traffic?" Checks dependencies and returns 503
+* ``/health/ready`` - "can it serve traffic?" Checks dependencies and returns 503
   when they are down, so the load balancer stops routing to this instance without
   restarting it.
-* ``/health`` — a human-readable summary for dashboards.
+* ``/health`` - a human-readable summary for dashboards.
 
 None of them require authentication, and none leak version or configuration
 detail beyond what is already public.
@@ -34,7 +34,7 @@ router = APIRouter(prefix="/health", tags=["Health"])
 
 @router.get("/live", summary="Liveness probe", status_code=status.HTTP_200_OK)
 async def liveness() -> dict[str, str]:
-    """Is the process alive? No dependency checks — see the module docstring."""
+    """Is the process alive? No dependency checks - see the module docstring."""
     return {"status": "alive"}
 
 

@@ -1,9 +1,9 @@
-"""Purchasing and inventory — suppliers, products, stock, POs, receipts, bills.
+"""Purchasing and inventory - suppliers, products, stock, POs, receipts, bills.
 
 **Stock is a ledger, not a counter.** ``StockMovement`` is append-only: every
 receipt, issue, adjustment, and transfer is a row that is never updated or deleted.
 ``StockLevel`` holds the derived position (quantity on hand and average cost) so
-that reads are cheap, but it is reconstructible by replaying movements — and a test
+that reads are cheap, but it is reconstructible by replaying movements - and a test
 asserts it matches. A bare mutable counter would make "why is stock wrong?"
 unanswerable.
 
@@ -15,8 +15,8 @@ no PO; a business with approval workflow raises the PO first.
 classic error:
 
 * **Goods receipt** moves stock and recognises a liability for goods received but
-  not yet invoiced — debit Inventory, credit *Goods Received Not Invoiced*.
-* **Bill** replaces that accrual with the real payable and books input GST —
+  not yet invoiced - debit Inventory, credit *Goods Received Not Invoiced*.
+* **Bill** replaces that accrual with the real payable and books input GST -
   debit GRNI, debit GST Input, credit Accounts Payable.
 
 Keeping them separate is what lets stock arrive on the 30th and the invoice arrive
@@ -195,7 +195,7 @@ class Supplier(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
 # Products
 # =============================================================================
 class Product(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
-    """An item master entry — the thing that appears on a document line.
+    """An item master entry - the thing that appears on a document line.
 
     Shared by sales and purchasing rather than duplicated: a shop buys and sells the
     same widget, and two records would let its HSN code, tax rate, or unit disagree
@@ -207,7 +207,7 @@ class Product(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDel
     description: Mapped[str | None] = mapped_column(Text)
 
     #: EAN/UPC. Indexed and unique per organization so a barcode scan is a single
-    #: point lookup — the whole point of supporting them.
+    #: point lookup - the whole point of supporting them.
     barcode: Mapped[str | None] = mapped_column(String(50))
 
     kind: Mapped[ProductKind] = mapped_column(
@@ -311,7 +311,7 @@ class StockLevel(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
     O(movements). The authoritative history is :class:`StockMovement`, and
     ``test_stock_level_matches_replayed_movements`` asserts the two agree.
 
-    ``average_cost`` is carried at 6dp — see
+    ``average_cost`` is carried at 6dp - see
     :mod:`app.modules.purchasing.valuation` for why the extra precision matters.
     """
 
@@ -323,12 +323,12 @@ class StockLevel(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
     )
 
     quantity: Mapped[Quantity] = mapped_column(nullable=False, default=ZERO)
-    #: Total cost of the stock on hand. **Authoritative** — it changes only by
+    #: Total cost of the stock on hand. **Authoritative** - it changes only by
     #: amounts posted to the ledger, so it can never drift from the Inventory
     #: account. See :class:`app.modules.purchasing.valuation.ValuationState`.
     stock_value: Mapped[Money] = mapped_column(nullable=False, default=ZERO)
     #: Derived from ``stock_value / quantity`` and stored for querying and display.
-    #: Never the basis of a calculation — the value is.
+    #: Never the basis of a calculation - the value is.
     average_cost: Mapped[Decimal] = mapped_column(nullable=False, default=ZERO)
 
     #: Committed to sales orders but not yet shipped. Informational in this module;
@@ -371,7 +371,7 @@ class StockMovement(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
     movement is history. A mistake is corrected by a compensating ``REVERSAL``
     movement, exactly as the ledger corrects a posted entry.
 
-    ``quantity`` is stored **signed** here — unlike journal lines, which use
+    ``quantity`` is stored **signed** here - unlike journal lines, which use
     separate debit/credit columns. The reason is the opposite of the one there: a
     stock report wants a running total, which a signed column gives as a plain
     ``SUM``, whereas debit/credit would need a conditional aggregate. Journals have
@@ -454,7 +454,7 @@ class PurchaseLineMixin:
     """Columns common to purchase-document lines.
 
     Mirrors :class:`app.modules.sales.models.SalesLineMixin` and computes tax with
-    the same engine — a purchase and a sale of the same item at the same price must
+    the same engine - a purchase and a sale of the same item at the same price must
     produce identical tax, or the books cannot reconcile.
     """
 
@@ -647,7 +647,7 @@ class GoodsReceipt(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, So
         index=True,
     )
 
-    #: Value of the goods received, at receipt cost. Not a tax-inclusive figure —
+    #: Value of the goods received, at receipt cost. Not a tax-inclusive figure -
     #: tax is not recoverable until the bill arrives.
     total_cost: Mapped[Money] = mapped_column(nullable=False, default=ZERO)
 
@@ -748,7 +748,7 @@ class Bill(
     claim."""
 
     bill_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    #: The supplier's own invoice number — what they will quote when chasing payment.
+    #: The supplier's own invoice number - what they will quote when chasing payment.
     supplier_invoice_number: Mapped[str | None] = mapped_column(String(100), index=True)
 
     supplier_id: Mapped[uuid.UUID] = mapped_column(
@@ -805,7 +805,7 @@ class Bill(
 
     __table_args__ = (
         UniqueConstraint("organization_id", "bill_number", name="uq_bill_org_number"),
-        # The same supplier invoice must not be entered twice — the single most
+        # The same supplier invoice must not be entered twice - the single most
         # common and most expensive data-entry error in accounts payable.
         Index(
             "uq_bill_supplier_invoice",

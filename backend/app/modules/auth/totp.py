@@ -1,6 +1,6 @@
 """TOTP (RFC 6238) two-factor authentication.
 
-Standard parameters — 6 digits, 30-second step, SHA-1 — because that is what
+Standard parameters - 6 digits, 30-second step, SHA-1 - because that is what
 Google Authenticator, Authy, 1Password, and every other authenticator app
 implements. Deviating (SHA-256, 8 digits) is cryptographically defensible and
 practically useless: most apps silently ignore the algorithm parameter in the
@@ -12,7 +12,7 @@ Two replay defences, addressing different attacks:
   previous, current, and next code. Wider windows multiply the guessing surface.
 * **Single-use enforcement.** Because a code stays valid for up to 90 seconds, an
   attacker who observes one (shoulder-surfing, a phished form) can replay it.
-  Every accepted code is therefore burned in Redis for the rest of its window —
+  Every accepted code is therefore burned in Redis for the rest of its window -
   see :func:`app.core.redis.RedisKey.totp_replay`.
 """
 
@@ -31,7 +31,7 @@ from app.core.config import settings
 
 DIGITS: Final = 6
 INTERVAL_SECONDS: Final = 30
-#: Accept one step either side of now — ±30s of clock skew.
+#: Accept one step either side of now - ±30s of clock skew.
 VALID_WINDOW: Final = 1
 #: 160 bits, the RFC 4226 recommendation, as 32 base32 characters.
 SECRET_LENGTH: Final = 32
@@ -41,7 +41,7 @@ def generate_secret() -> str:
     """Generate a fresh base32 TOTP secret.
 
     ``pyotp.random_base32`` draws from :mod:`secrets`, so this is CSPRNG-backed.
-    Store it encrypted — see :func:`app.core.security.encrypt_secret`.
+    Store it encrypted - see :func:`app.core.security.encrypt_secret`.
     """
     return pyotp.random_base32(length=SECRET_LENGTH)
 
@@ -86,7 +86,7 @@ def verify_code(secret: str, code: str) -> bool:
     """Verify a TOTP code against the secret.
 
     ``pyotp.verify`` compares in constant time internally. Replay prevention is
-    *not* handled here — the service layer must also burn the code in Redis.
+    *not* handled here - the service layer must also burn the code in Redis.
     """
     cleaned = code.strip().replace(" ", "").replace("-", "")
     if not cleaned.isdigit() or len(cleaned) != DIGITS:

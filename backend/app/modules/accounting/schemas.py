@@ -2,7 +2,7 @@
 
 Money crosses the wire as a JSON **string**, not a number. A JSON number is an
 IEEE-754 double in every JavaScript client, so `1234567.89` silently becomes
-`1234567.8899999999` — and a ledger that displays a cent off is a ledger nobody
+`1234567.8899999999` - and a ledger that displays a cent off is a ledger nobody
 trusts. Pydantic serialises `Decimal` to a string here, and the frontend formats
 it without ever converting to `number`.
 """
@@ -60,7 +60,7 @@ class AccountCreate(BaseSchema):
 
 
 class AccountUpdate(BaseSchema):
-    """All fields optional — a PATCH.
+    """All fields optional - a PATCH.
 
     `account_type` is deliberately absent. Changing an account's type after it
     holds postings would silently flip the sign of its balance in every historical
@@ -106,7 +106,7 @@ class AccountTreeNode(AccountWithBalance):
     """Recursive chart-of-accounts node.
 
     Nested rather than flat-with-parent-ids because the client renders a tree and
-    would otherwise have to rebuild the hierarchy itself — and a subtree's rolled-up
+    would otherwise have to rebuild the hierarchy itself - and a subtree's rolled-up
     balance can only be computed once the tree exists.
     """
 
@@ -207,7 +207,7 @@ class JournalEntryCreate(BaseSchema):
     entry_date: dt.date
     narration: Narration
     reference: str | None = Field(default=None, max_length=100)
-    #: Who the money came from or went to. Free text — see the model for why this is
+    #: Who the money came from or went to. Free text - see the model for why this is
     #: not a foreign key.
     counterparty: str | None = Field(default=None, max_length=200)
     lines: list[JournalEntryLineInput] = Field(min_length=2)
@@ -289,7 +289,7 @@ class JournalEntryRead(TimestampedSchema):
 
     #: Whether cash actually moved, and which way.
     #:
-    #: An entry always has both a debit and a credit — that is what double-entry means —
+    #: An entry always has both a debit and a credit - that is what double-entry means -
     #: so "was this debited or credited" has no single answer. The question people are
     #: really asking is whether money came in or went out, and that is decided by which
     #: side the *cash* account sits on: cash debited means it arrived, credited means it
@@ -304,7 +304,7 @@ class JournalEntryRead(TimestampedSchema):
 
 
 class ReverseEntryRequest(BaseSchema):
-    """A reversal may be dated later than the original — you cannot post into a
+    """A reversal may be dated later than the original - you cannot post into a
     closed month just because that is where the mistake was made."""
 
     reversal_date: dt.date | None = None
@@ -320,7 +320,7 @@ class TrialBalanceRow(ResponseSchema):
     name: str
     account_type: AccountType
     #: The net balance, shown on whichever side it falls. Zero on both sides means the
-    #: account had activity that cancelled out — check `gross_debit`/`gross_credit`.
+    #: account had activity that cancelled out - check `gross_debit`/`gross_credit`.
     debit: Decimal
     credit: Decimal
     #: Total movement through the account before netting.
@@ -333,7 +333,7 @@ class TrialBalanceRow(ResponseSchema):
 
     @property
     def nets_to_nil(self) -> bool:
-        """Had movement, and it cancelled out — usually a reversal."""
+        """Had movement, and it cancelled out - usually a reversal."""
         return (
             self.debit == 0
             and self.credit == 0
@@ -348,8 +348,8 @@ class TrialBalance(ResponseSchema):
     total_debit: Decimal
     total_credit: Decimal
     #: Entries cancelled by a reversal in this window. Surfaced because a reversal
-    #: leaves no visible trace in the net figures — both entries remain in the ledger
-    #: and sum to zero — so without this the report cannot be reconciled against a
+    #: leaves no visible trace in the net figures - both entries remain in the ledger
+    #: and sum to zero - so without this the report cannot be reconciled against a
     #: journal that plainly shows four entries.
     reversed_entry_count: int = 0
     #: Must always be true. Surfaced rather than asserted so a corrupted ledger is
@@ -419,7 +419,7 @@ class BalanceSheet(ResponseSchema):
     total_liabilities: Decimal
     total_equity: Decimal
     #: Profit for the year to date. Until the year is closed this is not yet in
-    #: retained earnings, so it is shown as its own equity line — without it the
+    #: retained earnings, so it is shown as its own equity line - without it the
     #: sheet would not balance.
     current_period_earnings: Decimal
     is_balanced: bool

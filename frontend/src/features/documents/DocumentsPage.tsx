@@ -1,16 +1,16 @@
 /**
- * Scanned documents — the inbox between a supplier's PDF and the ledger.
+ * Scanned documents - the inbox between a supplier's PDF and the ledger.
  *
  * **This screen's job is to make a machine's guess easy to disbelieve.** Every
  * extracted value is shown with how much the server trusts it, low-confidence
- * fields are marked, and the confirm form is pre-filled but fully editable —
+ * fields are marked, and the confirm form is pre-filled but fully editable -
  * because what gets posted is what the reviewer approves, not what OCR read. The
  * backend enforces that (it never reads the extracted values on the confirm path);
  * the UI's job is to make the difference visible rather than hide it behind a
  * one-click "accept".
  *
  * The confirm form asks for **lines**, not just a total. A bill without lines
- * cannot be costed, taxed per HSN, or matched to a receipt — and extraction does
+ * cannot be costed, taxed per HSN, or matched to a receipt - and extraction does
  * not read line items reliably enough to pretend otherwise. Typing two lines is
  * the price of a bill that is actually usable.
  */
@@ -156,18 +156,18 @@ function DocumentQueue({ onOpen }: { onOpen: (id: string) => void }) {
       header: 'Invoice no.',
       hideOnMobile: true,
       cell: (row) => (
-        <span className="font-mono text-[12px]">{row.extracted_invoice_number ?? '—'}</span>
+        <span className="font-mono text-[12px]">{row.extracted_invoice_number ?? '-'}</span>
       ),
     },
     {
       header: 'Date',
       hideOnMobile: true,
-      cell: (row) => (row.extracted_invoice_date ? formatDate(row.extracted_invoice_date) : '—'),
+      cell: (row) => (row.extracted_invoice_date ? formatDate(row.extracted_invoice_date) : '-'),
     },
     {
       header: 'Total',
       numeric: true,
-      cell: (row) => (row.extracted_total_amount ? formatMoney(row.extracted_total_amount) : '—'),
+      cell: (row) => (row.extracted_total_amount ? formatMoney(row.extracted_total_amount) : '-'),
     },
     {
       header: 'Confidence',
@@ -204,7 +204,7 @@ function DocumentQueue({ onOpen }: { onOpen: (id: string) => void }) {
       <Card>
         <CardHeader
           title="Document inbox"
-          description="Newest first — what arrived this morning should not be buried under old scans."
+          description="Newest first - what arrived this morning should not be buried under old scans."
           action={
             <div className="flex items-center gap-2">
               <label className="text-content-secondary flex items-center gap-1.5 text-[12px]">
@@ -464,7 +464,7 @@ function DocumentReview({ id, onClose }: { id: string; onClose: () => void }) {
               <p className="text-content font-medium">This may already have been entered</p>
               <p className="text-content-secondary mt-0.5">
                 An earlier document has the same supplier GSTIN and invoice number. Check before
-                confirming — this is a warning, not a block, because the values compared were read
+                confirming - this is a warning, not a block, because the values compared were read
                 by a machine.
               </p>
             </div>
@@ -572,13 +572,13 @@ function ExtractedFields({ document }: { document: Document }) {
           {document.totals_reconcile ? (
             <p className="text-success flex items-center gap-1.5">
               <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-              Taxable value plus tax equals the total — strong evidence all three were read right.
+              Taxable value plus tax equals the total - strong evidence all three were read right.
             </p>
           ) : (
             <p className="text-content-muted flex items-center gap-1.5">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
               The three amounts do not add up. Either a figure was misread, or the supplier's own
-              arithmetic is off — check all three.
+              arithmetic is off - check all three.
             </p>
           )}
         </div>
@@ -780,7 +780,7 @@ function ConfirmForm({ document, onConfirmed }: { document: Document; onConfirme
                   </option>
                 ))}
               </select>
-              {/* The scan usually names a supplier who is not on file yet — that is
+              {/* The scan usually names a supplier who is not on file yet - that is
                   the normal case for a first invoice from someone, not an edge case.
                   Sending the user to another screen would lose the review. */}
               <Button
@@ -897,7 +897,7 @@ function ConfirmForm({ document, onConfirmed }: { document: Document; onConfirme
             <strong className="text-content tabular-nums">
               {formatMoney(document.extracted_total_amount)}
             </strong>
-            . The bill's total is computed from the lines above, so compare the two before posting —
+            . The bill's total is computed from the lines above, so compare the two before posting -
             they should agree.
           </p>
         )}
@@ -932,7 +932,7 @@ function ConfirmForm({ document, onConfirmed }: { document: Document; onConfirme
  */
 function ConfidenceMeter({ value, compact }: { value: string | null; compact?: boolean }) {
   if (value === null) {
-    return <span className="text-content-muted text-[11px]">—</span>;
+    return <span className="text-content-muted text-[11px]">-</span>;
   }
 
   const fraction = Number(value);

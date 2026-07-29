@@ -1,10 +1,10 @@
 /* =============================================================================
-   Personal ERP — design tokens and base styles
+   Personal ERP - design tokens and base styles
    Tailwind CSS v4: configuration lives here in CSS, not in a JS config file.
    =============================================================================
 
    The token layer is deliberately semantic rather than literal. Components
-   reference `bg-surface` and `text-muted`, never `bg-zinc-900` — so dark mode is
+   reference `bg-surface` and `text-muted`, never `bg-zinc-900` - so dark mode is
    one set of variable overrides instead of a `dark:` variant on every element,
    and a brand change is a handful of lines rather than a find-and-replace.
 
@@ -16,7 +16,7 @@
 @import 'tailwindcss';
 
 /* Tell Tailwind that dark mode is driven by a class on <html>, not the OS media
-   query — the theme switcher needs to override the system preference. */
+   query - the theme switcher needs to override the system preference. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
@@ -27,7 +27,7 @@
   --font-mono:
     'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
-  /* Tightened tracking on larger sizes — the Linear/Stripe signature, and it
+  /* Tightened tracking on larger sizes - the Linear/Stripe signature, and it
      genuinely improves headline legibility. */
   --tracking-tighter: -0.045em;
   --tracking-tight: -0.02em;
@@ -63,7 +63,7 @@
 }
 
 /* =============================================================================
-   Semantic tokens — light theme (the default)
+   Semantic tokens - light theme (the default)
    ============================================================================= */
 @layer base {
   :root {
@@ -246,7 +246,7 @@
 
   /* One focus treatment everywhere. `:focus-visible` rather than `:focus` so a
      mouse click does not leave a ring behind, while keyboard users always get
-     one — removing outlines outright is an accessibility failure. */
+     one - removing outlines outright is an accessibility failure. */
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
@@ -295,7 +295,7 @@
     caret-color: var(--content);
   }
 
-  /* Respect the OS reduced-motion setting. Not optional — motion can trigger
+  /* Respect the OS reduced-motion setting. Not optional - motion can trigger
      nausea and migraines for vestibular-sensitive users. */
   @media (prefers-reduced-motion: reduce) {
     *,

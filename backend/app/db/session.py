@@ -1,6 +1,6 @@
 """Async engine, session factory, and the FastAPI session dependency.
 
-Transaction policy — one request, one transaction:
+Transaction policy - one request, one transaction:
 
 :func:`get_db` yields a session and commits when the handler returns cleanly, or
 rolls back if it raises. Handlers and services therefore never call ``commit()``

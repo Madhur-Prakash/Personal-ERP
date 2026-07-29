@@ -2,7 +2,7 @@
 
 Two of these write to the ledger, and the split between them is the point:
 
-**Goods receipt** — stock arrives, and a liability for goods-received-not-invoiced
+**Goods receipt** - stock arrives, and a liability for goods-received-not-invoiced
 is recognised:
 
 ===============================  ==========  ==========
@@ -12,7 +12,7 @@ Inventory                           cost
 Goods Received Not Invoiced                     cost
 ===============================  ==========  ==========
 
-**Bill** — the supplier's invoice replaces that accrual with a real payable and
+**Bill** - the supplier's invoice replaces that accrual with a real payable and
 books recoverable input GST:
 
 ===============================  ==========  ==========
@@ -198,7 +198,7 @@ class PurchasingBase:
         """Place of supply, from the *buyer's* perspective.
 
         The organization is the buyer here, so its state is compared against the
-        supplier's — the mirror of the sales case.
+        supplier's - the mirror of the sales case.
         """
         return resolve_treatment(
             seller_state_code=supplier.state_code,
@@ -336,7 +336,7 @@ class ProductService(PurchasingBase):
         return await self._product(organization_id, product_id)
 
     async def by_barcode(self, organization_id: uuid.UUID, barcode: str) -> Product:
-        """Point lookup for a barcode scan — the reason the column is indexed."""
+        """Point lookup for a barcode scan - the reason the column is indexed."""
         product = (
             await self.session.execute(
                 select(Product).where(
@@ -456,7 +456,7 @@ class ProductService(PurchasingBase):
             organization_id=organization_id,
             resource_type="product",
             resource_id=product.id,
-            summary=f"Created product {product.sku} — {product.name}",
+            summary=f"Created product {product.sku} - {product.name}",
             **_audit_ctx(ctx),
         )
         return product

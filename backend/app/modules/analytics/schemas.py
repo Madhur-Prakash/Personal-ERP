@@ -17,7 +17,7 @@ class MovementRead(ResponseSchema):
 
     current: Decimal
     previous: Decimal
-    #: Null when the previous period gives no basis for a percentage — going from
+    #: Null when the previous period gives no basis for a percentage - going from
     #: zero is an infinite increase, not "+100%". Render "no prior data", not a
     #: number.
     change_percent: Decimal | None = None
@@ -80,7 +80,7 @@ class TrendRead(ResponseSchema):
 
 
 class RankedRowRead(ResponseSchema):
-    #: Null for rankings not keyed to a record — product lines are grouped by
+    #: Null for rankings not keyed to a record - product lines are grouped by
     #: description, because invoice lines are deliberately free-text.
     id: uuid.UUID | None = None
     label: str
@@ -92,7 +92,7 @@ class RankingRead(ResponseSchema):
     span: PeriodRead
     rows: list[RankedRowRead]
     #: The total across *all* rows, not just the returned top N, so the UI can show
-    #: "these five are 62% of revenue" — which is the actually useful reading.
+    #: "these five are 62% of revenue" - which is the actually useful reading.
     total: Decimal
 
 
@@ -128,7 +128,7 @@ class PeriodOptions(ResponseSchema):
     """The selectable windows, resolved against the organization's fiscal year.
 
     Served rather than hard-coded in the frontend so "this financial year" means the
-    same dates on both sides — an April-start business and a January-start one get
+    same dates on both sides - an April-start business and a January-start one get
     different answers, and duplicating that rule in TypeScript would eventually
     disagree with the ledger.
     """

@@ -19,7 +19,7 @@ ledger lines and separate columns on the invoice.
 
 So: line amounts stay exact at 4dp, each line's tax is quantised to 2dp, and the
 document total is the sum of already-rounded parts. That way every printed figure
-is the sum of the printed figures above it — which is the only property that
+is the sum of the printed figures above it - which is the only property that
 survives a customer with a calculator.
 """
 
@@ -117,7 +117,7 @@ def compute_line(
 ) -> LineTotals:
     """Compute one line's taxable base and tax split.
 
-    ``discount_amount`` wins over ``discount_percent`` when both are supplied — an
+    ``discount_amount`` wins over ``discount_percent`` when both are supplied - an
     absolute figure is a deliberate override and a percentage is a default, so the
     specific one takes precedence.
 
@@ -200,7 +200,7 @@ def compute_document(
 
     ``round_to_whole`` produces the whole-rupee total common on Indian invoices.
     The adjustment is returned as ``round_off`` so it can be posted to its own
-    ledger account — otherwise the journal entry would not balance.
+    ledger account - otherwise the journal entry would not balance.
     """
     subtotal = ZERO
     discount_total = ZERO
@@ -268,8 +268,8 @@ def resolve_treatment(
 def state_code_from_gstin(gstin: str | None) -> str | None:
     """Extract the state code from a GSTIN.
 
-    A GSTIN's first two digits are the state code, so a customer's state — and
-    therefore the CGST/SGST versus IGST decision — is derivable from the number
+    A GSTIN's first two digits are the state code, so a customer's state - and
+    therefore the CGST/SGST versus IGST decision - is derivable from the number
     they already gave you.
     """
     if not gstin or len(gstin) < 2 or not gstin[:2].isdigit():

@@ -7,7 +7,7 @@ order (highest priority first):
     2. The ``.env`` file at the repository root
     3. The defaults declared below
 
-Nothing else in the codebase may read ``os.environ`` directly — import
+Nothing else in the codebase may read ``os.environ`` directly - import
 :func:`get_settings` instead. That keeps configuration testable (override the
 cache) and makes every knob discoverable in one file.
 """
@@ -60,7 +60,7 @@ def _split_csv(value: object) -> object:
     """
     if isinstance(value, str):
         stripped = value.strip()
-        if stripped.startswith("["):  # already JSON — parse it as such
+        if stripped.startswith("["):  # already JSON - parse it as such
             import json
 
             parsed = json.loads(stripped)
@@ -168,7 +168,7 @@ class Settings(BaseSettings):
     upload_dir: Path = BACKEND_DIR / "var" / "uploads"
 
     #: Hard ceiling on one upload. A 600 dpi colour scan of an A4 invoice is
-    #: ~8 MB, so 15 MB accepts real documents and refuses everything else — the
+    #: ~8 MB, so 15 MB accepts real documents and refuses everything else - the
     #: limit is enforced while streaming, so an oversized body is never buffered.
     max_upload_bytes: int = Field(default=15 * 1024 * 1024, ge=64 * 1024)
 

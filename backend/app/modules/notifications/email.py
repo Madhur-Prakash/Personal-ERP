@@ -2,15 +2,15 @@
 
 Two behaviours, chosen by whether ``SMTP_HOST`` is configured:
 
-* **Configured** — sends via :mod:`aiosmtplib`.
-* **Not configured** (the local default) — renders the message and writes it to
+* **Configured** - sends via :mod:`aiosmtplib`.
+* **Not configured** (the local default) - renders the message and writes it to
   the logifyx log, including the verification/reset link. Development works with
   no mail server at all, and nobody has to dig a token out of the database to
   test a flow. ``docker compose up`` also runs Mailpit on
   http://localhost:8025 for those who want a real inbox.
 
 Sending never raises into a request. A signup that succeeded must not report
-failure because the mail relay was briefly unreachable — the user can always
+failure because the mail relay was briefly unreachable - the user can always
 request another verification email, but a rolled-back registration is
 unrecoverable. Failures are logged at error level for alerting.
 
@@ -85,13 +85,13 @@ async def send_email(
 ) -> bool:
     """Send one message. Returns success; never raises.
 
-    A plaintext alternative always accompanies the HTML — some clients refuse to
+    A plaintext alternative always accompanies the HTML - some clients refuse to
     render HTML, and multipart messages score better with spam filters.
     """
     if not settings.emails_enabled:
         # Development: the link in `text` is the whole point of this branch.
         log.info(
-            "email suppressed (SMTP not configured) — body follows",
+            "email suppressed (SMTP not configured) - body follows",
             extra={"to": to, "subject": subject, "category": category, "body": text},
         )
         return True
@@ -116,7 +116,7 @@ async def send_email(
         log.info("email sent", extra={"to": to, "subject": subject, "category": category})
         return True
     except Exception as exc:
-        # Swallowed on purpose — see the module docstring.
+        # Swallowed on purpose - see the module docstring.
         log.error(
             "email delivery failed",
             extra={"to": to, "subject": subject, "category": category, "error": str(exc)},

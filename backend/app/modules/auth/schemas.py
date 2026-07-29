@@ -5,7 +5,7 @@ Response-shape decisions that matter:
 * **Refresh tokens are not in any response body.** They travel in an
   ``HttpOnly; Secure; SameSite=Strict`` cookie, unreachable from JavaScript, so
   an XSS bug cannot exfiltrate long-lived credentials. Access tokens *are*
-  returned in the body and held in memory only — never ``localStorage``.
+  returned in the body and held in memory only - never ``localStorage``.
 * **Several endpoints return the same message whether or not the account
   exists.** Password reset, magic link, and OTP request all answer "if an account
   exists, we have sent a link". Anything more specific is an enumeration oracle.
@@ -76,7 +76,7 @@ class LoginRequest(BaseSchema):
 class TokenResponse(ResponseSchema):
     """Successful authentication.
 
-    The refresh token is absent by design — see the module docstring.
+    The refresh token is absent by design - see the module docstring.
     """
 
     access_token: str
@@ -160,7 +160,7 @@ class ChangePasswordRequest(BaseSchema):
 class MagicLinkRequest(BaseSchema):
     email: Email
     #: Where to land after authenticating. Validated against an allow-list
-    #: server-side — an unchecked redirect target is an open-redirect bug.
+    #: server-side - an unchecked redirect target is an open-redirect bug.
     redirect_path: str | None = None
 
     @field_validator("redirect_path")
@@ -214,7 +214,7 @@ class TwoFactorEnableRequest(BaseSchema):
 
 class TwoFactorEnableResponse(ResponseSchema):
     enabled: bool
-    recovery_codes: list[str] = Field(description="Shown exactly once — store them securely")
+    recovery_codes: list[str] = Field(description="Shown exactly once - store them securely")
 
 
 class TwoFactorDisableRequest(BaseSchema):
@@ -259,7 +259,7 @@ class OrganizationSummary(ResponseSchema):
 
 
 class AuthenticatedUser(ResponseSchema):
-    """The ``/auth/me`` payload — everything the client needs to render a shell.
+    """The ``/auth/me`` payload - everything the client needs to render a shell.
 
     Permissions are included so the UI can hide actions the user cannot perform.
     That is presentation only: the server re-checks every permission on every
@@ -287,7 +287,7 @@ class AuthenticatedUser(ResponseSchema):
 class PasswordPolicyResponse(ResponseSchema):
     """The enforced policy, so client-side hints cannot drift from the server.
 
-    Mirrors :func:`app.modules.auth.password_policy.describe_policy` exactly —
+    Mirrors :func:`app.modules.auth.password_policy.describe_policy` exactly -
     if a knob is added there, it belongs here too.
     """
 

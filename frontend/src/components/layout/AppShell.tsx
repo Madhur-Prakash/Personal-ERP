@@ -344,7 +344,7 @@ export function StagePlaceholder({
         </div>
         <h2 className="text-content text-[15px] font-semibold">Arriving in Stage {stage}</h2>
         <p className="text-content-muted mt-1.5 max-w-md text-[13px] leading-relaxed">
-          This module is part of the staged delivery plan. Stage 1 ships the foundation —
+          This module is part of the staged delivery plan. Stage 1 ships the foundation -
           authentication, organizations, roles, and the audit trail.
         </p>
       </div>

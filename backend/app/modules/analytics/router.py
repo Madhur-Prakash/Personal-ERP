@@ -56,8 +56,8 @@ AnalyticsDep = Annotated[AnalyticsService, Depends(get_analytics)]
 class OrgCalendar:
     """The organization's fiscal settings, resolved once per request.
 
-    Its own dependency because every endpoint here needs the same three facts —
-    fiscal-year start, timezone, and currency — and reading them ad hoc in each
+    Its own dependency because every endpoint here needs the same three facts -
+    fiscal-year start, timezone, and currency - and reading them ad hoc in each
     handler is how one endpoint ends up computing "this year" on the calendar year
     while another uses the fiscal one.
     """
@@ -92,7 +92,7 @@ async def get_calendar(organization_id: ActiveOrganizationId, session: DbSession
         )
     ).one_or_none()
 
-    if row is None:  # pragma: no cover — the org was resolved by the auth dependency
+    if row is None:  # pragma: no cover - the org was resolved by the auth dependency
         raise NotFoundError("Organization")
 
     return OrgCalendar(row.fiscal_year_start_month, row.timezone, row.currency)
@@ -184,7 +184,7 @@ async def dashboard(
     balance sheet, so a tile can never disagree with the statement it summarises.
 
     The response includes the `comparison` window explicitly. "Revenue up 12%" is
-    meaningless without knowing 12% against what — and for a month-to-date figure the
+    meaningless without knowing 12% against what - and for a month-to-date figure the
     comparison is deliberately truncated to the same number of days, which the user
     can only verify if the dates are shown.
     """
@@ -246,7 +246,7 @@ async def top_customers(
     """Ranked on taxable value, not the invoice total.
 
     GST collected is money held on the government's behalf. Including it would rank a
-    customer buying 28% goods above one buying more of a 5% product — a fiction about
+    customer buying 28% goods above one buying more of a 5% product - a fiction about
     who is actually worth more to the business.
     """
     span = calendar.span(period)
@@ -286,14 +286,14 @@ async def control_checks(
 ) -> ControlChecksRead:
     """Does the ledger agree with the documents behind it?
 
-    Receivables, payables, and inventory are each derived twice — once from the
+    Receivables, payables, and inventory are each derived twice - once from the
     control account, once from the invoices, bills, or stock levels that should have
     produced it. They must agree.
 
     This is the reconciliation a bookkeeper does monthly by hand. Most
     small-business software never shows it, so a document that updated one table but
     not the other is found a year later by an accountant who cannot say when it
-    started. Disagreement is reported, not raised — a broken figure should be
+    started. Disagreement is reported, not raised - a broken figure should be
     *visible* rather than turning a useful screen into a 500.
     """
     on = as_of or calendar.today

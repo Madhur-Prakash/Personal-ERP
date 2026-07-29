@@ -12,7 +12,7 @@ from pydantic import Field, StringConstraints
 from app.core.schemas import BaseSchema, ResponseSchema
 from app.modules.billing.service import Direction, MoneyKind
 
-#: A money amount on the way in. Positive only — a correction is a reversal, not a
+#: A money amount on the way in. Positive only - a correction is a reversal, not a
 #: negative entry, because a ledger records what happened rather than the net of it.
 #: `decimal_places=2` because a person typing an amount by hand means rupees and
 #: paise; the column keeps 4 for computed figures.
@@ -24,7 +24,7 @@ Description = Annotated[str, StringConstraints(strip_whitespace=True, min_length
 class RecordEntryRequest(BaseSchema):
     """What the form sends.
 
-    Only three fields are required: which way, when, and how much — plus a note,
+    Only three fields are required: which way, when, and how much - plus a note,
     because an amount with no description is unidentifiable a month later and the
     ledger's narration cannot be blank.
 
@@ -64,7 +64,7 @@ class CategoryRead(ResponseSchema):
 class CreateCategoryRequest(BaseSchema):
     """Add a category of your own.
 
-    Only a name and a direction. The code, parent group, and subtype are derived —
+    Only a name and a direction. The code, parent group, and subtype are derived -
     asking someone to pick an account code and a subtype in order to record a payment
     would defeat the purpose of this screen.
     """
@@ -76,8 +76,8 @@ class CreateCategoryRequest(BaseSchema):
 class CreateMoneyAccountRequest(BaseSchema):
     """Add a cash box or bank account.
 
-    A name and which of the two it behaves like. Everything else — the account code,
-    the parent group, the subtype — is derived, for the same reason the category form
+    A name and which of the two it behaves like. Everything else - the account code,
+    the parent group, the subtype - is derived, for the same reason the category form
     derives them: nobody should need the chart of accounts to add a UPI wallet.
     """
 
@@ -96,7 +96,7 @@ class BillingOptions(ResponseSchema):
     """Everything the form needs to render, in one request.
 
     Served rather than hard-coded so the categories follow the organization's actual
-    chart of accounts — including any account it has added itself.
+    chart of accounts - including any account it has added itself.
     """
 
     categories: list[CategoryRead]
@@ -124,7 +124,7 @@ class EntryRead(ResponseSchema):
     money_account_name: str
 
     created_at: dt.datetime
-    #: Cancelled by a reversal. Still listed — the cancellation is part of the record.
+    #: Cancelled by a reversal. Still listed - the cancellation is part of the record.
     is_reversed: bool
 
 

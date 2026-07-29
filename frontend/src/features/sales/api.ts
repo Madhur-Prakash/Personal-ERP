@@ -1,4 +1,4 @@
-/** Sales API client. Money is always a `string` — see `features/accounting/api.ts`. */
+/** Sales API client. Money is always a `string` - see `features/accounting/api.ts`. */
 import { api } from '@/lib/api';
 import type { Money, Page, PageQuery } from '@/features/accounting/api';
 

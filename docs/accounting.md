@@ -5,7 +5,7 @@ sales journal, Stage 4 goods receipts move inventory and recognise COGS, Stage 5
 OCR produces draft entries, Stage 8 reports read the ledger.
 
 Getting this wrong is not recoverable later, so each invariant is enforced in
-three places — Pydantic schema, service, and database constraint.
+three places - Pydantic schema, service, and database constraint.
 
 ---
 
@@ -25,7 +25,7 @@ migration or a manual `UPDATE` in psql cannot create an unbalanced entry. A test
 proves it by attempting exactly that with raw SQL.
 
 Invariant 3 is worth dwelling on. There is no "edit posted entry" endpoint, and no
-service method that would allow it — correction happens by posting a **reversal**,
+service method that would allow it - correction happens by posting a **reversal**,
 which leaves both the original and its mirror in the ledger. The audit trail then
 shows what happened *and* what corrected it, which is the whole point of an audit
 trail.
@@ -56,8 +56,8 @@ Two tests pin this: `0.1 + 0.2` must equal exactly `0.3000`, and thirty entries 
 ## Debit/credit columns, not one signed amount
 
 A signed column is more compact but forces every reader to remember the sign
-convention per account type, and makes "total debits" — the figure an accountant
-reconciles against — a conditional aggregate instead of a plain `SUM`.
+convention per account type, and makes "total debits" - the figure an accountant
+reconciles against - a conditional aggregate instead of a plain `SUM`.
 
 `Account.signed_balance()` converts raw totals into a balance in the account's own
 terms, so *positive always means more of what this account is for*: more cash in
@@ -88,13 +88,13 @@ guards this.
 ## Why a balance sheet balances
 
 P&L accounts reset each fiscal year; their net result rolls into retained earnings
-only when the year is closed. So mid-year, `assets != liabilities + equity` — the
+only when the year is closed. So mid-year, `assets != liabilities + equity` - the
 difference is exactly the profit earned so far.
 
 The report computes that figure over the fiscal year to date and presents it as a
 distinct equity line, `current_period_earnings`. **Omitting it is the classic
 reason a hand-rolled balance sheet fails to balance.** A test asserts it equals
-the P&L's net profit over the same range — the two statements read the same ledger
+the P&L's net profit over the same range - the two statements read the same ledger
 and must agree.
 
 ---
@@ -107,9 +107,9 @@ draft consumes no statutory number.
 `NumberSequence` is incremented under `SELECT … FOR UPDATE`. Two alternatives were
 rejected:
 
-- **`MAX(number) + 1`** — two concurrent posts read the same maximum and produce
+- **`MAX(number) + 1`** - two concurrent posts read the same maximum and produce
   duplicates.
-- **A PostgreSQL `SEQUENCE`** — sequences deliberately do not roll back, so a
+- **A PostgreSQL `SEQUENCE`** - sequences deliberately do not roll back, so a
   failed transaction burns a number permanently. Statutory numbering must be
   gap-free.
 
@@ -131,8 +131,8 @@ numbers are filed they must stop changing while the rest of the year stays open.
 | Status | Meaning |
 | --- | --- |
 | `open` | accepts postings |
-| `closed` | soft close — no postings, an administrator can reopen |
-| `locked` | hard close after filing — the API will not reopen it |
+| `closed` | soft close - no postings, an administrator can reopen |
+| `locked` | hard close after filing - the API will not reopen it |
 
 Periods must close **in order**. Closing March while February is open produces
 comparatives nobody can reconcile.
@@ -163,7 +163,7 @@ await posting.post_simple(
 
 `Account.system_key` marks the single default account for each role. An
 organization may have many receivable accounts; exactly one carries the key.
-`source_type`/`source_id` are a loose string pair rather than a polymorphic FK —
+`source_type`/`source_id` are a loose string pair rather than a polymorphic FK -
 the accounting module must not depend on modules that do not exist yet, and
 inverting that dependency is what keeps this layer replaceable.
 
@@ -179,7 +179,7 @@ inverting that dependency is what keeps this layer replaceable.
 | Balance sheet | as at a date | includes `current_period_earnings` |
 | Cash flow | a range | **direct method** |
 
-Cash flow uses the direct method — actual cash movements grouped by the
+Cash flow uses the direct method - actual cash movements grouped by the
 counter-account that explains them. The indirect method (net profit adjusted for
 non-cash items) is the statutory presentation for larger entities and is deferred;
 for a small business, "where did the money actually go" is more useful and
@@ -205,7 +205,7 @@ Two SQLAlchemy defaults make the obvious spelling quietly wrong:
 
 1. **It stores the member *name*, not the value.** `EntryStatus.DRAFT` persists as
    `'DRAFT'` while the API serialises `'draft'`. Worse, any SQL predicate written
-   against the value silently never matches — a partial index
+   against the value silently never matches - a partial index
    `WHERE status = 'pending'` exists but enforces nothing.
 2. **`create_constraint` defaults to False**, so there is no `CHECK` at all and the
    column accepts any string.

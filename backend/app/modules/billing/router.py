@@ -1,4 +1,4 @@
-"""Billing endpoints — the simple money in / money out path."""
+"""Billing endpoints - the simple money in / money out path."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ async def get_today(organization_id: ActiveOrganizationId, session: DbSession) -
     """Today in the organization's timezone.
 
     Not the server's UTC date: at 00:30 IST it is still yesterday in UTC, so a form
-    defaulting to "today" would pre-fill the wrong date — and an entry dated a day
+    defaulting to "today" would pre-fill the wrong date - and an entry dated a day
     early can land in a month that is already closed.
     """
     row = (
@@ -56,7 +56,7 @@ async def get_today(organization_id: ActiveOrganizationId, session: DbSession) -
             select(Organization.timezone).where(Organization.id == organization_id)
         )
     ).scalar_one_or_none()
-    if row is None:  # pragma: no cover — resolved by the auth dependency
+    if row is None:  # pragma: no cover - resolved by the auth dependency
         raise NotFoundError("Organization")
     return local_date(dt.datetime.now(dt.UTC), row)
 
@@ -151,7 +151,7 @@ async def create_category(
     are all derived, so nobody has to understand the chart of accounts to file a
     payment under "Tempo Hire".
 
-    Guarded on `account:write` rather than `journal:write` — it does add to the chart of
+    Guarded on `account:write` rather than `journal:write` - it does add to the chart of
     accounts, and an organization may want that narrower than day-to-day recording.
     """
     category = await service.create_category(
@@ -185,7 +185,7 @@ async def create_money_account(
 
     The seeded chart has one till and one current account, which covers a business
     with exactly those. A second bank, a UPI wallet, a card-settlement account, or a
-    partner's petty cash are all ordinary — and without this, money that moved through
+    partner's petty cash are all ordinary - and without this, money that moved through
     a wallet gets filed as cash and no balance matches anything real.
     """
     account = await service.create_money_account(
@@ -216,7 +216,7 @@ async def record_entry(
 ) -> EntryRead:
     """Record one movement. It is posted to the ledger immediately.
 
-    Posted, not saved as a draft — the whole point of this feature is that the figure
+    Posted, not saved as a draft - the whole point of this feature is that the figure
     shows up on the dashboard, and a draft entry does not reach any report. "I recorded
     it and it is not showing" would be the worst outcome for the one screen meant to be
     effortless.
@@ -322,7 +322,7 @@ async def reverse_entry(
     """Cancel an entry by posting its mirror image.
 
     There is no delete and no edit. A posted ledger entry is immutable here, so the
-    only honest undo is an opposite entry that nets it to zero — which is also what an
+    only honest undo is an opposite entry that nets it to zero - which is also what an
     auditor expects to find. Both rows survive, and the original stays in the list
     marked as reversed.
     """

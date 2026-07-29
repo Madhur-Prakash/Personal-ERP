@@ -1,6 +1,6 @@
 """Unit tests for cryptographic primitives.
 
-No database or Redis — these are pure functions, and the properties asserted here
+No database or Redis - these are pure functions, and the properties asserted here
 are the ones the whole auth system rests on.
 """
 
@@ -40,7 +40,7 @@ class TestPasswordHashing:
         assert not verify_password("wrong-password", digest)
 
     def test_uses_argon2id(self) -> None:
-        """Argon2id specifically — not argon2i or argon2d."""
+        """Argon2id specifically - not argon2i or argon2d."""
         assert hash_password("Correct-Horse-Battery-9").startswith("$argon2id$")
 
     def test_salted_so_hashes_differ(self) -> None:

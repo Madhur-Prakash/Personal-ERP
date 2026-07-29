@@ -3,10 +3,10 @@
 The assertions that matter tie stock to the ledger. Three identities must hold at
 all times, and each is checked after real operations rather than in isolation:
 
-1. **Trial balance balances** — after every receipt, bill, payment, and sale.
-2. **Stock value equals the Inventory account balance** — the physical and the
+1. **Trial balance balances** - after every receipt, bill, payment, and sale.
+2. **Stock value equals the Inventory account balance** - the physical and the
    financial view of the same goods must agree, or one of them is lying.
-3. **StockLevel equals the replayed movement history** — the denormalised position
+3. **StockLevel equals the replayed movement history** - the denormalised position
    is only safe if it provably matches the append-only log it derives from.
 """
 
@@ -270,7 +270,7 @@ class TestGoodsReceipt:
 
         These three receipts total exactly 9,000. The average works out to
         8,000/150 = 53.333333… which truncates, so `quantity * average_cost` comes
-        back as 8,999.9999 — a gap against the ledger that grows with every
+        back as 8,999.9999 - a gap against the ledger that grows with every
         movement and cannot be explained to an auditor.
 
         If this test ever fails because the two now agree, the rounding assumption
@@ -378,7 +378,7 @@ class TestBills:
     ) -> None:
         """Debit GRNI + GST Input, credit Accounts Payable.
 
-        Inventory is untouched — the goods were already capitalised at receipt.
+        Inventory is untouched - the goods were already capitalised at receipt.
         Debiting it again would double-count the cost.
         """
         receipt = await GoodsReceiptService(db).create(
@@ -764,7 +764,7 @@ class TestStockOperations:
     async def test_issue_for_sale_posts_cogs(
         self, db: AsyncSession, books: Organization, user: User, supplier, product
     ) -> None:
-        """Debit COGS, credit Inventory — at the weighted average, not the last price."""
+        """Debit COGS, credit Inventory - at the weighted average, not the last price."""
         for quantity, cost in [("100", "40"), ("100", "60")]:
             await GoodsReceiptService(db).create(
                 books.id,
@@ -804,7 +804,7 @@ class TestStockOperations:
     async def test_transfer_conserves_value_and_posts_nothing(
         self, db: AsyncSession, books: Organization, user: User, supplier, product
     ) -> None:
-        """A transfer is not an economic event — the goods are still owned."""
+        """A transfer is not an economic event - the goods are still owned."""
         stock = StockService(db)
         main = await stock.default_warehouse(books.id)
         second = await WarehouseService(db).create(

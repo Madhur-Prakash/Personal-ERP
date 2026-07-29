@@ -1,7 +1,7 @@
 /**
  * Analytics API client.
  *
- * Money is a `string` throughout — see `features/accounting/api.ts`. Confidence-style
+ * Money is a `string` throughout - see `features/accounting/api.ts`. Confidence-style
  * numbers (percentage change) are strings for the same reason: they are `Decimal`
  * server-side, and JSON's only numeric type is a float.
  *
@@ -32,7 +32,7 @@ export interface Movement {
   current: Money;
   previous: Money;
   /**
-   * Null when the previous period gives no basis for a percentage — going from
+   * Null when the previous period gives no basis for a percentage - going from
    * zero is an infinite increase, not "+100%". Render "no prior data", never a
    * number.
    */
@@ -92,7 +92,7 @@ export interface RankedRow {
 export interface Ranking {
   span: DateSpan;
   rows: RankedRow[];
-  /** Across all rows, not just the returned top N — so "these five are 62%" is true. */
+  /** Across all rows, not just the returned top N - so "these five are 62%" is true. */
   total: Money;
 }
 

@@ -1,4 +1,4 @@
-"""Invoicing and payment collection — where sales becomes accounting.
+"""Invoicing and payment collection - where sales becomes accounting.
 
 Kept in its own module rather than alongquotations and orders because this is the
 only part of sales that writes to the ledger, and that boundary is worth being able
@@ -11,8 +11,8 @@ Account                          Debit      Credit
 ===========================  ==========  ==========
 Accounts Receivable           1,180.00
 Sales Revenue                             1,000.00
-GST Output Tax — CGST                        90.00
-GST Output Tax — SGST                        90.00
+GST Output Tax - CGST                        90.00
+GST Output Tax - SGST                        90.00
 ===========================  ==========  ==========
 
 **The collection.** A ₹1,180 receipt into the bank becomes:
@@ -174,7 +174,7 @@ class InvoiceService(SalesDocumentService):
         if not invoice.status.is_editable:
             raise BusinessRuleError(
                 f"Invoice {invoice.invoice_number} is {invoice.status} and cannot be "
-                "edited. Cancel it and raise a new one — a posted invoice is a "
+                "edited. Cancel it and raise a new one - a posted invoice is a "
                 "statutory record.",
                 details={"status": str(invoice.status)},
             )
@@ -256,7 +256,7 @@ class InvoiceService(SalesDocumentService):
             JournalEntryCreate(
                 journal_id=journal.id,
                 entry_date=invoice.invoice_date,
-                narration=f"Invoice {invoice.invoice_number} — {invoice.customer.name}",
+                narration=f"Invoice {invoice.invoice_number} - {invoice.customer.name}",
                 reference=invoice.invoice_number,
                 post=True,
                 lines=lines,
@@ -313,7 +313,7 @@ class InvoiceService(SalesDocumentService):
         """Assemble the journal lines for an invoice.
 
         Revenue is grouped by account so a multi-line invoice against one revenue
-        account produces one credit rather than twenty — the ledger records the
+        account produces one credit rather than twenty - the ledger records the
         accounting effect, not the invoice layout.
         """
         receivable = await self.chart.resolve_system_account(
@@ -327,7 +327,7 @@ class InvoiceService(SalesDocumentService):
             JournalEntryLineInput(
                 account_id=receivable.id,
                 debit=invoice.grand_total,
-                description=f"{invoice.customer.name} — {invoice.invoice_number}",
+                description=f"{invoice.customer.name} - {invoice.invoice_number}",
             )
         ]
 
@@ -402,7 +402,7 @@ class InvoiceService(SalesDocumentService):
     ) -> Invoice:
         """Cancel a posted invoice by reversing its ledger entry.
 
-        The invoice is retained, never deleted — it had a number, it was sent, and
+        The invoice is retained, never deleted - it had a number, it was sent, and
         the audit trail must show both that it existed and that it was cancelled.
         """
         invoice = await self.get(organization_id, invoice_id)
@@ -411,7 +411,7 @@ class InvoiceService(SalesDocumentService):
             raise ConflictError(f"Invoice {invoice.invoice_number} is already cancelled")
         if invoice.paid_amount > 0:
             raise BusinessRuleError(
-                "This invoice has payments against it. Unallocate them first — "
+                "This invoice has payments against it. Unallocate them first - "
                 "cancelling would leave the receipt pointing at nothing.",
                 details={"paid_amount": str(invoice.paid_amount)},
             )
@@ -421,7 +421,7 @@ class InvoiceService(SalesDocumentService):
             invoice.status = InvoiceStatus.CANCELLED
             invoice.cancelled_at = dt.datetime.now(dt.UTC)
         else:
-            if invoice.journal_entry_id is None:  # pragma: no cover — CHECK prevents it
+            if invoice.journal_entry_id is None:  # pragma: no cover - CHECK prevents it
                 raise BusinessRuleError("This invoice is posted but has no journal entry.")
 
             reversal = await self.posting.reverse_entry(
@@ -471,7 +471,7 @@ class InvoiceService(SalesDocumentService):
         invoice = await self.get(organization_id, invoice_id)
         if invoice.status is not InvoiceStatus.DRAFT:
             raise BusinessRuleError(
-                "Only drafts can be deleted. Cancel the invoice instead — it has a "
+                "Only drafts can be deleted. Cancel the invoice instead - it has a "
                 "number and a ledger effect."
             )
 
@@ -575,7 +575,7 @@ class PaymentService(SalesDocumentService):
     ) -> Any:
         """Where the money landed.
 
-        An explicit account wins; otherwise the method decides — cash to the cash
+        An explicit account wins; otherwise the method decides - cash to the cash
         account, everything else to the bank.
         """
         if data.deposit_account_id is not None:
@@ -599,7 +599,7 @@ class PaymentService(SalesDocumentService):
 
         ``customer`` is passed in rather than read from ``payment.customer``: the
         payment was constructed moments ago, so that relationship is unloaded, and
-        async SQLAlchemy cannot lazy-load it mid-statement — it raises
+        async SQLAlchemy cannot lazy-load it mid-statement - it raises
         ``MissingGreenlet``.
         """
         receivable = await self.chart.resolve_system_account(
@@ -610,13 +610,13 @@ class PaymentService(SalesDocumentService):
         if journal is None:
             raise BusinessRuleError(f"No {journal_type} journal is configured.")
 
-        assert payment.deposit_account_id is not None  # noqa: S101 — set by caller
+        assert payment.deposit_account_id is not None  # noqa: S101 - set by caller
         return await self.posting.create_entry(
             organization_id,
             JournalEntryCreate(
                 journal_id=journal.id,
                 entry_date=payment.payment_date,
-                narration=f"Receipt {payment.payment_number} — {customer.name}",
+                narration=f"Receipt {payment.payment_number} - {customer.name}",
                 reference=payment.reference or payment.payment_number,
                 post=True,
                 lines=[
@@ -709,7 +709,7 @@ class PaymentService(SalesDocumentService):
                 )
             if not invoice.status.is_posted:
                 raise BusinessRuleError(
-                    f"Invoice {invoice.invoice_number} is {invoice.status} — only a "
+                    f"Invoice {invoice.invoice_number} is {invoice.status} - only a "
                     "posted invoice can be paid.",
                 )
             if amount > invoice.outstanding:

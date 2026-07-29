@@ -3,7 +3,7 @@
  *
  * Deliberately simpler than TanStack Table: these screens need alignment, a
  * loading state, an empty state, and numeric columns that line up. They do not
- * need client-side sorting or column resizing — the server paginates and sorts,
+ * need client-side sorting or column resizing - the server paginates and sorts,
  * because a business with 40,000 invoices cannot ship them all to the browser to
  * sort them there.
  *
@@ -23,7 +23,7 @@ export interface Column<T> {
   cell: (row: T) => ReactNode;
   /** Right-align and use tabular figures. For money and quantities. */
   numeric?: boolean;
-  /** Hide below the `sm` breakpoint — for columns that are nice-to-have. */
+  /** Hide below the `sm` breakpoint - for columns that are nice-to-have. */
   hideOnMobile?: boolean;
   className?: string;
 }
@@ -35,7 +35,7 @@ interface DataTableProps<T> {
   isLoading?: boolean;
   onRowClick?: (row: T) => void;
   empty?: { title: string; description?: string; action?: ReactNode };
-  /** Rendered as a footer row — totals, usually. */
+  /** Rendered as a footer row - totals, usually. */
   footer?: ReactNode;
 }
 

@@ -15,18 +15,18 @@ import type { AuditSeverity } from '@/types/api';
 /**
  * Render an audit diff value for display.
  *
- * The values are `unknown` — a diff can hold a string, number, boolean, null, or
+ * The values are `unknown` - a diff can hold a string, number, boolean, null, or
  * a nested JSONB object. Passing an object to `String()` yields
  * "[object Object]", which is worse than useless in an audit trail, so objects
  * are serialised instead.
  */
 function renderDiffValue(value: unknown): string {
-  if (value === null || value === undefined) return '—';
+  if (value === null || value === undefined) return '-';
   if (typeof value === 'object') return JSON.stringify(value);
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
   }
-  return '—';
+  return '-';
 }
 
 const SEVERITY_TONE: Record<AuditSeverity, BadgeTone> = {

@@ -5,18 +5,18 @@
 Small businesses get offered two bad options: cloud SaaS that rents you your own
 books and raises the price once you depend on it, or legacy desktop software that
 lives on one machine and dies with its hard drive. Personal ERP is the third
-option — you run it on your own server, your data stays in your own PostgreSQL,
+option - you run it on your own server, your data stays in your own PostgreSQL,
 and there is no vendor between you and your accounts.
 
 The design constraint is **restraint**. This is deliberately not an
 enterprise-scale platform: no Kubernetes, no message-broker cluster, no service
 mesh. It is a single `docker compose up` that one person can operate without a
 DevOps team. Everything is modular, so when a business genuinely outgrows a
-component — more workers, a read replica, a separate object store — that piece can
+component - more workers, a read replica, a separate object store - that piece can
 be scaled or swapped without rewriting the rest. Scale when the business demands
 it, not on day one.
 
-Built in stages. **Stages 1 to 5 and 8 are complete** — foundation, accounting,
+Built in stages. **Stages 1 to 5 and 8 are complete** - foundation, accounting,
 sales, purchasing and inventory, document intelligence, and analytics; see
 [Delivery status](#delivery-status).
 
@@ -29,17 +29,17 @@ sales, purchasing and inventory, document intelligence, and analytics; see
 | Monorepo, Docker Compose (dev + prod) | Done |
 | FastAPI backend, PostgreSQL 17, Redis 7 | Done |
 | React 19 + TypeScript + Vite frontend | Done |
-| Authentication — password, email verification, magic link, email OTP, password reset, TOTP 2FA with recovery codes | Done |
-| Sessions — refresh-token rotation with reuse detection, device history, remote revocation | Done |
-| Multi-tenancy — organizations, members, invitations | Done |
-| RBAC — 42 permissions, 5 seeded roles, custom roles, per-member overrides | Done |
+| Authentication - password, email verification, magic link, email OTP, password reset, TOTP 2FA with recovery codes | Done |
+| Sessions - refresh-token rotation with reuse detection, device history, remote revocation | Done |
+| Multi-tenancy - organizations, members, invitations | Done |
+| RBAC - 42 permissions, 5 seeded roles, custom roles, per-member overrides | Done |
 | Immutable audit trail with field-level diffs | Done |
-| **Billing** — record money in and out with just a date, an amount, and a note. No customer or supplier needed; posts real double-entry, so the dashboard and every report update immediately | Done |
-| Double-entry accounting — chart of accounts, journals, period locks, trial balance, P&L, balance sheet, cash flow | Done |
-| Sales — customers, leads, quotations, orders, invoices with GST, payment allocation, receivables ageing | Done |
-| Purchasing & inventory — suppliers, POs, goods receipt, weighted-average valuation, bills, input GST, payables ageing | Done |
-| Document intelligence — invoice upload, field extraction with per-field confidence, GSTIN supplier matching, duplicate-invoice warnings, confirm-into-bill | Done |
-| Analytics — real dashboard figures with like-for-like period comparison, twelve-month trend, rankings, control-account reconciliation | Done |
+| **Billing** - record money in and out with just a date, an amount, and a note. No customer or supplier needed; posts real double-entry, so the dashboard and every report update immediately | Done |
+| Double-entry accounting - chart of accounts, journals, period locks, trial balance, P&L, balance sheet, cash flow | Done |
+| Sales - customers, leads, quotations, orders, invoices with GST, payment allocation, receivables ageing | Done |
+| Purchasing & inventory - suppliers, POs, goods receipt, weighted-average valuation, bills, input GST, payables ageing | Done |
+| Document intelligence - invoice upload, field extraction with per-field confidence, GSTIN supplier matching, duplicate-invoice warnings, confirm-into-bill | Done |
+| Analytics - real dashboard figures with like-for-like period comparison, twelve-month trend, rankings, control-account reconciliation | Done |
 | Design system, light/dark/system theming, command palette | Done |
 | Alembic migrations (reversible, drift-checked) | Done |
 | 177 API operations across 136 paths | Done |
@@ -53,7 +53,7 @@ above, by design.
 
 ## Quick start
 
-Requires Docker, and — for running outside containers —
+Requires Docker, and - for running outside containers -
 [uv](https://docs.astral.sh/uv/) and Node 24.
 
 ```bash
@@ -74,7 +74,7 @@ http://localhost:8025** to click the verification link. `make up` wires the
 backend's SMTP at Mailpit, so no real mail provider is needed.
 
 > If you run the backend without SMTP configured at all, emails are written to
-> the log instead of sent — but logifyx's masking redacts the token from the URL,
+> the log instead of sent - but logifyx's masking redacts the token from the URL,
 > so the link is not usable from there. Mailpit is the path that works.
 
 `make help` lists every task.
@@ -85,13 +85,13 @@ Most small businesses do not need invoices, customers, or suppliers. They need t
 what came in and what went out. **Billing** is that screen, and it is first in the
 navigation:
 
-- Two buttons — *Money in* and *Money out*.
+- Two buttons - *Money in* and *Money out*.
 - Type an amount and a note. The date defaults to today, the category and the cash
   account default to sensible choices, and the form stays open so a week of receipts
   can be entered in a row.
 - Nothing else is required. No customer, no supplier, no invoice.
 
-**A bill with nobody's name on it is an expense, not a payable** — and that is the
+**A bill with nobody's name on it is an expense, not a payable** - and that is the
 correct treatment, not a shortcut. A payable exists because you owe a specific party;
 once the money has left your hand there is nothing owed and nobody to owe it to. So
 money out is *debit expense, credit cash*, money in is *debit cash, credit income*, and
@@ -99,7 +99,7 @@ the accounting equation holds without inventing a party.
 
 Because each entry is a real ledger posting, it shows up in the trial balance, the P&L,
 the cash flow statement, the dashboard, and the analytics trend without anything else
-being configured. There is no billing table — a parallel store of "the user's simple
+being configured. There is no billing table - a parallel store of "the user's simple
 view" would be a cache that can disagree with the ledger.
 
 To correct a mistake, **reverse** the entry. There is no delete and no edit: a posted
@@ -111,7 +111,7 @@ when they are genuinely needed. Nothing forces you through them.
 
 ### Optional: reading scanned invoices
 
-Document upload works without this — the file is stored and can be attached to a
+Document upload works without this - the file is stored and can be attached to a
 bill entered by hand. What the extra adds is *reading* it.
 
 ```bash
@@ -154,17 +154,17 @@ uv run mypy app                 # typecheck
 ```
 
 CI runs `ruff check .` over the whole project and `ruff format --check .` (the
-non-mutating form — it reports rather than rewrites). Narrowing to `app tests`
+non-mutating form - it reports rather than rewrites). Narrowing to `app tests`
 locally is faster and covers everything you actually edit.
 
-[`ruff`](https://docs.astral.sh/ruff/) is linter and formatter in one — well under
+[`ruff`](https://docs.astral.sh/ruff/) is linter and formatter in one - well under
 a second across the whole backend. Beyond style it enforces two things that matter here: `T20` bans
 `print()`, so logging cannot bypass logifyx and lose its credential masking; and
 `ASYNC` catches blocking calls inside `async def`, which stall the whole event
 loop rather than one request.
 
 [`mypy`](https://mypy-lang.org/) runs in `strict` mode. Its real job in this
-codebase is making `None` impossible to ignore — `User.password_hash` is nullable
+codebase is making `None` impossible to ignore - `User.password_hash` is nullable
 (magic-link and invited users have no password), and mypy is what forces every
 call site to handle that before reaching Argon2.
 
@@ -200,7 +200,7 @@ npm run format        # prettier --write             (ruff format's counterpart)
 npm run build         # tsc -b && vite build
 ```
 
-`npm run lint:fix` and `npm run format:check` are also defined — the latter is the
+`npm run lint:fix` and `npm run format:check` are also defined - the latter is the
 non-mutating form, which is what CI uses.
 
 > **On Windows, run the raw commands above from PowerShell, not Git Bash.** Git
@@ -228,7 +228,7 @@ non-mutating form, which is what CI uses.
 │   │   ├── modules/         One vertical slice per bounded context
 │   │   └── api/v1/          Router aggregation
 │   ├── migrations/          Alembic
-│   └── tests/               pytest — 714 tests
+│   └── tests/               pytest - 714 tests
 ├── frontend/                React 19 · TypeScript · Vite · Tailwind v4
 │   └── src/
 │       ├── components/      Design-system primitives and layout
@@ -248,9 +248,9 @@ Each backend module is a vertical slice:
 modules/<name>/
   models.py        SQLAlchemy tables
   schemas.py       Pydantic request/response contracts
-  repository.py    Data access — the only layer touching the session
-  service.py       Business rules — transport-agnostic
-  router.py        HTTP surface — thin
+  repository.py    Data access - the only layer touching the session
+  service.py       Business rules - transport-agnostic
+  router.py        HTTP surface - thin
 ```
 
 Dependencies point inward: `router → service → repository → models`. A service
@@ -271,14 +271,14 @@ refresh token is never reachable from JavaScript at all.
 
 **Refresh tokens rotate, and reuse is treated as a breach.** Every refresh mints
 a new token and revokes the old one. Presenting an already-rotated token means
-two parties hold it, and we cannot tell which is legitimate — so the whole
+two parties hold it, and we cannot tell which is legitimate - so the whole
 session lineage is revoked and the event is audited as critical.
 ([`auth/service.py`](backend/app/modules/auth/service.py))
 
 **Permissions ride in the access token; a Redis epoch counter overrides it.**
 Embedding permissions means authorization costs no database query. Staleness is
-bounded by the 15-minute token TTL, and anything that must apply immediately —
-role change, suspension, password change, sign-out-everywhere — bumps the user's
+bounded by the 15-minute token TTL, and anything that must apply immediately -
+role change, suspension, password change, sign-out-everywhere - bumps the user's
 epoch, invalidating every outstanding token at once.
 ([`auth/dependencies.py`](backend/app/modules/auth/dependencies.py))
 
@@ -288,7 +288,7 @@ makes cross-tenant access structurally impossible rather than merely checked.
 ([`organizations/router.py`](backend/app/modules/organizations/router.py))
 
 **Permissions are code; roles are data.** A permission is a capability the
-software implements, so it lives in an enum — the enum *is* the contract, it is
+software implements, so it lives in an enum - the enum *is* the contract, it is
 greppable, and it cannot drift from a table. Roles are per-organization rows
 composing those slugs. ([`rbac/permissions.py`](backend/app/modules/rbac/permissions.py))
 
@@ -298,8 +298,8 @@ a miss so timing cannot distinguish the two either.
 
 **Password policy: 6 characters minimum, with at least one uppercase letter, one
 lowercase letter, and one special character.** Because composition rules of this
-shape reliably produce `Password@1` — the first thing any cracking dictionary
-tries — a blocklist backstop also rejects weak roots however they are dressed up
+shape reliably produce `Password@1` - the first thing any cracking dictionary
+tries - a blocklist backstop also rejects weak roots however they are dressed up
 (`P@ssw0rd` and `Passw0rd!` both normalise to `password`).
 ([`auth/password_policy.py`](backend/app/modules/auth/password_policy.py))
 
@@ -319,14 +319,14 @@ context injection, and JSON output in production.
 
 ## The stack
 
-**Backend** — FastAPI, Python 3.13, uv, SQLAlchemy 2 (async), Alembic,
+**Backend** - FastAPI, Python 3.13, uv, SQLAlchemy 2 (async), Alembic,
 PostgreSQL 17, Redis 7, Pydantic v2, Argon2id, PyJWT, pyotp, aiosmtplib, logifyx.
 
-**Frontend** — React 19, TypeScript, Vite 7, Tailwind CSS v4, TanStack
+**Frontend** - React 19, TypeScript, Vite 7, Tailwind CSS v4, TanStack
 Router + Query + Table, React Hook Form, Zod, Recharts, cmdk, Sonner, Lucide,
 Motion.
 
-**Infrastructure** — Docker, Nginx, Let's Encrypt, GitHub Actions.
+**Infrastructure** - Docker, Nginx, Let's Encrypt, GitHub Actions.
 
 ---
 
@@ -370,9 +370,9 @@ prevention, and secret redaction in the audit trail.
 ## Delivery status
 
 The delivery model is **parallel build-out**: modules are developed concurrently
-rather than gated on the previous one signing off. The quality bar is unchanged —
+rather than gated on the previous one signing off. The quality bar is unchanged -
 strict mypy, real tests against real PostgreSQL and Redis, and a documented
-rationale per module — but a module ships as soon as *it* is green, not when its
+rationale per module - but a module ships as soon as *it* is green, not when its
 predecessor is.
 
 The one thing that stays sequenced is the **dependency graph**, because it is
@@ -384,51 +384,51 @@ it is stable, so everything downstream of it can now proceed in parallel.
 Modules not yet built appear in the navigation as visibly disabled entries rather
 than links to nothing.
 
-- [x] **Stage 1 — Foundation.** Monorepo, Docker, auth, users/organizations,
+- [x] **Stage 1 - Foundation.** Monorepo, Docker, auth, users/organizations,
       RBAC, audit, CI/CD, design system, dashboard, deployment.
-- [x] **Stage 2 — Accounting core.** Chart of accounts, journals, ledgers,
+- [x] **Stage 2 - Accounting core.** Chart of accounts, journals, ledgers,
       double-entry bookkeeping, trial balance, P&L, balance sheet, cash flow.
       Posted entries are immutable and corrected only by reversal; periods lock;
       entry numbering is gap-free under concurrency. Frontend screens built.
-- [x] **Stage 3 — Customers & sales.** CRM, leads, quotations, sales orders,
+- [x] **Stage 3 - Customers & sales.** CRM, leads, quotations, sales orders,
       invoices, payments. Invoices post real double-entry to the ledger, GST splits
       CGST/SGST vs IGST by place of supply, payments allocate many-to-many across
       invoices. Frontend screens built. *PDF generation is not yet built.*
-- [x] **Stage 4 — Purchases & inventory.** Suppliers, purchase orders, goods
+- [x] **Stage 4 - Purchases & inventory.** Suppliers, purchase orders, goods
       receipt, warehouses, stock movements, barcodes. Weighted-average valuation
       that reconciles exactly to the Inventory account, goods receipt accruing
       Goods Received Not Invoiced, bills claiming input GST, COGS on sale.
       Frontend screens built.
-- [x] **Stage 5 — OCR & document intelligence.** Upload a supplier invoice; the
+- [x] **Stage 5 - OCR & document intelligence.** Upload a supplier invoice; the
       GSTIN, invoice number, date, and amounts are read out of it with per-field
       confidence, the supplier is matched by GSTIN, and likely duplicate invoices
-      are flagged. **OCR never posts to the ledger** — it pre-fills a form, and
+      are flagged. **OCR never posts to the ledger** - it pre-fills a form, and
       confirming goes through the same `BillService` as a hand-entered bill.
       A digital PDF is read from its text layer (exact); images go to Tesseract.
       Requires `uv sync --extra ocr` plus the Tesseract binary; without them the
       app runs normally and reports document reading as unavailable.
-- [ ] **Stage 6 — AI assistant.** Conversational interface, RAG over business
+- [ ] **Stage 6 - AI assistant.** Conversational interface, RAG over business
       data, natural-language queries, forecasting.
-- [ ] **Stage 7 — Automation platform.** Visual workflow builder, triggers,
+- [ ] **Stage 7 - Automation platform.** Visual workflow builder, triggers,
       scheduled jobs, approval flows, messaging integrations.
-- [x] **Stage 8 — Analytics & reporting.** A real dashboard: revenue, expenses,
+- [x] **Stage 8 - Analytics & reporting.** A real dashboard: revenue, expenses,
       profit, cash, receivables, payables, and stock, each with a like-for-like
       period comparison, plus a twelve-month trend and customer/product rankings.
       Every figure is computed by the same `ReportingService` that renders the P&L,
       so a tile cannot disagree with the statement behind it. Also ships
-      **control-account reconciliation** — receivables, payables, and stock derived
+      **control-account reconciliation** - receivables, payables, and stock derived
       twice, from the ledger and from the documents, and compared. *Custom report
       builder and scheduled exports are not yet built.*
-- [ ] **Stage 9 — Enterprise.** Advanced multi-tenancy, API keys, webhooks, SSO,
+- [ ] **Stage 9 - Enterprise.** Advanced multi-tenancy, API keys, webhooks, SSO,
       compliance, passkeys.
-- [ ] **Stage 10 — Production hardening.** Security review, monitoring, load
+- [ ] **Stage 10 - Production hardening.** Security review, monitoring, load
       testing, performance tuning.
 
 ### A note on the dashboard
 
 Earlier revisions of this README warned that the dashboard's revenue, expense, and
 profit figures were illustrative placeholders labelled "Sample". **They are not any
-more** — as of Stage 8 every figure is derived from posted ledger entries, and the
+more** - as of Stage 8 every figure is derived from posted ledger entries, and the
 fabricated series has been deleted rather than left behind a flag.
 
 Two rules the dashboard now follows, both about not overclaiming:
@@ -438,7 +438,7 @@ Two rules the dashboard now follows, both about not overclaiming:
   reports revenue "down 90%", and a dashboard that does that is misleading for most
   of every month.
 - **A percentage change with no basis is not shown as a number.** Going from ₹0 to
-  ₹50,000 is not "+100%" — it is undefined, so the tile says "no prior data".
+  ₹50,000 is not "+100%" - it is undefined, so the tile says "no prior data".
 
 If the ledger ever disagrees with the documents behind it, the dashboard leads with
 that rather than quietly rendering figures derived from a broken ledger.

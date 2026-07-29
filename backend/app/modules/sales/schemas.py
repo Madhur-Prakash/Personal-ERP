@@ -1,13 +1,13 @@
 """Sales API contracts.
 
-Money crosses the wire as a string, as everywhere else — a JSON number is a
+Money crosses the wire as a string, as everywhere else - a JSON number is a
 double in every JavaScript client.
 
 **Line inputs carry no computed fields.** A client sends quantity, price, discount,
 and tax rate; the server computes the taxable base, the CGST/SGST/IGST split, and
 the totals. Accepting a client-supplied total would let a caller invoice ₹100 and
 book ₹1 of revenue, and no amount of validation short of recomputing it makes that
-safe — so it is simply never accepted.
+safe - so it is simply never accepted.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ DocCode = Annotated[
 PartyName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=250)]
 LineText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
-#: 15 characters, the statutory GSTIN format. Validated by shape, not checksum —
+#: 15 characters, the statutory GSTIN format. Validated by shape, not checksum -
 #: the check digit algorithm is worth adding but a malformed length is the error
 #: people actually make.
 Gstin = Annotated[
@@ -220,7 +220,7 @@ class SalesLineInput(BaseSchema):
     """One line as submitted by a client.
 
     Note what is absent: no taxable amount, no tax split, no line total. Those are
-    computed server-side — see the module docstring.
+    computed server-side - see the module docstring.
     """
 
     description: LineText
@@ -374,7 +374,7 @@ class InvoiceCreate(BaseSchema):
 
 
 class InvoiceUpdate(BaseSchema):
-    """Drafts only. A posted invoice is a statutory record — cancel it instead."""
+    """Drafts only. A posted invoice is a statutory record - cancel it instead."""
 
     invoice_date: dt.date | None = None
     due_date: dt.date | None = None
@@ -409,7 +409,7 @@ class InvoiceRead(TimestampedSchema, DocumentTotalsRead):
 
 class CancelInvoiceRequest(BaseSchema):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
-    #: A cancellation may be dated later than the invoice — you cannot post into a
+    #: A cancellation may be dated later than the invoice - you cannot post into a
     #: closed period just because that is where the mistake was made.
     cancellation_date: dt.date | None = None
 
@@ -431,7 +431,7 @@ class PaymentCreate(BaseSchema):
     deposit_account_id: uuid.UUID | None = None
     notes: str | None = None
     #: Optional. An empty list records a payment on account, which is a real thing
-    #: customers do — they pay before you invoice.
+    #: customers do - they pay before you invoice.
     allocations: list[PaymentAllocationInput] = Field(default_factory=list)
 
     @model_validator(mode="after")

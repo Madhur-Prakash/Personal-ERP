@@ -1,5 +1,5 @@
 /**
- * Analytics — the same figures as the statements, arranged for scanning.
+ * Analytics - the same figures as the statements, arranged for scanning.
  *
  * Everything here is derived server-side from the ledger by the service that renders
  * the P&L, so nothing on this page can disagree with the accounts. Three deliberate
@@ -90,7 +90,7 @@ export function AnalyticsPage() {
         description={
           dashboard
             ? `${dashboard.period_label}: ${formatDate(dashboard.span.start)} to ${formatDate(dashboard.span.end)}, compared against ${formatDate(dashboard.comparison.start)} to ${formatDate(dashboard.comparison.end)}.`
-            : 'Figures derived from the ledger — the same source as the financial statements.'
+            : 'Figures derived from the ledger - the same source as the financial statements.'
         }
         action={
           <select
@@ -131,7 +131,7 @@ export function AnalyticsPage() {
         <Card>
           <CardHeader
             title="Income and expenses by month"
-            description="Bars sum exactly to the totals above — the series is derived from the same posted entries."
+            description="Bars sum exactly to the totals above - the series is derived from the same posted entries."
             action={
               trend ? (
                 <span className="text-content-muted text-[12px] tabular-nums">
@@ -154,7 +154,7 @@ export function AnalyticsPage() {
         <div className="grid gap-4 lg:grid-cols-2">
           <RankingCard
             title="Top customers"
-            description="Ranked on taxable value — GST collected is the government's money, not revenue."
+            description="Ranked on taxable value - GST collected is the government's money, not revenue."
             ranking={customers}
             currency={currency}
             countLabel="invoices"
@@ -375,7 +375,7 @@ function RankingCard({
 /**
  * Control-account reconciliation.
  *
- * Each figure is derived twice — once from the control account, once from the
+ * Each figure is derived twice - once from the control account, once from the
  * documents that should have produced it. This is the check a bookkeeper does monthly
  * by hand; showing it means a document that updated one table and not the other is
  * caught in days rather than found by an accountant a year later.
@@ -449,7 +449,7 @@ function ReconciliationCard({
       {checks && !checks.all_agree && (
         <CardBody className="pt-3">
           <p className="text-content-secondary text-[12px]">
-            A difference means something was recorded in one place and not the other — most often a
+            A difference means something was recorded in one place and not the other - most often a
             document edited outside the normal flow. Every figure on this page is derived from the
             ledger, so resolve this before relying on them.
           </p>

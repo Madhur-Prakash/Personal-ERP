@@ -1,4 +1,4 @@
-"""Stock service — movements, valuation, and their ledger effect.
+"""Stock service - movements, valuation, and their ledger effect.
 
 Every change to stock goes through :meth:`StockService.record` and nowhere else.
 That single entry point is what keeps four things in step that would otherwise
@@ -11,7 +11,7 @@ drift:
 
 The locking matters. Two concurrent receipts for the same product read the same
 average cost, compute from it, and the second write silently discards the first's
-contribution — a lost update that shows up weeks later as an inventory value nobody
+contribution - a lost update that shows up weeks later as an inventory value nobody
 can explain. Every ``record`` call therefore takes a row lock on the stock level
 before reading it (``SELECT … FOR UPDATE``), so concurrent movements on the same
 product serialise and movements on different products do not.
@@ -207,7 +207,7 @@ class StockService:
         sign is derived here rather than trusted.
 
         Returns the movement, whose ``balance_after``/``average_cost_after`` capture
-        the position at that instant — which is what makes a stock card auditable
+        the position at that instant - which is what makes a stock card auditable
         after the average has moved on.
         """
         if quantity <= 0:
@@ -337,7 +337,7 @@ class StockService:
                 organization_id,
                 actor=actor,
                 entry_date=movement_date,
-                narration=f"Cost of sales — {product.name}"
+                narration=f"Cost of sales - {product.name}"
                 + (f" ({reference})" if reference else ""),
                 debit_account_id=await self._cogs_account_id(organization_id, product),
                 credit_account_id=await self._inventory_account_id(organization_id, product),
@@ -398,7 +398,7 @@ class StockService:
                 organization_id,
                 actor=actor,
                 entry_date=movement_date,
-                narration=f"Stock adjustment — {product.name}: {reason}",
+                narration=f"Stock adjustment - {product.name}: {reason}",
                 debit_account_id=inventory if increase else shrinkage,
                 credit_account_id=shrinkage if increase else inventory,
                 amount=value,

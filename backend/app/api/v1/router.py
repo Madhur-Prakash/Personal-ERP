@@ -2,7 +2,7 @@
 
 Every module's router is mounted here, and nowhere else. One file answers "what
 does this API expose?", and versioning is a matter of adding a ``v2`` package
-rather than editing routes in place — existing clients keep working while a new
+rather than editing routes in place - existing clients keep working while a new
 contract is introduced alongside.
 """
 
@@ -58,7 +58,7 @@ api_router.include_router(invitations_router)
 api_router.include_router(roles_router)
 api_router.include_router(audit_router)
 
-# Stage 2 — accounting. Ordered chart -> calendar -> journals -> entries ->
+# Stage 2 - accounting. Ordered chart -> calendar -> journals -> entries ->
 # reports, which is the order the books are actually set up and used.
 api_router.include_router(accounts_router)
 api_router.include_router(calendar_router)
@@ -66,7 +66,7 @@ api_router.include_router(journals_router)
 api_router.include_router(entries_router)
 api_router.include_router(reports_router)
 
-# Billing — the simple path: money in and money out, no customer or supplier
+# Billing - the simple path: money in and money out, no customer or supplier
 # needed. Mounted before sales because for most users it is the only screen they
 # touch, and these are real ledger postings so everything downstream picks them up.
 api_router.include_router(billing_router)

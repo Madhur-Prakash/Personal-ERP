@@ -1,4 +1,4 @@
-"""Purchasing HTTP surface — the full purchase-to-pay cycle over the API.
+"""Purchasing HTTP surface - the full purchase-to-pay cycle over the API.
 
 The service-layer tests in ``test_purchasing.py`` prove the accounting. This file
 proves the endpoints are actually reachable and wired correctly: permissions
@@ -30,7 +30,7 @@ def money(value: str) -> Decimal:
     """Parse a money string from the API.
 
     Compared numerically rather than as a string: money crosses the wire as a
-    decimal string, and its *scale* depends on provenance — a value read back from
+    decimal string, and its *scale* depends on provenance - a value read back from
     `NUMERIC(18,4)` serialises as `"0.0000"` while the same figure computed in
     Python (`Decimal("5900") - Decimal("5900")`) serialises as `"0"`. Both are the
     same amount, so asserting the string form is brittle by construction.
@@ -82,7 +82,7 @@ class TestPurchaseToPayCycle:
         product = response.json()
         assert product["tracks_stock"] is True
 
-        # Barcode lookup — the scanner path.
+        # Barcode lookup - the scanner path.
         scan = await authed_client.get(f"{api}/products/by-barcode/8901234567890")
         assert scan.status_code == 200
         assert scan.json()["id"] == product["id"]

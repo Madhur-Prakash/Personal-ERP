@@ -34,7 +34,7 @@ SMTP_TLS=false
 
 ## Email in development
 
-**Use Mailpit — http://localhost:8025.** `make up` points the backend's SMTP at
+**Use Mailpit - http://localhost:8025.** `make up` points the backend's SMTP at
 it, so every email is captured with working links and no real provider is needed.
 
 There is also a no-SMTP mode: with `SMTP_HOST` empty the mailer logs the message
@@ -45,7 +45,7 @@ logged URL**, so the link cannot be used from the log:
 http://localhost:5173/verify-email?****
 ```
 
-That redaction is correct — a one-time credential should not sit in a log file —
+That redaction is correct - a one-time credential should not sit in a log file -
 so treat the log path as a way to confirm *that* an email was generated, and
 Mailpit as the way to actually click it. Set `LOG_MASK=false` if you genuinely
 need the raw value locally.
@@ -60,9 +60,9 @@ need the raw value locally.
 modules/<name>/
   models.py        SQLAlchemy tables
   schemas.py       Pydantic contracts
-  repository.py    Data access — the only layer touching the session
-  service.py       Business rules — raises domain exceptions, never HTTP ones
-  router.py        HTTP — thin; parse, delegate, shape
+  repository.py    Data access - the only layer touching the session
+  service.py       Business rules - raises domain exceptions, never HTTP ones
+  router.py        HTTP - thin; parse, delegate, shape
 ```
 
 Dependencies point inward. Violating that is the one thing to catch in review.
@@ -99,7 +99,7 @@ Invitation(role_id=role.id, ...)
 Invitation(role=role, ...)
 ```
 
-This is a real bug we hit and fixed — see the comment in
+This is a real bug we hit and fixed - see the comment in
 `organizations/service.py`.
 
 ### Adding a permission
@@ -111,7 +111,7 @@ This is a real bug we hit and fixed — see the comment in
 4. Enforce it: `Depends(require_permission(Permission.YOUR_THING))`.
 
 Because permissions live in code, one that is missing from the catalogue cannot be
-granted through the UI at all — which is the point.
+granted through the UI at all - which is the point.
 
 ---
 
@@ -121,7 +121,7 @@ granted through the UI at all — which is the point.
 
 ```
 src/
-  components/ui/       Primitives — no data fetching
+  components/ui/       Primitives - no data fetching
   components/layout/   Shell, palette, theme toggle
   features/<name>/     api.ts + page components, colocated
   lib/                 HTTP client, env validation, formatting
@@ -189,13 +189,13 @@ The suite is weighted toward places where a bug is expensive:
 
 - token rotation and reuse detection
 - permission expansion, including wildcards and unknown grants
-- cross-tenant isolation — *attempt* the bad thing and assert it is refused
+- cross-tenant isolation - *attempt* the bad thing and assert it is refused
 - owner-lockout prevention
 - secret redaction in the audit trail
 - account-enumeration resistance, including timing
 
 Use `example.com` for test emails. `email-validator` rejects special-use TLDs like
-`.test` and `.local` — correct behaviour for production, and it means those
+`.test` and `.local` - correct behaviour for production, and it means those
 domains cannot be used in fixtures.
 
 ---
@@ -232,7 +232,7 @@ make redis-cli
 docker exec personalerp-redis redis-cli -n 0 KEYS 'personalerp:*'
 ```
 
-**A user seems stuck signed out.** Check their token epoch — anything that bumps
+**A user seems stuck signed out.** Check their token epoch - anything that bumps
 it invalidates outstanding tokens:
 
 ```bash
@@ -265,7 +265,7 @@ Recorded because each cost real time:
 - **logifyx's formatters drop `extra={...}` silently.** Both the console and JSON
   formatters build output from a fixed set of record attributes, so structured
   fields vanished with no error. `StructuredLogger` in `core/logging.py` folds
-  them into the message text so they actually appear — see that class for the
+  them into the message text so they actually appear - see that class for the
   trade-off.
 - **Vite's object-form `manualChunks` matches exact specifiers only.** It will not
   capture `react/jsx-runtime`, producing an empty chunk while React stays in the

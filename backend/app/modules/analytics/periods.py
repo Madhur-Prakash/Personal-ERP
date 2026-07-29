@@ -1,6 +1,6 @@
 """Period arithmetic for analytics.
 
-**This module is pure.** Dates in, dates out — no database, no ORM. It is separate
+**This module is pure.** Dates in, dates out - no database, no ORM. It is separate
 because this is where dashboards quietly lie, and the lies are all arithmetic:
 
 **Comparing month-to-date against a whole previous month.** On the 3rd of the month
@@ -10,7 +10,7 @@ a naive dashboard compares three days of revenue against thirty and reports reve
 days, so day 3 is compared against days 1-3 of the previous month.
 
 **Reporting a percentage change from zero.** If last month was ₹0 and this month is
-₹50,000, the change is not +100%, and it is not +∞ — it is undefined, because there
+₹50,000, the change is not +100%, and it is not +∞ - it is undefined, because there
 is no base to compare against. :func:`percent_change` returns ``None``, and the UI
 shows "no prior data" instead of a number that looks meaningful and is not.
 
@@ -98,7 +98,7 @@ def _add_months(day: dt.date, months: int) -> dt.date:
     """Shift by whole months, clamping the day to the target month's length.
 
     31 January minus one month is 31 December, but 31 March minus one month cannot
-    be 31 February — it clamps to the 28th or 29th. Naive day-arithmetic here is the
+    be 31 February - it clamps to the 28th or 29th. Naive day-arithmetic here is the
     source of the classic "the report skipped March" bug.
     """
     total = (day.year * 12 + day.month - 1) + months
@@ -119,7 +119,7 @@ def fiscal_year_start(day: dt.date, start_month: int) -> dt.date:
     """The start of the fiscal year containing ``day``.
 
     With an April start, 15 February 2026 falls in the year that began 1 April
-    2025 — the previous calendar year. Getting this backwards shifts every
+    2025 - the previous calendar year. Getting this backwards shifts every
     year-to-date figure by up to twelve months.
     """
     if not 1 <= start_month <= 12:
@@ -133,7 +133,7 @@ def quarter_start(day: dt.date, fiscal_start_month: int) -> dt.date:
     """The start of the fiscal quarter containing ``day``.
 
     Quarters are counted from the *fiscal* year start, not from January. For an
-    April-start business, Q1 is April-June — which is what "this quarter" means to
+    April-start business, Q1 is April-June - which is what "this quarter" means to
     them, and what their filings use.
     """
     year_start = fiscal_year_start(day, fiscal_start_month)
@@ -144,8 +144,8 @@ def quarter_start(day: dt.date, fiscal_start_month: int) -> dt.date:
 def resolve_period(period: Period, *, today: dt.date, fiscal_start_month: int = 4) -> DateRange:
     """Turn a named window into concrete dates.
 
-    ``today`` is a parameter rather than read from the clock so that every caller —
-    tests, a scheduled export, a request replayed for debugging — resolves the same
+    ``today`` is a parameter rather than read from the clock so that every caller -
+    tests, a scheduled export, a request replayed for debugging - resolves the same
     dates for the same inputs.
     """
     match period:
@@ -179,7 +179,7 @@ def previous_comparable(period: Period, current: DateRange) -> DateRange:
     """
     if period is Period.THIS_MONTH:
         start = _add_months(current.start, -1)
-        # Truncate to the same day count, and never past the end of that month —
+        # Truncate to the same day count, and never past the end of that month -
         # comparing 31 days of January against February is not possible.
         end = min(start + dt.timedelta(days=current.days - 1), month_end(start))
         return DateRange(start, end)
@@ -214,7 +214,7 @@ def percent_change(current: Decimal, previous: Decimal) -> Decimal | None:
 
     ``None`` when there is no meaningful base:
 
-    * **Previous is zero.** Going from ₹0 to ₹50,000 is not "+100%" — the increase
+    * **Previous is zero.** Going from ₹0 to ₹50,000 is not "+100%" - the increase
       is infinite, and any finite number printed there is a fabrication. The caller
       shows "no prior data".
     * **Previous is negative.** A percentage change across a sign flip is
@@ -234,7 +234,7 @@ def month_buckets(span: DateRange) -> list[DateRange]:
 
     The first and last buckets are partial whenever the span does not start on the
     1st or end on a month end. Clipping rather than extending keeps the sum of the
-    buckets equal to the total for the span — a chart whose bars add up to something
+    buckets equal to the total for the span - a chart whose bars add up to something
     other than the headline figure is worse than no chart.
     """
     buckets: list[DateRange] = []
@@ -249,7 +249,7 @@ def month_buckets(span: DateRange) -> list[DateRange]:
 
 
 def month_label(day: dt.date) -> str:
-    """``Apr 2026``. Short, and unambiguous across a year boundary — a 12-month
+    """``Apr 2026``. Short, and unambiguous across a year boundary - a 12-month
     chart labelled only ``Apr`` shows two of them."""
     return f"{calendar.month_abbr[day.month]} {day.year}"
 
@@ -259,10 +259,10 @@ def local_date(instant: dt.datetime, timezone_name: str) -> dt.date:
 
     **Period boundaries are local dates, not UTC dates.** At 00:30 on 1 August in
     Asia/Kolkata it is still 31 July in UTC, so a dashboard resolving "this month"
-    from the UTC date shows the whole of July — every night, for five and a half
+    from the UTC date shows the whole of July - every night, for five and a half
     hours. The same error moves the fiscal-year boundary on 1 April.
 
-    Kept pure — the instant is a parameter — so the boundary behaviour is testable
+    Kept pure - the instant is a parameter - so the boundary behaviour is testable
     without freezing the clock.
 
     Falls back to the instant's own date if the zone name is unknown. A bad timezone

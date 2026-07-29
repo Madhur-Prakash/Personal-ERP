@@ -1,10 +1,10 @@
-"""Accounting core — the double-entry ledger.
+"""Accounting core - the double-entry ledger.
 
 This is the module every later stage writes into: Stage 3 invoices post to the
 sales journal, Stage 4 goods receipts post inventory and COGS, Stage 5 OCR
 produces draft entries, Stage 8 reports read the ledger. Getting it wrong here is
-not recoverable later, so the invariants are enforced at three levels — Python
-service, database ``CHECK`` constraint, and test — rather than trusted to
+not recoverable later, so the invariants are enforced at three levels - Python
+service, database ``CHECK`` constraint, and test - rather than trusted to
 application code alone.
 
 **The invariants.**
@@ -22,8 +22,8 @@ application code alone.
 
 **Why debit/credit columns rather than one signed amount.** A signed column is
 more compact, but it forces every reader to remember the sign convention per
-account type, and it makes "total debits" — the number an accountant reconciles
-against — a conditional aggregate instead of a plain ``SUM``. The two-column form
+account type, and it makes "total debits" - the number an accountant reconciles
+against - a conditional aggregate instead of a plain ``SUM``. The two-column form
 matches how the domain is actually taught and audited.
 """
 
@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 class AccountType(StrEnum):
     """The five fundamental account types.
 
-    These are not a taxonomy choice — they are the accounting equation itself:
+    These are not a taxonomy choice - they are the accounting equation itself:
     ``Assets = Liabilities + Equity + (Income - Expenses)``. Everything else in
     this module derives from which side of that equation an account sits on.
     """
@@ -104,7 +104,7 @@ class BalanceSide(StrEnum):
 class AccountSubtype(StrEnum):
     """Report-line grouping within a type.
 
-    A balance sheet does not list "assets" flat — it separates current from
+    A balance sheet does not list "assets" flat - it separates current from
     fixed, and orders them by liquidity. The subtype is what lets the report
     builder do that without hard-coding account codes.
     """
@@ -287,7 +287,7 @@ class Account(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDel
 
     @property
     def label(self) -> str:
-        return f"{self.code} — {self.name}"
+        return f"{self.code} - {self.name}"
 
     def signed_balance(self, total_debit: Decimal, total_credit: Decimal) -> Decimal:
         """Convert raw debit/credit totals into a balance in the account's own terms.
@@ -341,7 +341,7 @@ class FiscalYear(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
 
 
 class AccountingPeriod(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
-    """A month within a fiscal year — the unit that opens and closes.
+    """A month within a fiscal year - the unit that opens and closes.
 
     Monthly rather than yearly granularity because GST returns are filed monthly:
     once a month's numbers are filed they must stop changing, while the rest of
@@ -423,7 +423,7 @@ class NumberSequence(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
     contending transactions and nothing else.
 
     Statutory numbering must also be *gap-free*, which rules out a PostgreSQL
-    ``SEQUENCE`` — sequences deliberately do not roll back, so a failed
+    ``SEQUENCE`` - sequences deliberately do not roll back, so a failed
     transaction burns a number permanently. Here the increment is part of the
     transaction, so a rollback returns the number.
 
@@ -458,7 +458,7 @@ class JournalEntry(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
 
     ``total_debit`` and ``total_credit`` are stored rather than derived. Two
     reasons: a trial balance over a year of entries becomes an index-only scan of
-    this table instead of an aggregate over every line, and — more importantly —
+    this table instead of an aggregate over every line, and - more importantly -
     storing them lets the balance invariant become a database ``CHECK``. A
     computed value cannot be constrained.
 
@@ -479,15 +479,15 @@ class JournalEntry(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
 
     entry_date: Mapped[LedgerDate] = mapped_column(nullable=False, index=True)
     narration: Mapped[str] = mapped_column(Text, nullable=False)
-    #: External document reference — cheque number, supplier invoice number.
+    #: External document reference - cheque number, supplier invoice number.
     reference: Mapped[str | None] = mapped_column(String(100), index=True)
 
     #: Who the money came from, or went to. Free text, and deliberately not a foreign
     #: key to a customer or supplier.
     #:
     #: This is the "particulars" column of a traditional day book. Most entries in a
-    #: small business name a party that will never be a master record — the auto driver,
-    #: the electricity board, a walk-in buyer — and forcing a customer row into existence
+    #: small business name a party that will never be a master record - the auto driver,
+    #: the electricity board, a walk-in buyer - and forcing a customer row into existence
     #: to write down who paid you is exactly the friction the billing screen exists to
     #: remove. Indexed because "everything I paid Airtel" is a question people ask.
     #:
@@ -522,7 +522,7 @@ class JournalEntry(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
     )
 
     # --- Provenance for later stages ---
-    #: What produced this entry — ``"invoice"``, ``"payment"``, ``"stock_move"``.
+    #: What produced this entry - ``"invoice"``, ``"payment"``, ``"stock_move"``.
     #: A loose string pair rather than a polymorphic FK: the accounting module
     #: must not depend on modules that do not exist yet, and inverting that
     #: dependency is what keeps this layer replaceable.

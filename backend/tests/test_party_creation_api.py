@@ -1,7 +1,7 @@
 """Customer and supplier creation, using exactly the payloads the UI sends.
 
 These exist because of a real bug. The frontend shares one form between customers and
-suppliers — they ask for the same six fields — but the two request schemas name the
+suppliers - they ask for the same six fields - but the two request schemas name the
 city differently: a customer has a billing address and a shipping one, so its field is
 `billing_city`, while a supplier has a single address and uses `city`. Both schemas are
 `extra="forbid"`, so the shared form sent `city` for a customer and got a 422.
@@ -21,7 +21,7 @@ from httpx import AsyncClient
 
 pytestmark = pytest.mark.integration
 
-#: The fields the shared `PartyFormModal` collects, with the city key left out —
+#: The fields the shared `PartyFormModal` collects, with the city key left out -
 #: each test adds the one its endpoint expects.
 FORM_COMMON: dict[str, Any] = {
     "name": "Sharma Enterprises",
@@ -34,7 +34,7 @@ FORM_COMMON: dict[str, Any] = {
 
 class TestCustomerCreation:
     async def test_accepts_the_form_payload(self, authed_client: AsyncClient, api: str) -> None:
-        """`billing_city`, not `city` — this is the 422 the shared form used to cause."""
+        """`billing_city`, not `city` - this is the 422 the shared form used to cause."""
         response = await authed_client.post(
             f"{api}/customers", json={**FORM_COMMON, "billing_city": "Mumbai"}
         )
@@ -86,7 +86,7 @@ class TestCustomerCreation:
         """The workflow the missing form was blocking, end to end.
 
         Creating a customer is only useful if an invoice can then be raised against
-        it — which is what the user was trying to do when the dropdown was empty.
+        it - which is what the user was trying to do when the dropdown was empty.
         """
         customer = await authed_client.post(
             f"{api}/customers", json={"name": "Sharma Enterprises", "gstin": "27AABCU9603R1ZM"}
@@ -113,7 +113,7 @@ class TestCustomerCreation:
 
 class TestSupplierCreation:
     async def test_accepts_the_form_payload(self, authed_client: AsyncClient, api: str) -> None:
-        """`city`, not `billing_city` — the mirror image of the customer case."""
+        """`city`, not `billing_city` - the mirror image of the customer case."""
         response = await authed_client.post(
             f"{api}/suppliers", json={**FORM_COMMON, "city": "Mumbai"}
         )
@@ -143,7 +143,7 @@ class TestSupplierCreation:
     ) -> None:
         """The OCR confirm form has the same empty-dropdown dead end.
 
-        A scanned invoice almost always names a supplier who is not on file yet — that
+        A scanned invoice almost always names a supplier who is not on file yet - that
         is the normal case for a first invoice from someone, so creating one inline has
         to work.
         """

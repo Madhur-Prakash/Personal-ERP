@@ -1,6 +1,6 @@
 """Integration tests for the authentication API.
 
-These run against real PostgreSQL and Redis through the real ASGI stack — no
+These run against real PostgreSQL and Redis through the real ASGI stack - no
 mocked repositories. Auth bugs live in the interaction between layers (token
 issued but session revoked, epoch bumped but token still accepted), which a
 mock-based test cannot see.
@@ -413,7 +413,7 @@ class TestRefresh:
         successor = rotated.cookies[REFRESH_COOKIE_NAME]
 
         # Replay the old token. The cookie jar now holds the rotated token and the
-        # endpoint prefers the cookie, so it must be cleared — otherwise this is
+        # endpoint prefers the cookie, so it must be cleared - otherwise this is
         # just a second legitimate refresh.
         client.cookies.clear()
         replay = await client.post(f"{api}/auth/refresh", json={"refresh_token": stolen})
@@ -431,7 +431,7 @@ class TestRefresh:
         )
         assert any(s.revocation_reason == SessionRevocationReason.REUSE_DETECTED for s in sessions)
 
-        # The successor must be dead too — this is the assertion that catches a
+        # The successor must be dead too - this is the assertion that catches a
         # rolled-back revocation. Last, because it raises and rolls back again.
         client.cookies.clear()
         after = await client.post(f"{api}/auth/refresh", json={"refresh_token": successor})
@@ -621,7 +621,7 @@ class TestChangePassword:
         )
         assert response.status_code == 200, response.text
 
-        # The caller's own token is invalidated too — a password change signs out
+        # The caller's own token is invalidated too - a password change signs out
         # everywhere, including here.
         assert (await authed_client.get(f"{api}/auth/me")).status_code == 401
 
@@ -769,7 +769,7 @@ class TestTwoFactor:
         assert body["provisioning_uri"].startswith("otpauth://totp/")
         assert body["qr_code"].startswith("data:image/png;base64,")
 
-        # Not yet in force — enrolment is unconfirmed.
+        # Not yet in force - enrolment is unconfirmed.
         await db.refresh(user)
         assert user.is_two_factor_enabled is False
 
@@ -922,7 +922,7 @@ class TestSessions:
     async def test_cannot_revoke_another_users_session(
         self, authed_client: AsyncClient, api: str, db: AsyncSession
     ) -> None:
-        """Ownership check, not just existence — otherwise ids are guessable."""
+        """Ownership check, not just existence - otherwise ids are guessable."""
         import datetime as dt2
 
         from app.core.security import generate_token, hash_password, hash_token
