@@ -1,0 +1,243 @@
+"""Application configuration.
+
+Single source of truth for every tunable in the backend. Values resolve in this
+order (highest priority first):
+
+    1. Real process environment variables
+    2. The ``.env`` file at the repository root
+    3. The defaults declared below
+
+Nothing else in the codebase may read ``os.environ`` directly — import
+:func:`get_settings` instead. That keeps configuration testable (override the
+cache) and makes every knob discoverable in one file.
+"""
+
+from __future__ import annotations
+
+import secrets
+from enum import StrEnum
+from functools import lru_cache
+from pathlib import Path
+from typing import Annotated, Literal, Self
+
+from pydantic import (
+    BeforeValidator,
+    Field,
+    PostgresDsn,
+    RedisDsn,
+    computed_field,
+    model_validator,
+)
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# backend/app/core/config.py -> backend/app/core -> backend/app -> backend -> <root>
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+ROOT_DIR = BACKEND_DIR.parent
+
+
+class Environment(StrEnum):
+    """Deployment environment. Drives safety checks and defaults."""
+
+    DEVELOPMENT = "development"
+    STAGING = "staging"
+    PRODUCTION = "production"
+    TEST = "test"
+
+    @property
+    def is_production(self) -> bool:
+        return self is Environment.PRODUCTION
+
+    @property
+    def is_local(self) -> bool:
+        return self in (Environment.DEVELOPMENT, Environment.TEST)
+
+
+def _split_csv(value: object) -> object:
+    """Accept ``a,b,c`` as well as a real JSON list for list-typed settings.
+
+    Docker Compose and shell exports can only supply strings, so every list
+    setting has to tolerate the comma-separated form.
+    """
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("["):  # already JSON — parse it as such
+            import json
+
+            parsed = json.loads(stripped)
+            return [str(item).strip() for item in parsed]
+        return [item.strip() for item in stripped.split(",") if item.strip()]
+    return value
+
+
+#: A list setting that accepts ``a,b,c`` from the environment.
+#:
+#: ``NoDecode`` is essential: without it pydantic-settings tries ``json.loads``
+#: on the raw value *inside the env/dotenv source*, before any validator runs,
+#: and a bare ``a,b,c`` raises SettingsError. NoDecode hands the string through
+#: untouched so ``_split_csv`` can do the work.
+CsvList = Annotated[list[str], NoDecode, BeforeValidator(_split_csv)]
+
+
+class Settings(BaseSettings):
+    """Typed, validated application settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=(ROOT_DIR / ".env", BACKEND_DIR / ".env"),
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",  # the shared .env also holds VITE_*/LOG_* keys
+    )
+
+    # ---- Runtime ------------------------------------------------------------
+    environment: Environment = Environment.DEVELOPMENT
+    debug: bool = True
+    app_name: str = "Personal ERP"
+    app_version: str = "0.1.0"
+
+    # ---- HTTP ---------------------------------------------------------------
+    backend_host: str = "0.0.0.0"
+    backend_port: int = 8000
+    api_v1_prefix: str = "/api/v1"
+    cors_origins: CsvList = Field(default_factory=lambda: ["http://localhost:5173"])
+    allowed_hosts: CsvList = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
+
+    # ---- PostgreSQL ---------------------------------------------------------
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_user: str = "personalerp"
+    postgres_password: str = "personalerp"
+    postgres_db: str = "personalerp"
+    database_url: PostgresDsn | None = None
+    db_pool_size: int = Field(default=10, ge=1)
+    db_max_overflow: int = Field(default=20, ge=0)
+    db_pool_recycle: int = Field(default=1800, ge=60)
+    db_echo: bool = False
+
+    # ---- Redis --------------------------------------------------------------
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_password: str | None = None
+    redis_url: RedisDsn | None = None
+
+    # ---- Security -----------------------------------------------------------
+    secret_key: str = Field(default_factory=lambda: secrets.token_urlsafe(64))
+    jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
+    access_token_ttl_minutes: int = Field(default=15, ge=1, le=1440)
+    refresh_token_ttl_days: int = Field(default=30, ge=1, le=365)
+    argon2_time_cost: int = Field(default=3, ge=1)
+    argon2_memory_cost: int = Field(default=65536, ge=8192)
+    argon2_parallelism: int = Field(default=4, ge=1)
+    encryption_key: str | None = None
+
+    # ---- Auth policy --------------------------------------------------------
+    email_verification_ttl_hours: int = Field(default=24, ge=1)
+    password_reset_ttl_minutes: int = Field(default=30, ge=1)
+    magic_link_ttl_minutes: int = Field(default=15, ge=1)
+    otp_ttl_minutes: int = Field(default=10, ge=1)
+    otp_length: int = Field(default=6, ge=4, le=10)
+    max_login_attempts: int = Field(default=5, ge=1)
+    login_lockout_minutes: int = Field(default=15, ge=1)
+    invite_ttl_days: int = Field(default=7, ge=1)
+
+    # ---- Rate limiting ------------------------------------------------------
+    rate_limit_enabled: bool = True
+    rate_limit_default: str = "200/minute"
+    rate_limit_auth: str = "10/minute"
+
+    # ---- Email --------------------------------------------------------------
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str = "no-reply@personalerp.local"
+    smtp_from_name: str = "Personal ERP"
+    smtp_tls: bool = True
+
+    # ---- Frontend -----------------------------------------------------------
+    frontend_url: str = "http://localhost:5173"
+
+    # -------------------------------------------------------------------------
+    # Derived values
+    # -------------------------------------------------------------------------
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sqlalchemy_dsn(self) -> str:
+        """asyncpg DSN. Explicit ``DATABASE_URL`` wins over the composed parts."""
+        if self.database_url is not None:
+            dsn = str(self.database_url)
+            # Normalise whatever scheme was supplied to the async driver.
+            for prefix in ("postgresql+psycopg://", "postgresql://", "postgres://"):
+                if dsn.startswith(prefix):
+                    return "postgresql+asyncpg://" + dsn.removeprefix(prefix)
+            return dsn
+        return (
+            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def redis_dsn(self) -> str:
+        if self.redis_url is not None:
+            return str(self.redis_url)
+        auth = f":{self.redis_password}@" if self.redis_password else ""
+        return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def emails_enabled(self) -> bool:
+        """When false, mail is logged instead of sent (the dev default)."""
+        return bool(self.smtp_host)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def docs_url(self) -> str | None:
+        """OpenAPI docs are never exposed in production."""
+        return None if self.environment.is_production else "/docs"
+
+    # -------------------------------------------------------------------------
+    # Guardrails
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def _enforce_production_safety(self) -> Self:
+        """Fail fast on insecure production configuration.
+
+        Crashing at boot is strictly better than silently serving traffic with a
+        placeholder signing key or wildcard CORS.
+        """
+        if not self.environment.is_production:
+            return self
+
+        problems: list[str] = []
+
+        if len(self.secret_key) < 32 or "dev-only" in self.secret_key:
+            problems.append("SECRET_KEY must be a real 32+ character secret")
+        if self.debug:
+            problems.append("DEBUG must be false")
+        if "*" in self.cors_origins:
+            problems.append("CORS_ORIGINS must list explicit origins, not '*'")
+        if not self.encryption_key:
+            problems.append("ENCRYPTION_KEY is required (2FA secrets are encrypted at rest)")
+        if self.postgres_password in ("personalerp", "postgres", "change-me-in-production"):
+            problems.append("POSTGRES_PASSWORD is still the default")
+        if "*" in self.allowed_hosts:
+            problems.append("ALLOWED_HOSTS must list explicit hosts, not '*'")
+
+        if problems:
+            joined = "\n  - ".join(problems)
+            raise ValueError(f"Refusing to start in production:\n  - {joined}")
+        return self
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return the process-wide settings singleton.
+
+    Cached so ``.env`` is read once. Tests override by calling
+    ``get_settings.cache_clear()`` after patching the environment.
+    """
+    return Settings()
+
+
+settings = get_settings()

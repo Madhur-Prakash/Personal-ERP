@@ -1,0 +1,229 @@
+# =============================================================================
+# CI — runs on every push and pull request.
+#
+# Backend and frontend run as independent jobs so a frontend type error does not
+# hide a backend test failure, and both report in parallel.
+#
+# The backend job runs against real PostgreSQL and Redis service containers
+# rather than mocks or SQLite. The test suite verifies partial unique indexes,
+# JSONB behaviour, and cursor pagination — none of which SQLite implements the
+# same way, so passing against a substitute would prove nothing.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# A new push supersedes the previous run on the same ref, so CI queues do not
+# back up behind superseded commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.13'
+  NODE_VERSION: '24'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: personalerp
+          POSTGRES_PASSWORD: personalerp
+          POSTGRES_DB: personalerp
+        ports: ['5432:5432']
+        # Without a health check the job races the database's startup and fails
+        # intermittently on the first connection.
+        options: >-
+          --health-cmd "pg_isready -U personalerp"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        # `--frozen` fails if uv.lock is stale, so CI cannot silently test a
+        # different dependency set than the lockfile describes.
+        run: uv sync --frozen
+
+      - name: Write test environment
+        run: |
+          cat > ../.env <<'EOF'
+          ENVIRONMENT=test
+          DEBUG=true
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_USER=personalerp
+          POSTGRES_PASSWORD=personalerp
+          POSTGRES_DB=personalerp
+          REDIS_HOST=localhost
+          REDIS_PORT=6379
+          SECRET_KEY=ci-only-secret-key-0123456789abcdefghijklmnopqrstuv
+          CORS_ORIGINS=http://localhost:5173
+          SMTP_HOST=
+          LOG_LEVEL=WARNING
+          LOG_COLOR=false
+          EOF
+
+      - name: Lint (ruff)
+        run: uv run ruff check --output-format=github .
+
+      - name: Check formatting (ruff)
+        run: uv run ruff format --check .
+
+      - name: Type check (mypy)
+        # Blocking. It was non-blocking while a tail of third-party stub gaps was
+        # burned down; that work is finished — strict mypy is clean across all
+        # source files — so the gate is enforced to keep it that way. A clean
+        # typechecker that cannot fail the build silently rots.
+        run: uv run mypy app
+
+      - name: Verify migrations apply cleanly
+        run: uv run alembic upgrade head
+
+      - name: Verify migrations are reversible
+        # A migration that cannot be rolled back is a migration you cannot deploy
+        # safely. Checked on every PR, not discovered during an incident.
+        run: |
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+      - name: Verify no schema drift
+        # Fails if the models describe a schema the migrations do not produce —
+        # i.e. someone changed a model without generating a migration.
+        run: uv run alembic check
+
+      - name: Run tests
+        run: uv run pytest --cov --cov-report=xml --cov-report=term-missing -q
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc -b
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: http://localhost:8000
+          VITE_API_V1_PREFIX: /api/v1
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Only after both test jobs pass — no point building an image from code that
+    # does not compile.
+    needs: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Validate compose files
+        # Catches YAML and schema mistakes that would otherwise only surface on
+        # the server during a deploy.
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.prod.yml config --quiet
+        env:
+          POSTGRES_USER: personalerp
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: personalerp
+          REDIS_PASSWORD: ci
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          target: production
+          push: false
+          # GitHub Actions cache, so layers survive between runs.
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          target: production
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max

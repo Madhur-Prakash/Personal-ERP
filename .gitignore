@@ -1,0 +1,55 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---- Node ----
+node_modules/
+.pnpm-store/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+playwright-report/
+test-results/
+.playwright/
+
+# ---- Logs (logifyx writes here) ----
+logs/
+*.log
+
+# ---- Env / secrets ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!frontend/**/*.key.ts
+secrets/
+
+# ---- Infra volumes ----
+.docker-data/
+infra/nginx/certs/
+infra/certbot/
+
+# ---- Editors / OS ----
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+.DS_Store
+Thumbs.db
+desktop.ini

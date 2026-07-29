@@ -1,0 +1,220 @@
+# =============================================================================
+# Personal ERP — production stack for a self-hosted VPS
+#
+#   cp .env.example .env      # then fill in real secrets
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Differences from the development stack that matter:
+#
+#   * PostgreSQL and Redis are NOT published to the host. They are reachable only
+#     on the internal Docker network, so the database is not exposed to the
+#     internet by a misconfigured firewall.
+#   * Only the edge proxy binds host ports (80/443).
+#   * Migrations run as a one-shot job that the API waits on, so two replicas can
+#     never race to apply the same migration.
+#   * Every service has resource limits, log rotation, and a restart policy.
+# =============================================================================
+
+name: personalerp-prod
+
+x-logging: &default-logging
+  # Without this, container logs grow without bound and eventually fill the disk
+  # — the most common way a small VPS dies.
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Data
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C --data-checksums'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/backups:/backups
+    # Deliberately no `ports:` — internal network only.
+    command:
+      # Modest tuning for a small VPS. Raise shared_buffers to ~25% of RAM.
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      # Log slow queries so a performance regression is visible before users
+      # report it.
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_checkpoints=on
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: '2', memory: 2G }
+    logging: *default-logging
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits: { cpus: '1', memory: 768M }
+    logging: *default-logging
+    networks: [internal]
+
+  # ---------------------------------------------------------------------------
+  # Migrations — one-shot, runs to completion before the API starts
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: ./backend
+      target: production
+    restart: 'no'
+    env_file: [.env]
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    command: ['alembic', 'upgrade', 'head']
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging: *default-logging
+    networks: [internal]
+
+  # ---------------------------------------------------------------------------
+  # Application
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      target: production
+    restart: always
+    env_file: [.env]
+    environment:
+      ENVIRONMENT: production
+      DEBUG: 'false'
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      LOG_JSON: 'true' # structured output for the aggregator
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      # Waits for the migration job to exit 0. This is what makes replicas safe.
+      migrate: { condition: service_completed_successfully }
+    deploy:
+      # Scale horizontally: every instance is stateless, so replicas need no
+      # coordination. Nginx load-balances across them by service name.
+      replicas: 2
+      resources:
+        limits: { cpus: '2', memory: 1G }
+      update_config:
+        # Start the replacement and confirm it is healthy before stopping the
+        # old one — this is what makes a deploy zero-downtime.
+        order: start-first
+        failure_action: rollback
+        delay: 10s
+    logging: *default-logging
+    networks: [internal]
+
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+      args:
+        # Baked into the bundle at build time. Must be the public origin.
+        VITE_API_BASE_URL: ${PUBLIC_API_URL:-https://app.example.com}
+        VITE_API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
+        VITE_APP_NAME: ${APP_NAME:-Personal ERP}
+    restart: always
+    deploy:
+      replicas: 2
+      resources:
+        limits: { cpus: '0.5', memory: 256M }
+      update_config:
+        order: start-first
+    logging: *default-logging
+    networks: [internal]
+
+  # ---------------------------------------------------------------------------
+  # Edge
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    restart: always
+    # The only service exposed to the host.
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infra/certbot/conf:/etc/letsencrypt:ro
+      - ./infra/certbot/www:/var/www/certbot:ro
+    depends_on: [backend, frontend]
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost/healthz']
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits: { cpus: '1', memory: 256M }
+    logging: *default-logging
+    networks: [internal]
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - ./infra/certbot/conf:/etc/letsencrypt
+      - ./infra/certbot/www:/var/www/certbot
+    # Wakes twice daily; certbot renews only inside the 30-day window, so this
+    # is cheap and means a renewal is never missed.
+    entrypoint: >
+      /bin/sh -c "trap exit TERM;
+      while :; do certbot renew --webroot -w /var/www/certbot --quiet;
+      sleep 12h & wait $${!}; done"
+    logging: *default-logging
+    networks: [internal]
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  internal:
+    driver: bridge

@@ -1,0 +1,999 @@
+"""Integration tests for the authentication API.
+
+These run against real PostgreSQL and Redis through the real ASGI stack — no
+mocked repositories. Auth bugs live in the interaction between layers (token
+issued but session revoked, epoch bumped but token still accepted), which a
+mock-based test cannot see.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.redis import get_redis
+from app.modules.audit.models import AuditAction, AuditLog, AuditSeverity
+from app.modules.auth.dependencies import REFRESH_COOKIE_NAME
+from app.modules.auth.models import SessionRevocationReason, UserSession
+from app.modules.auth.token_store import email_verification_store, otp_store
+from app.modules.organizations.models import Organization
+from app.modules.users.models import User
+from tests.conftest import TEST_PASSWORD
+
+
+# =============================================================================
+# Registration
+# =============================================================================
+class TestRegistration:
+    async def test_creates_unverified_user(
+        self, client: AsyncClient, api: str, db: AsyncSession
+    ) -> None:
+        response = await client.post(
+            f"{api}/auth/register",
+            json={
+                "email": "New.User@Example.COM",
+                "password": TEST_PASSWORD,
+                "full_name": "Nina Rao",
+            },
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["email_verification_required"] is True
+
+        # Email must be normalised to lowercase, or uniqueness is case-sensitive.
+        stored = await db.scalar(select(User).where(User.email == "new.user@example.com"))
+        assert stored is not None
+        assert stored.email_verified_at is None
+        assert stored.password_hash is not None
+        assert TEST_PASSWORD not in stored.password_hash
+
+    async def test_creates_organization_with_seeded_roles(
+        self, client: AsyncClient, api: str, db: AsyncSession
+    ) -> None:
+        response = await client.post(
+            f"{api}/auth/register",
+            json={
+                "email": "founder@example.com",
+                "password": TEST_PASSWORD,
+                "full_name": "Arjun Mehta",
+                "organization_name": "Mehta Exports",
+            },
+        )
+        assert response.status_code == 201, response.text
+        organization_id = response.json()["organization_id"]
+        assert organization_id is not None
+
+        from app.modules.rbac.models import Role
+
+        roles = (
+            await db.scalars(select(Role).where(Role.organization_id == organization_id))
+        ).all()
+        assert {role.slug for role in roles} == {
+            "owner",
+            "admin",
+            "accountant",
+            "sales",
+            "viewer",
+        }
+        assert sum(role.is_default for role in roles) == 1
+
+    async def test_duplicate_email_conflicts(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        response = await client.post(
+            f"{api}/auth/register",
+            json={
+                "email": user.email,
+                "password": TEST_PASSWORD,
+                "full_name": "Impostor",
+            },
+        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "email_taken"
+
+    async def test_duplicate_email_is_case_insensitive(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        response = await client.post(
+            f"{api}/auth/register",
+            json={
+                "email": user.email.upper(),
+                "password": TEST_PASSWORD,
+                "full_name": "Impostor",
+            },
+        )
+        assert response.status_code == 409
+
+    async def test_weak_password_rejected_with_reasons(self, client: AsyncClient, api: str) -> None:
+        response = await client.post(
+            f"{api}/auth/register",
+            json={
+                "email": "weak@example.com",
+                "password": "password123",
+                "full_name": "Weak Pass",
+            },
+        )
+        assert response.status_code == 422
+        error = response.json()["error"]
+        assert error["code"] == "validation_error"
+        assert error["details"]["password"]
+
+    async def test_rejects_both_org_and_invitation(self, client: AsyncClient, api: str) -> None:
+        response = await client.post(
+            f"{api}/auth/register",
+            json={
+                "email": "confused@example.com",
+                "password": TEST_PASSWORD,
+                "full_name": "Confused User",
+                "organization_name": "Some Co",
+                "invitation_token": "abc123",
+            },
+        )
+        assert response.status_code == 422
+
+    async def test_cannot_set_privileged_fields(
+        self, client: AsyncClient, api: str, db: AsyncSession
+    ) -> None:
+        """Mass-assignment guard: ``extra="forbid"`` must reject unknown fields."""
+        response = await client.post(
+            f"{api}/auth/register",
+            json={
+                "email": "sneaky@example.com",
+                "password": TEST_PASSWORD,
+                "full_name": "Sneaky User",
+                "is_superuser": True,
+            },
+        )
+        assert response.status_code == 422
+
+
+# =============================================================================
+# Email verification
+# =============================================================================
+class TestEmailVerification:
+    async def test_verifies_with_valid_token(
+        self, client: AsyncClient, api: str, db: AsyncSession, unverified_user: User
+    ) -> None:
+        token = await email_verification_store().issue({"user_id": str(unverified_user.id)})
+
+        response = await client.post(f"{api}/auth/verify-email", json={"token": token})
+        assert response.status_code == 200, response.text
+
+        await db.refresh(unverified_user)
+        assert unverified_user.email_verified_at is not None
+
+    async def test_token_is_single_use(
+        self, client: AsyncClient, api: str, unverified_user: User
+    ) -> None:
+        token = await email_verification_store().issue({"user_id": str(unverified_user.id)})
+
+        assert (
+            await client.post(f"{api}/auth/verify-email", json={"token": token})
+        ).status_code == 200
+        second = await client.post(f"{api}/auth/verify-email", json={"token": token})
+        assert second.status_code == 401
+
+    async def test_invalid_token_rejected(self, client: AsyncClient, api: str) -> None:
+        response = await client.post(f"{api}/auth/verify-email", json={"token": "not-a-real-token"})
+        assert response.status_code == 401
+
+    async def test_resend_does_not_reveal_account_existence(
+        self, client: AsyncClient, api: str, unverified_user: User
+    ) -> None:
+        real = await client.post(
+            f"{api}/auth/resend-verification", json={"email": unverified_user.email}
+        )
+        fake = await client.post(
+            f"{api}/auth/resend-verification", json={"email": "nobody@example.com"}
+        )
+        assert real.status_code == fake.status_code == 200
+        assert real.json() == fake.json()
+
+
+# =============================================================================
+# Login
+# =============================================================================
+class TestLogin:
+    async def test_successful_login_returns_token_and_cookie(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        response = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        assert body["token_type"] == "bearer"
+        assert body["access_token"]
+        assert body["user"]["email"] == user.email
+
+        # The refresh token must never appear in the body.
+        assert "refresh_token" not in body
+
+        cookie = response.cookies.get(REFRESH_COOKIE_NAME)
+        assert cookie, "refresh cookie was not set"
+
+    async def test_refresh_cookie_is_httponly_and_samesite_strict(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        """The property that makes XSS unable to steal a long-lived credential."""
+        response = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        set_cookie = next(
+            value
+            for key, value in response.headers.multi_items()
+            if key.lower() == "set-cookie" and REFRESH_COOKIE_NAME in value
+        )
+        assert "HttpOnly" in set_cookie
+        assert "SameSite=strict" in set_cookie.replace("SameSite=Strict", "SameSite=strict")
+
+    async def test_login_is_case_insensitive_on_email(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        response = await client.post(
+            f"{api}/auth/login",
+            json={"email": user.email.upper(), "password": TEST_PASSWORD},
+        )
+        assert response.status_code == 200
+
+    async def test_wrong_password_rejected(self, client: AsyncClient, api: str, user: User) -> None:
+        response = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": "wrong-password-here"}
+        )
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "invalid_credentials"
+
+    async def test_unknown_and_wrong_password_are_indistinguishable(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        """No enumeration oracle: identical status, code, and message."""
+        unknown = await client.post(
+            f"{api}/auth/login",
+            json={"email": "nobody@example.com", "password": "wrong-password-here"},
+        )
+        wrong = await client.post(
+            f"{api}/auth/login",
+            json={"email": user.email, "password": "wrong-password-here"},
+        )
+        assert unknown.status_code == wrong.status_code == 401
+        assert unknown.json()["error"]["code"] == wrong.json()["error"]["code"]
+        assert unknown.json()["error"]["message"] == wrong.json()["error"]["message"]
+
+    async def test_unverified_email_blocked(
+        self, client: AsyncClient, api: str, unverified_user: User
+    ) -> None:
+        response = await client.post(
+            f"{api}/auth/login",
+            json={"email": unverified_user.email, "password": TEST_PASSWORD},
+        )
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "email_not_verified"
+
+    async def test_disabled_account_blocked(
+        self, client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        user.is_active = False
+        await db.flush()
+
+        response = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "account_disabled"
+
+    async def test_lockout_after_repeated_failures(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        """Brute-force protection, counted per email address."""
+        from app.core.config import settings
+
+        for _ in range(settings.max_login_attempts):
+            response = await client.post(
+                f"{api}/auth/login",
+                json={"email": user.email, "password": "wrong-password-here"},
+            )
+            assert response.status_code == 401
+
+        # Even the correct password is now refused.
+        locked = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        assert locked.status_code == 423
+        assert locked.json()["error"]["code"] == "account_locked"
+
+    async def test_successful_login_clears_failure_counter(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        for _ in range(2):
+            await client.post(
+                f"{api}/auth/login",
+                json={"email": user.email, "password": "wrong-password-here"},
+            )
+
+        assert (
+            await client.post(
+                f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+            )
+        ).status_code == 200
+
+        from app.core.redis import RedisKey
+
+        assert await get_redis().get(RedisKey.login_attempts(user.email)) is None
+
+
+# =============================================================================
+# Authenticated identity
+# =============================================================================
+class TestMe:
+    async def test_returns_profile_and_permissions(
+        self, authed_client: AsyncClient, api: str, user: User, organization: Organization
+    ) -> None:
+        response = await authed_client.get(f"{api}/auth/me")
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        assert body["email"] == user.email
+        assert body["active_organization"]["id"] == str(organization.id)
+        assert body["active_organization"]["is_owner"] is True
+        # The owner holds every permission in the catalogue.
+        from app.modules.rbac.permissions import ALL_PERMISSION_VALUES
+
+        assert set(body["permissions"]) == ALL_PERMISSION_VALUES
+
+    async def test_requires_authentication(self, client: AsyncClient, api: str) -> None:
+        response = await client.get(f"{api}/auth/me")
+        assert response.status_code == 401
+        assert response.headers.get("WWW-Authenticate") == "Bearer"
+
+    async def test_rejects_garbage_token(self, client: AsyncClient, api: str) -> None:
+        client.headers["Authorization"] = "Bearer not-a-real-jwt"
+        response = await client.get(f"{api}/auth/me")
+        assert response.status_code == 401
+
+
+# =============================================================================
+# Refresh rotation
+# =============================================================================
+class TestRefresh:
+    async def test_rotates_and_returns_new_tokens(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        login = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        original_cookie = login.cookies[REFRESH_COOKIE_NAME]
+
+        refreshed = await client.post(f"{api}/auth/refresh")
+        assert refreshed.status_code == 200, refreshed.text
+
+        new_cookie = refreshed.cookies.get(REFRESH_COOKIE_NAME)
+        assert new_cookie and new_cookie != original_cookie, "token was not rotated"
+
+    async def test_rotation_preserves_original_expiry(
+        self, client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        """Refreshing must not let a session extend itself indefinitely."""
+        await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        first = (await db.scalars(select(UserSession))).all()[0]
+        original_expiry = first.expires_at
+
+        await client.post(f"{api}/auth/refresh")
+
+        sessions = (await db.scalars(select(UserSession))).all()
+        assert len(sessions) == 2
+        assert all(s.expires_at == original_expiry for s in sessions)
+
+    async def test_reuse_of_rotated_token_revokes_lineage(
+        self, client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        """The central defence against a stolen refresh token.
+
+        Replaying an already-rotated token means two parties hold it, so the whole
+        chain is revoked rather than guessing which one is legitimate.
+
+        Critically, this asserts the *successor* token is dead too. An earlier
+        version of the handler returned 401 correctly but had its revocation
+        rolled back by that very exception, so the attacker's chain kept working
+        while the endpoint looked correct.
+        """
+        login = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        stolen = login.cookies[REFRESH_COOKIE_NAME]
+
+        rotated = await client.post(f"{api}/auth/refresh")
+        assert rotated.status_code == 200
+        successor = rotated.cookies[REFRESH_COOKIE_NAME]
+
+        # Replay the old token. The cookie jar now holds the rotated token and the
+        # endpoint prefers the cookie, so it must be cleared — otherwise this is
+        # just a second legitimate refresh.
+        client.cookies.clear()
+        replay = await client.post(f"{api}/auth/refresh", json={"refresh_token": stolen})
+        assert replay.status_code == 401
+
+        # Database state is asserted here, before any further request. Each 401
+        # rolls the request session back, and stacking two of them leaves it
+        # unusable for direct queries.
+        sessions = (
+            await db.scalars(select(UserSession).where(UserSession.user_id == user.id))
+        ).all()
+        assert sessions, "no sessions found"
+        assert all(s.revoked_at is not None for s in sessions), (
+            "lineage was not fully revoked after reuse"
+        )
+        assert any(s.revocation_reason == SessionRevocationReason.REUSE_DETECTED for s in sessions)
+
+        # The successor must be dead too — this is the assertion that catches a
+        # rolled-back revocation. Last, because it raises and rolls back again.
+        client.cookies.clear()
+        after = await client.post(f"{api}/auth/refresh", json={"refresh_token": successor})
+        assert after.status_code == 401, "successor token survived reuse detection"
+
+    async def test_reuse_detection_is_audited_as_critical(
+        self, client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        """The audit row must survive the 401 that reports the breach."""
+        login = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        stolen = login.cookies[REFRESH_COOKIE_NAME]
+        await client.post(f"{api}/auth/refresh")
+
+        client.cookies.clear()
+        await client.post(f"{api}/auth/refresh", json={"refresh_token": stolen})
+
+        entries = (
+            await db.scalars(
+                select(AuditLog).where(AuditLog.action == AuditAction.SESSION_REUSE_DETECTED)
+            )
+        ).all()
+        assert entries, "reuse detection wrote no audit row"
+        assert entries[0].severity == AuditSeverity.CRITICAL
+
+    async def test_unknown_refresh_token_rejected(self, client: AsyncClient, api: str) -> None:
+        response = await client.post(
+            f"{api}/auth/refresh", json={"refresh_token": "totally-made-up-token"}
+        )
+        assert response.status_code == 401
+
+    async def test_missing_refresh_token_rejected(self, client: AsyncClient, api: str) -> None:
+        response = await client.post(f"{api}/auth/refresh")
+        assert response.status_code == 401
+
+    async def test_expired_session_rejected(
+        self, client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        login = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        token = login.cookies[REFRESH_COOKIE_NAME]
+
+        session = (await db.scalars(select(UserSession))).all()[0]
+        session.expires_at = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
+        await db.flush()
+
+        response = await client.post(f"{api}/auth/refresh", json={"refresh_token": token})
+        assert response.status_code == 401
+
+
+# =============================================================================
+# Logout
+# =============================================================================
+class TestLogout:
+    async def test_logout_revokes_session_and_access_token(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        """The access token must die immediately, not at its TTL."""
+        assert (await authed_client.get(f"{api}/auth/me")).status_code == 200
+
+        assert (await authed_client.post(f"{api}/auth/logout")).status_code == 200
+
+        after = await authed_client.get(f"{api}/auth/me")
+        assert after.status_code == 401, "access token still worked after logout"
+
+    async def test_logout_all_devices(
+        self, client: AsyncClient, api: str, db: AsyncSession, user: User, organization
+    ) -> None:
+        first = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        second = await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        second_token = second.json()["access_token"]
+
+        client.headers["Authorization"] = f"Bearer {first.json()['access_token']}"
+        response = await client.post(f"{api}/auth/logout", json={"all_devices": True})
+        assert response.status_code == 200
+
+        # The other device's token must also be dead, via the epoch bump.
+        client.headers["Authorization"] = f"Bearer {second_token}"
+        assert (await client.get(f"{api}/auth/me")).status_code == 401
+
+
+# =============================================================================
+# Password reset and change
+# =============================================================================
+class TestPasswordReset:
+    async def test_forgot_password_never_reveals_existence(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        real = await client.post(f"{api}/auth/forgot-password", json={"email": user.email})
+        fake = await client.post(
+            f"{api}/auth/forgot-password", json={"email": "nobody@example.com"}
+        )
+        assert real.status_code == fake.status_code == 200
+        assert real.json() == fake.json()
+
+    async def test_reset_sets_new_password_and_revokes_sessions(
+        self, client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        await client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+
+        from app.modules.auth.token_store import password_reset_store
+
+        token = await password_reset_store().issue({"user_id": str(user.id)})
+
+        new_password = "Quixotic-Ledger-Verse-77"
+        response = await client.post(
+            f"{api}/auth/reset-password",
+            json={"token": token, "new_password": new_password},
+        )
+        assert response.status_code == 200, response.text
+
+        # Old password no longer works; new one does.
+        client.cookies.clear()
+        assert (
+            await client.post(
+                f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+            )
+        ).status_code == 401
+        assert (
+            await client.post(
+                f"{api}/auth/login", json={"email": user.email, "password": new_password}
+            )
+        ).status_code == 200
+
+    async def test_reset_token_is_single_use(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        from app.modules.auth.token_store import password_reset_store
+
+        token = await password_reset_store().issue({"user_id": str(user.id)})
+
+        assert (
+            await client.post(
+                f"{api}/auth/reset-password",
+                json={"token": token, "new_password": "Quixotic-Ledger-Verse-77"},
+            )
+        ).status_code == 200
+
+        second = await client.post(
+            f"{api}/auth/reset-password",
+            json={"token": token, "new_password": "Another-Valid-Phrase-88"},
+        )
+        assert second.status_code == 401
+
+    async def test_reset_enforces_password_policy(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        from app.modules.auth.token_store import password_reset_store
+
+        token = await password_reset_store().issue({"user_id": str(user.id)})
+        response = await client.post(
+            f"{api}/auth/reset-password", json={"token": token, "new_password": "password123"}
+        )
+        assert response.status_code == 422
+
+
+class TestChangePassword:
+    async def test_requires_correct_current_password(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        response = await authed_client.post(
+            f"{api}/auth/change-password",
+            json={
+                "current_password": "definitely-not-it",
+                "new_password": "Quixotic-Ledger-Verse-77",
+            },
+        )
+        assert response.status_code == 401
+
+    async def test_changes_password_and_revokes_all_sessions(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        response = await authed_client.post(
+            f"{api}/auth/change-password",
+            json={
+                "current_password": TEST_PASSWORD,
+                "new_password": "Quixotic-Ledger-Verse-77",
+            },
+        )
+        assert response.status_code == 200, response.text
+
+        # The caller's own token is invalidated too — a password change signs out
+        # everywhere, including here.
+        assert (await authed_client.get(f"{api}/auth/me")).status_code == 401
+
+    async def test_rejects_reusing_the_same_password(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        response = await authed_client.post(
+            f"{api}/auth/change-password",
+            json={"current_password": TEST_PASSWORD, "new_password": TEST_PASSWORD},
+        )
+        assert response.status_code == 422
+
+
+# =============================================================================
+# Passwordless
+# =============================================================================
+class TestPasswordless:
+    async def test_magic_link_signs_user_in(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        from app.modules.auth.token_store import magic_link_store
+
+        token = await magic_link_store().issue({"user_id": str(user.id), "redirect_path": None})
+
+        response = await client.post(f"{api}/auth/magic-link/verify", json={"token": token})
+        assert response.status_code == 200, response.text
+        assert response.json()["access_token"]
+
+    async def test_magic_link_token_is_single_use(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        from app.modules.auth.token_store import magic_link_store
+
+        token = await magic_link_store().issue({"user_id": str(user.id), "redirect_path": None})
+        assert (
+            await client.post(f"{api}/auth/magic-link/verify", json={"token": token})
+        ).status_code == 200
+        assert (
+            await client.post(f"{api}/auth/magic-link/verify", json={"token": token})
+        ).status_code == 401
+
+    async def test_magic_link_request_is_neutral(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        real = await client.post(f"{api}/auth/magic-link", json={"email": user.email})
+        fake = await client.post(f"{api}/auth/magic-link", json={"email": "nobody@example.com"})
+        assert real.json() == fake.json()
+
+    async def test_magic_link_rejects_absolute_redirect(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        """Open-redirect guard."""
+        response = await client.post(
+            f"{api}/auth/magic-link",
+            json={"email": user.email, "redirect_path": "https://evil.test/steal"},
+        )
+        assert response.status_code == 422
+
+    async def test_magic_link_rejects_protocol_relative_redirect(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        response = await client.post(
+            f"{api}/auth/magic-link",
+            json={"email": user.email, "redirect_path": "//evil.test/steal"},
+        )
+        assert response.status_code == 422
+
+    async def test_otp_signs_user_in(self, client: AsyncClient, api: str, user: User) -> None:
+        code = await otp_store.issue(user.email)
+
+        response = await client.post(
+            f"{api}/auth/otp/verify", json={"email": user.email, "code": code}
+        )
+        assert response.status_code == 200, response.text
+
+    async def test_otp_is_single_use(self, client: AsyncClient, api: str, user: User) -> None:
+        code = await otp_store.issue(user.email)
+        assert (
+            await client.post(f"{api}/auth/otp/verify", json={"email": user.email, "code": code})
+        ).status_code == 200
+        assert (
+            await client.post(f"{api}/auth/otp/verify", json={"email": user.email, "code": code})
+        ).status_code == 401
+
+    async def test_wrong_otp_rejected(self, client: AsyncClient, api: str, user: User) -> None:
+        await otp_store.issue(user.email)
+        response = await client.post(
+            f"{api}/auth/otp/verify", json={"email": user.email, "code": "000000"}
+        )
+        assert response.status_code == 401
+
+    async def test_otp_attempt_budget_destroys_code(self, user: User) -> None:
+        """A 6-digit code must not be brute-forceable.
+
+        Exercised against the store rather than the endpoint: repeated wrong
+        guesses at ``/auth/otp/verify`` also trip the account lockout, which would
+        mask whether the *code* itself was invalidated. Both defences are wanted;
+        this test isolates the OTP budget, and
+        ``TestLogin::test_lockout_after_repeated_failures`` covers the other.
+        """
+        from app.core.redis import RedisKey
+        from app.modules.auth.token_store import MAX_OTP_ATTEMPTS
+
+        code = await otp_store.issue(user.email)
+
+        for _ in range(MAX_OTP_ATTEMPTS):
+            assert await otp_store.verify(user.email, "000000") is False
+
+        # Budget spent: the stored code is destroyed, not merely rejected.
+        assert await get_redis().get(RedisKey.otp(user.email)) is None
+        assert await otp_store.verify(user.email, code) is False
+
+    async def test_otp_brute_force_locks_the_account(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        """Wrong OTP guesses must count toward the same lockout as passwords."""
+        from app.core.config import settings
+
+        await otp_store.issue(user.email)
+
+        for _ in range(settings.max_login_attempts):
+            await client.post(
+                f"{api}/auth/otp/verify", json={"email": user.email, "code": "000000"}
+            )
+
+        locked = await client.post(
+            f"{api}/auth/otp/verify", json={"email": user.email, "code": "000000"}
+        )
+        assert locked.status_code == 423
+
+
+# =============================================================================
+# Two-factor authentication
+# =============================================================================
+class TestTwoFactor:
+    async def test_full_enrolment_and_login_flow(
+        self, authed_client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        import pyotp
+
+        setup = await authed_client.post(f"{api}/auth/2fa/setup")
+        assert setup.status_code == 200, setup.text
+        body = setup.json()
+        assert body["secret"]
+        assert body["provisioning_uri"].startswith("otpauth://totp/")
+        assert body["qr_code"].startswith("data:image/png;base64,")
+
+        # Not yet in force — enrolment is unconfirmed.
+        await db.refresh(user)
+        assert user.is_two_factor_enabled is False
+
+        code = pyotp.TOTP(body["secret"]).now()
+        enable = await authed_client.post(f"{api}/auth/2fa/enable", json={"code": code})
+        assert enable.status_code == 200, enable.text
+        recovery_codes = enable.json()["recovery_codes"]
+        assert len(recovery_codes) == 10
+
+        await db.refresh(user)
+        assert user.is_two_factor_enabled is True
+        # Recovery codes must be stored hashed, never in the clear.
+        assert all(code not in str(user.recovery_code_hashes) for code in recovery_codes)
+
+        # Logging in now requires the second factor.
+        authed_client.headers.pop("Authorization", None)
+        authed_client.cookies.clear()
+        login = await authed_client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        assert login.status_code == 200
+        assert login.json()["two_factor_required"] is True
+        challenge_id = login.json()["challenge_id"]
+
+        completed = await authed_client.post(
+            f"{api}/auth/login/2fa",
+            json={"challenge_id": challenge_id, "code": pyotp.TOTP(body["secret"]).now()},
+        )
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["access_token"]
+
+    async def test_enable_rejects_wrong_code(
+        self, authed_client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        """Self-lockout guard: enrolment must prove the app works."""
+        await authed_client.post(f"{api}/auth/2fa/setup")
+
+        response = await authed_client.post(f"{api}/auth/2fa/enable", json={"code": "000000"})
+        assert response.status_code == 401
+
+        await db.refresh(user)
+        assert user.is_two_factor_enabled is False
+
+    async def test_recovery_code_works_and_is_consumed(
+        self, authed_client: AsyncClient, api: str, db: AsyncSession, user: User
+    ) -> None:
+        import pyotp
+
+        setup = (await authed_client.post(f"{api}/auth/2fa/setup")).json()
+        enable = await authed_client.post(
+            f"{api}/auth/2fa/enable", json={"code": pyotp.TOTP(setup["secret"]).now()}
+        )
+        recovery_code = enable.json()["recovery_codes"][0]
+
+        authed_client.headers.pop("Authorization", None)
+        authed_client.cookies.clear()
+        login = await authed_client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        challenge_id = login.json()["challenge_id"]
+
+        first = await authed_client.post(
+            f"{api}/auth/login/2fa",
+            json={"challenge_id": challenge_id, "code": recovery_code},
+        )
+        assert first.status_code == 200, first.text
+
+        await db.refresh(user)
+        assert len(user.recovery_code_hashes) == 9, "code was not consumed"
+
+        # The same code must not work twice.
+        login2 = await authed_client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        second = await authed_client.post(
+            f"{api}/auth/login/2fa",
+            json={
+                "challenge_id": login2.json()["challenge_id"],
+                "code": recovery_code,
+            },
+        )
+        assert second.status_code == 401
+
+    async def test_totp_code_cannot_be_replayed(
+        self, authed_client: AsyncClient, api: str, user: User
+    ) -> None:
+        """A code stays valid ~90s, so single-use enforcement is required."""
+        import pyotp
+
+        setup = (await authed_client.post(f"{api}/auth/2fa/setup")).json()
+        await authed_client.post(
+            f"{api}/auth/2fa/enable", json={"code": pyotp.TOTP(setup["secret"]).now()}
+        )
+
+        authed_client.headers.pop("Authorization", None)
+        authed_client.cookies.clear()
+
+        code = pyotp.TOTP(setup["secret"]).now()
+
+        login = await authed_client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        first = await authed_client.post(
+            f"{api}/auth/login/2fa",
+            json={"challenge_id": login.json()["challenge_id"], "code": code},
+        )
+        assert first.status_code == 200
+
+        login2 = await authed_client.post(
+            f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
+        replay = await authed_client.post(
+            f"{api}/auth/login/2fa",
+            json={"challenge_id": login2.json()["challenge_id"], "code": code},
+        )
+        assert replay.status_code == 401, "TOTP code was accepted twice"
+
+    async def test_disable_requires_password(self, authed_client: AsyncClient, api: str) -> None:
+        import pyotp
+
+        setup = (await authed_client.post(f"{api}/auth/2fa/setup")).json()
+        await authed_client.post(
+            f"{api}/auth/2fa/enable", json={"code": pyotp.TOTP(setup["secret"]).now()}
+        )
+
+        wrong = await authed_client.post(
+            f"{api}/auth/2fa/disable", json={"password": "not-the-password"}
+        )
+        assert wrong.status_code == 401
+
+        correct = await authed_client.post(
+            f"{api}/auth/2fa/disable", json={"password": TEST_PASSWORD}
+        )
+        assert correct.status_code == 200
+
+
+# =============================================================================
+# Sessions
+# =============================================================================
+class TestSessions:
+    async def test_lists_sessions_and_flags_current(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        response = await authed_client.get(f"{api}/auth/sessions")
+        assert response.status_code == 200, response.text
+        sessions = response.json()
+        assert len(sessions) >= 1
+        assert sum(s["is_current"] for s in sessions) == 1
+
+    async def test_cannot_revoke_another_users_session(
+        self, authed_client: AsyncClient, api: str, db: AsyncSession
+    ) -> None:
+        """Ownership check, not just existence — otherwise ids are guessable."""
+        import datetime as dt2
+
+        from app.core.security import generate_token, hash_password, hash_token
+
+        other = User(
+            email="other@example.com",
+            full_name="Other Person",
+            password_hash=hash_password(TEST_PASSWORD),
+            email_verified_at=dt2.datetime.now(dt2.UTC),
+        )
+        db.add(other)
+        await db.flush()
+
+        foreign_session = UserSession(
+            user_id=other.id,
+            refresh_token_hash=hash_token(generate_token()),
+            expires_at=dt2.datetime.now(dt2.UTC) + dt2.timedelta(days=7),
+        )
+        db.add(foreign_session)
+        await db.flush()
+
+        response = await authed_client.delete(f"{api}/auth/sessions/{foreign_session.id}")
+        assert response.status_code == 404
+
+        await db.refresh(foreign_session)
+        assert foreign_session.revoked_at is None
+
+
+# =============================================================================
+# Public metadata
+# =============================================================================
+class TestPasswordPolicyEndpoint:
+    async def test_served_without_authentication(self, client: AsyncClient, api: str) -> None:
+        """The client's hints must come from the server, not be duplicated."""
+        response = await client.get(f"{api}/auth/password-policy")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["min_length"] == 6
+        assert body["requires_uppercase"] is True
+        assert body["requires_lowercase"] is True
+        assert body["requires_special"] is True
+        assert body["requires_digit"] is False
+        assert body["special_characters"]
+        assert body["rules"]
+
+
+# =============================================================================
+# Error envelope and middleware
+# =============================================================================
+class TestErrorEnvelope:
+    async def test_errors_share_one_shape(self, client: AsyncClient, api: str) -> None:
+        response = await client.get(f"{api}/auth/me")
+        error = response.json()["error"]
+        assert set(error) >= {"code", "message"}
+        assert isinstance(error["code"], str)
+
+    async def test_request_id_is_returned_and_echoed(self, client: AsyncClient, api: str) -> None:
+        response = await client.get(f"{api}/auth/password-policy")
+        assert response.headers.get("X-Request-ID")
+
+        supplied = "test-request-id-12345"
+        echoed = await client.get(f"{api}/auth/password-policy", headers={"X-Request-ID": supplied})
+        assert echoed.headers["X-Request-ID"] == supplied
+
+    async def test_security_headers_present(self, client: AsyncClient, api: str) -> None:
+        response = await client.get(f"{api}/auth/password-policy")
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert "Content-Security-Policy" in response.headers
+
+    @pytest.mark.parametrize("path", ["/health/live", "/health/ready", "/health"])
+    async def test_health_endpoints_are_public(self, client: AsyncClient, path: str) -> None:
+        response = await client.get(path)
+        assert response.status_code == 200, response.text
