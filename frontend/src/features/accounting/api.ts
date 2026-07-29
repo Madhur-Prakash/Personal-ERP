@@ -118,6 +118,8 @@ export interface JournalEntry {
   entry_date: string;
   narration: string;
   reference: string | null;
+  /** Who the money came from or went to. Null on entries made before it was required. */
+  counterparty: string | null;
   status: EntryStatus;
   total_debit: Money;
   total_credit: Money;
@@ -153,6 +155,10 @@ export interface TrialBalanceRow {
    *  activity cancelled out - usually a reversal. */
   gross_debit: Money;
   gross_credit: Money;
+  /** Distinct parties this account received from, or the counter-account where an entry
+   *  named no party. Empty when nothing ever moved that way. */
+  money_from: string[];
+  money_to: string[];
   account_id: string;
   code: string;
   name: string;

@@ -276,6 +276,16 @@ class JournalEntryRead(TimestampedSchema):
     entry_date: dt.date
     narration: str
     reference: str | None
+    #: Who the money came from or went to.
+    #:
+    #: Accepted on create and stored ever since the counterparty column was added, but
+    #: never returned - so every entry recorded who it was with and no screen could show
+    #: it back. A field that is write-only in practice is worse than no field: the user
+    #: typed it, so they reasonably expect to see it.
+    #:
+    #: Still nullable on read, even though billing now requires it on write: entries made
+    #: before the rule changed, and entries posted by other modules, legitimately have none.
+    counterparty: str | None
     status: EntryStatus
     total_debit: Decimal
     total_credit: Decimal
@@ -330,6 +340,16 @@ class TrialBalanceRow(ResponseSchema):
     #: charge was reversed has a story, an untouched account does not.
     gross_debit: Decimal = ZERO
     gross_credit: Decimal = ZERO
+
+    #: Who the money in this account came from, and who it went to.
+    #:
+    #: A row here is one account aggregated over every entry that touched it, so unlike a
+    #: journal entry it has no single counterparty - these are the distinct parties, or the
+    #: counter-accounts where an entry named no party. `money_from` is drawn from entries
+    #: that *debited* this account (value arrived, so it came from elsewhere) and
+    #: `money_to` from entries that credited it.
+    money_from: list[str] = Field(default_factory=list)
+    money_to: list[str] = Field(default_factory=list)
 
     @property
     def nets_to_nil(self) -> bool:

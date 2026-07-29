@@ -179,7 +179,13 @@ class TestRegistrationProvisionsBooks:
         assert body["money_accounts"], "nowhere for the money to land"
 
         recorded = await client.post(
-            f"{api}/billing", json={"direction": "in", "amount": "10", "description": "asx"}
+            f"{api}/billing",
+            json={
+                "direction": "in",
+                "amount": "10",
+                "description": "asx",
+                "party": "A customer",
+            },
         )
         assert recorded.status_code == 201, recorded.text
         assert recorded.json()["entry_number"]
@@ -270,7 +276,12 @@ class TestBillingRepairsExistingOrganizations:
 
         recorded = await client.post(
             f"{api}/billing",
-            json={"direction": "out", "amount": "1500", "description": "Rent"},
+            json={
+                "direction": "out",
+                "amount": "1500",
+                "description": "Rent",
+                "party": "The landlord",
+            },
         )
         assert recorded.status_code == 201, recorded.text
 

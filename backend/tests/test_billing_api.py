@@ -234,6 +234,7 @@ class TestRecording:
                 "direction": "out",
                 "amount": "500",
                 "description": "Miscategorised",
+                "party": "Someone",
                 "category_id": income["id"],
             },
         )
@@ -464,6 +465,7 @@ class TestAddingCategoriesAndAccounts:
                 "direction": "in",
                 "amount": "2500",
                 "description": "Online order",
+                "party": "Someone",
                 "money_account_id": account_id,
             },
         )
@@ -498,6 +500,7 @@ class TestAddingCategoriesAndAccounts:
                 "direction": "out",
                 "amount": "1200",
                 "description": "Delivery run",
+                "party": "Someone",
                 "category_id": category.json()["id"],
                 "money_account_id": account.json()["id"],
             },
@@ -536,6 +539,94 @@ class TestParty:
             party="Airtel",
         )
         assert entry["party"] == "Airtel"
+
+    async def test_the_trial_balance_names_who_each_account_dealt_with(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The From/To columns on the trial balance.
+
+        A row there is one account aggregated over every entry that touched it, so it has
+        no single counterparty the way an entry does - the server collects the distinct
+        ones. Money *in* debits the cash account, so the payer belongs on that account's
+        "from" side and on the income account's "to" side.
+        """
+        await record(
+            authed_client,
+            api,
+            direction="in",
+            amount="500",
+            description="Sale",
+            party="Ramesh",
+        )
+        await record(
+            authed_client,
+            api,
+            direction="out",
+            amount="200",
+            description="Broadband",
+            party="Airtel",
+        )
+
+        rows = (await authed_client.get(f"{api}/reports/trial-balance")).json()["rows"]
+        by_name = {row["name"]: row for row in rows}
+
+        cash = next(row for name, row in by_name.items() if "Cash" in name)
+        # Ramesh paid in; Airtel was paid out of the same account.
+        assert "Ramesh" in cash["money_from"]
+        assert "Airtel" in cash["money_to"]
+
+        # And from the other side of each entry.
+        income = next(row for name, row in by_name.items() if row["account_type"] == "income")
+        assert "Ramesh" in income["money_to"]
+        expense = next(row for name, row in by_name.items() if row["account_type"] == "expense")
+        assert "Airtel" in expense["money_from"]
+
+        # A side that saw no movement stays empty rather than borrowing a name from the
+        # other side, which would assert a transaction that never happened.
+        assert income["money_from"] == []
+
+    async def test_the_trial_balance_falls_back_to_the_counter_account(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Entries predating the required-party rule still have to name something.
+
+        Posted through the journal directly, which is the path that legitimately has no
+        counterparty - so the account on the other side of the entry stands in.
+        """
+        # One billing entry first, purely to provision the fiscal calendar: this fixture
+        # deliberately has no fiscal year, because billing creates one on demand and a
+        # direct journal post does not.
+        await record(
+            authed_client, api, direction="in", amount="1", description="Opening", party="Ramesh"
+        )
+
+        accounts = (await authed_client.get(f"{api}/accounts")).json()
+        cash = next(a for a in accounts if a["system_key"] == "cash")
+        capital = next(a for a in accounts if a["system_key"] == "owner_capital")
+        journals = (await authed_client.get(f"{api}/journals")).json()
+        general = next(j for j in journals if j["journal_type"] == "general")
+
+        posted = await authed_client.post(
+            f"{api}/journal-entries",
+            json={
+                "journal_id": general["id"],
+                "entry_date": dt.date.today().isoformat(),
+                "narration": "Owner puts money in",
+                "post": True,
+                "lines": [
+                    {"account_id": cash["id"], "debit": "1000"},
+                    {"account_id": capital["id"], "credit": "1000"},
+                ],
+            },
+        )
+        assert posted.status_code == 201, posted.text
+
+        rows = (await authed_client.get(f"{api}/reports/trial-balance")).json()["rows"]
+        cash_row = next(row for row in rows if row["code"] == cash["code"])
+        # The journal entry named no party, so its counter-account stands in - alongside
+        # the party from the billing entry, which did name one.
+        assert capital["name"] in cash_row["money_from"]
+        assert "Ramesh" in cash_row["money_from"]
 
     async def test_is_required(
         self, authed_client: AsyncClient, api: str, books: Organization
@@ -599,15 +690,6 @@ class TestParty:
         hit = (await authed_client.get(f"{api}/billing", params={"q": "airtel"})).json()
         assert hit["meta"]["total_items"] == 1
         assert hit["items"][0]["party"] == "Airtel"
-
-    async def test_blank_is_stored_as_null_not_an_empty_string(
-        self, authed_client: AsyncClient, api: str, books: Organization
-    ) -> None:
-        """So "has a party" is a single check rather than two."""
-        entry = await record(
-            authed_client, api, direction="out", amount="50", description="Chai", party="   "
-        )
-        assert entry["party"] is None
 
 
 class TestListing:

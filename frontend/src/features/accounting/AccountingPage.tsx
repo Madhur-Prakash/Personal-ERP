@@ -176,6 +176,24 @@ function ChartOfAccounts() {
 // ---------------------------------------------------------------------------
 // Journal entries
 // ---------------------------------------------------------------------------
+function Parties({ names }: { names: string[] }) {
+  if (names.length === 0) return <span className="text-content-muted">-</span>;
+
+  const [first, ...rest] = names;
+  return (
+    <div className="min-w-0">
+      <p className="text-content truncate text-[12px]">{first}</p>
+      {rest.length > 0 && (
+        // Named in the tooltip rather than listed: a cell that grows with the number of
+        // parties would set the row height for the whole table.
+        <p className="text-content-muted truncate text-[11px]" title={rest.join(', ')}>
+          and {rest.length} more
+        </p>
+      )}
+    </div>
+  );
+}
+
 function JournalEntries() {
   const [page, setPage] = useState(1);
   const { data, isLoading } = useQuery({
@@ -340,23 +358,16 @@ function TrialBalanceReport() {
         />
         <DataTable
           columns={[
-            {
-              header: 'Code',
-              cell: (row) => <span className="font-mono text-[12px]">{row.code}</span>,
-            },
+            // {
+            //   header: 'Code',
+            //   cell: (row) => <span className="font-mono text-[12px]">{row.code}</span>,
+            // },
             {
               header: 'Account',
               cell: (row) => (
                 <div>
                   <span className="text-content">{row.name}</span>
                   {netsToNil(row) && (
-                    // Stated here rather than in the amount columns. Putting the
-                    // cancelled ₹100 in the Debit column made that column add up to
-                    // more than its own total, which is worse than hiding it: a figure
-                    // in an amount column that is not in the total is simply wrong.
-                    // At the table's own 13px rather than 11px. A line whose entire job
-                    // is to explain something should not be set as fine print - and the
-                    // icon carries the meaning without relying on colour alone.
                     <p className="text-warning mt-1 flex items-start gap-1.5 text-[13px]">
                       <Undo2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                       <span>
@@ -367,6 +378,16 @@ function TrialBalanceReport() {
                   )}
                 </div>
               ),
+            },
+            {
+              header: 'Money from',
+              hideOnMobile: true,
+              cell: (row) => <Parties names={row.money_from} />,
+            },
+            {
+              header: 'Money to',
+              hideOnMobile: true,
+              cell: (row) => <Parties names={row.money_to} />,
             },
             {
               header: 'Debit',
