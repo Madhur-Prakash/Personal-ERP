@@ -34,7 +34,7 @@ logs/
 # ---- Env / secrets ----
 .env
 .env.*
-!.env.example
+!.env.sample
 *.pem
 *.key
 !frontend/**/*.key.ts
