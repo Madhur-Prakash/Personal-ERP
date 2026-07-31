@@ -39,6 +39,7 @@ dependencies = [
     # "Asia/Kolkata" without this. Organizations store IANA zones and fiscal
     # periods depend on them, so it is a real runtime dependency, not dev-only.
     "tzdata>=2025.2",
+    "minio>=7.2.20",
 ]
 
 [project.optional-dependencies]
@@ -106,6 +107,11 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "S105", "S106"]  # asserts and dummy credentials are the point
 "app/core/config.py" = ["S104"]       # 0.0.0.0 bind is intentional inside a container
+# T20 bans `print` so nothing in the application bypasses logifyx. A command-line check is
+# the exception rather than a violation: its output *is* its interface - read by a person or
+# a CI step, not collected as logs - and routing it through a logger would put a timestamp
+# and a level in front of every line of a report meant to be read.
+"scripts/*" = ["T201"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

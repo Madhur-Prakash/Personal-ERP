@@ -45,7 +45,7 @@ from app.modules.audit.service import AuditService
 from app.modules.ocr.engines import UnsupportedDocumentError, recognise, sniff_format
 from app.modules.ocr.extraction import HIGH_CONFIDENCE, ExtractedDocument, extract_document
 from app.modules.ocr.models import Document, DocumentKind, DocumentStatus
-from app.modules.ocr.storage import DocumentStore, relative_path_for, sha256_of
+from app.modules.ocr.storage import document_store, relative_path_for, sha256_of
 from app.modules.organizations.clock import organization_today
 from app.modules.purchasing.models import Bill, Supplier
 from app.modules.purchasing.receiving import BillService
@@ -84,13 +84,23 @@ class DocumentService:
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        self.store = DocumentStore()
+        self.store = document_store()
         self.audit = AuditService(session)
         self.bills = BillService(session)
 
     # -----------------------------------------------------------------------
     # Reads
     # -----------------------------------------------------------------------
+    async def _by_digest(self, organization_id: uuid.UUID, digest: str) -> Document | None:
+        """The document with these exact bytes, if this organization already has one.
+
+        Shared by the pre-upload check and the lost-race recovery so the two cannot
+        disagree about what "already uploaded" means - and so the unique index and this
+        query keep matching filters.
+        """
+        query = self._base_query(organization_id).where(Document.sha256 == digest)
+        return (await self.session.execute(query)).scalar_one_or_none()
+
     def _base_query(self, organization_id: uuid.UUID) -> Select[tuple[Document]]:
         return (
             select(Document)
@@ -238,8 +248,28 @@ class DocumentService:
 
         digest = sha256_of(data)
 
-        existing_query = self._base_query(organization_id).where(Document.sha256 == digest)
-        existing = (await self.session.execute(existing_query)).scalar_one_or_none()
+        # Serialise uploads of these exact bytes for this organization, so the check below
+        # is authoritative rather than merely probably-right.
+        #
+        # Without it the check and the insert are two statements with a gap: a
+        # double-clicked upload button puts two requests in that gap, both find nothing,
+        # both insert, and one hits `uq_document_org_sha256`. **A failed flush cannot be
+        # recovered from** - SQLAlchemy marks the session as needing rollback, so every
+        # statement after it fails too, including the query that would find the row the
+        # winner just made. The loser's request therefore dies with an unexplained
+        # database error instead of the "you already uploaded this" answer that is sitting
+        # right there. Preventing the conflict is the only fix; catching it is too late.
+        #
+        # A transaction-scoped advisory lock, so the second request waits for the first to
+        # commit and then finds its row. Keyed on the digest, so it never blocks uploads of
+        # different files.
+        await self.session.execute(
+            select(
+                func.pg_advisory_xact_lock(func.hashtextextended(f"{organization_id}:{digest}", 0))
+            )
+        )
+
+        existing = await self._by_digest(organization_id, digest)
         if existing is not None:
             log.info(
                 "duplicate upload short-circuited",
@@ -266,11 +296,16 @@ class DocumentService:
         try:
             await self.session.flush()
         except IntegrityError as exc:
-            # Two concurrent uploads of the same file. The unique index is the
-            # authority; losing that race is not an error worth explaining.
+            # Unreachable for a duplicate file - the lock above settles those before the
+            # insert. Kept for any other constraint, and it can only report: the flush has
+            # already left the session unusable, so there is nothing left to query.
+            log.warning(
+                "document insert violated a constraint",
+                extra={"sha256": digest, "error": str(getattr(exc.orig, "constraint_name", exc))},
+            )
             raise ConflictError(
-                "That file is already being uploaded. Refresh the document list.",
-                code="document_upload_in_progress",
+                "That document could not be stored.",
+                code="document_upload_conflict",
             ) from exc
 
         await self._recognise_and_extract(document)

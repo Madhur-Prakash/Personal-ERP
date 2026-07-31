@@ -24,7 +24,7 @@ import hashlib
 import os
 import tempfile
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import anyio.to_thread
 
@@ -32,6 +32,9 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.modules.ocr.engines import DocumentFormat, DocumentTooLargeError
+
+if TYPE_CHECKING:
+    from app.modules.ocr.object_storage import ObjectDocumentStore
 
 log = get_logger(__name__)
 
@@ -209,3 +212,21 @@ async def read_within_limit(stream: object, *, limit: int | None = None) -> byte
         chunks.append(chunk)
 
     return b"".join(chunks)
+
+
+def document_store() -> DocumentStore | ObjectDocumentStore:
+    """The blob backend this deployment uses.
+
+    Chosen here and nowhere else, so no caller has to know or care. S3-compatible object
+    storage when its credentials are configured, the local filesystem otherwise - see
+    :data:`app.core.config.Settings.document_storage` for why that is derived from the
+    credentials rather than set by a separate switch.
+
+    Imported lazily. The object-storage module imports its client, and a deployment keeping
+    blobs on disk should not need it installed to start.
+    """
+    if settings.document_storage == "object":
+        from app.modules.ocr.object_storage import ObjectDocumentStore
+
+        return ObjectDocumentStore()
+    return DocumentStore()

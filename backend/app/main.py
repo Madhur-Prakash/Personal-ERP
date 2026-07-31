@@ -55,6 +55,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             "environment": str(settings.environment),
             "debug": settings.debug,
             "docs": settings.docs_url,
+            # Where uploaded documents go, named at startup because it is derived from
+            # whether credentials happen to be configured - and settings are read once per
+            # process, so an `.env` edited after the server started has no effect until it
+            # restarts. Without this line the only symptom is files quietly landing
+            # somewhere other than where the operator just configured, which is a long way
+            # to travel for "it needed a restart".
+            "documents": settings.document_storage,
+            "document_target": (
+                f"{settings.minio_endpoint}/{settings.minio_bucket}"
+                if settings.document_storage == "object"
+                else str(settings.upload_dir)
+            ),
         },
     )
 

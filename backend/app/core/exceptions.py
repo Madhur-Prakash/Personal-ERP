@@ -305,9 +305,23 @@ async def _integrity_error_handler(request: Request, exc: Exception) -> JSONResp
     """
     assert isinstance(exc, IntegrityError)  # noqa: S101
 
-    log.warning("database integrity violation", extra={"path": request.url.path}, exc_info=True)
-
     detail = str(getattr(exc.orig, "detail", "") or exc.orig or "")
+    # The constraint name, logged as its own field.
+    #
+    # `exc_info` alone was not enough: a 409 from this handler said only "database
+    # integrity violation", and working out *which* constraint fired meant reading the
+    # model, the migration, and every write in the request. asyncpg carries the name on
+    # the exception, so there is no reason to make anyone guess.
+    constraint = getattr(exc.orig, "constraint_name", None) or getattr(exc.orig, "constraint", None)
+    log.warning(
+        "database integrity violation",
+        extra={
+            "path": request.url.path,
+            "constraint": str(constraint) if constraint else "unknown",
+            "detail": detail[:500],
+        },
+        exc_info=True,
+    )
     if "unique" in detail.lower() or "duplicate key" in detail.lower():
         return ConflictError("A record with these details already exists").to_response()
     if "foreign key" in detail.lower():

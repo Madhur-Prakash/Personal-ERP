@@ -153,6 +153,12 @@ rollback: ## Roll back the most recent migration
 .PHONY: db-check
 db-check: ## Verify the models and migrations agree (no drift)
 	$(BACKEND) uv run alembic check
+# `alembic check` alone is not enough: autogenerate does not compare CHECK expressions, so
+# adding a value to a StrEnum is invisible to it. It reported no pending operations while
+# audit_log.action was missing 49 of 95 values - and because every write records an audit row
+# inside its own transaction, uploads, invoices and stock adjustments all failed with a 409
+# against a schema the tests could not exercise. They build their schema from the models.
+	$(BACKEND) uv run python scripts/check_schema_drift.py
 
 .PHONY: db-history
 db-history: ## Show the migration history

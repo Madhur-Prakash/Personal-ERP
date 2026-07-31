@@ -67,6 +67,32 @@ services:
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
     networks: [personalerp]
 
+  # Object storage for uploaded documents. S3-compatible, so the same code works
+  # against MinIO here and against real S3 or any compatible provider in production.
+  #
+  # **No volume, deliberately** - see the note in the backend's storage module. Documents
+  # live only as long as the container, which is right for development and wrong for
+  # anything else: `docker compose down` takes every uploaded file with it. Add
+  # `volumes: [minio-data:/data]` and a `minio-data:` entry below to keep them.
+  minio:
+    image: minio/minio
+    container_name: personalerp-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-yourpassword}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      # The backend creates its bucket on first use, so "is it up" is the whole check.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [personalerp]
+
   backend:
     build:
       context: ./backend

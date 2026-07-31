@@ -635,9 +635,22 @@ function FilePreview({ document }: { document: Document }) {
           document.page_count ? ` · ${document.page_count} page(s)` : ''
         }`}
         action={
-          <Button variant="ghost" onClick={() => setShowText((value) => !value)}>
-            {showText ? 'Show file' : 'Show text'}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={() => setShowText((value) => !value)}>
+              {showText ? 'Show file' : 'Show text'}
+            </Button>
+            {/* A browser that declines to inline the file must not leave the reviewer with
+                nothing: opened at the top level it is the browser's own viewer, exactly as
+                if the file had been downloaded and double-clicked. */}
+            {url !== null && (
+              <Button
+                variant="ghost"
+                onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+              >
+                Open in a new tab
+              </Button>
+            )}
+          </div>
         }
       />
       <CardBody className="pt-0">
@@ -648,13 +661,22 @@ function FilePreview({ document }: { document: Document }) {
         ) : url === null ? (
           <p className="text-content-muted text-[13px]">Loading preview…</p>
         ) : document.content_type === 'application/pdf' ? (
-          // Sandboxed: these bytes were uploaded by a stranger. The server also
-          // sends `Content-Disposition: attachment` and a `sandbox` CSP, so this
-          // is the third of three independent barriers.
+          // No `sandbox=""` here, deliberately - it used to be, and Chrome refused to
+          // render the frame at all: its built-in PDF viewer cannot run with every
+          // permission denied, so the preview showed "This page has been blocked by
+          // Chrome" for every PDF.
+          //
+          // Removing it costs less than it looks like, because the barriers that matter are
+          // server-side and unaffected: the media type is the one *sniffed from the bytes*
+          // at upload rather than the one the client announced, so this branch is only
+          // reached for something that really is a PDF and cannot be reinterpreted as HTML;
+          // the response also carries `Content-Disposition: attachment`, `nosniff`, and its
+          // own `sandbox` CSP. The framed document is a PDF rendered by Chrome's own
+          // process-isolated viewer, which has no access to this page's DOM or storage.
           <iframe
             src={url}
             title={document.original_filename}
-            sandbox=""
+            referrerPolicy="no-referrer"
             className="border-border h-96 w-full rounded-lg border"
           />
         ) : (

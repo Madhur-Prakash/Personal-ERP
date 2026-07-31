@@ -19,9 +19,11 @@ import io
 import uuid
 from collections.abc import Iterator
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,12 +57,24 @@ def isolated_upload_dir(tmp_path) -> Iterator[None]:
     asymmetry is worth naming - soft-deleting a document deliberately keeps its blob,
     so nothing in production cleans up after a test either.
     """
-    original = settings.upload_dir
+    original_dir = settings.upload_dir
     settings.upload_dir = tmp_path / "uploads"
+
+    # And force the *local* backend for the duration.
+    #
+    # `document_storage` is derived from whether object-storage credentials are configured,
+    # and a developer's `.env` has them - so without this the suite would upload every
+    # fixture document into the real bucket and leave it there. A test that depends on a
+    # running MinIO is a test that fails for reasons that have nothing to do with the code.
+    original_secret = settings.minio_secret_key
+    settings.minio_secret_key = SecretStr("")
+    assert settings.document_storage == "local", "storage must be local under test"
+
     try:
         yield
     finally:
-        settings.upload_dir = original
+        settings.upload_dir = original_dir
+        settings.minio_secret_key = original_secret
 
 
 def invoice_pdf(
@@ -196,6 +210,108 @@ class TestUpload:
 
         listing = await authed_client.get(f"{api}/documents")
         assert listing.json()["meta"]["total_items"] == 1
+
+    async def test_accepts_a_pdf_that_is_not_an_invoice(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        """A readable PDF with none of the fields an invoice has.
+
+        People try things. A resume, a bank statement, a scanned letter - the extractor
+        should find nothing and say so, not fail the upload: the file is stored, readable,
+        and simply has no invoice in it. Reported as a 409 integrity violation from
+        production, which is what this reproduces.
+        """
+        buffer = io.BytesIO()
+        _write_simple_pdf(
+            buffer,
+            "\n".join(
+                [
+                    "MADHUR PRAKASH MANGAL",
+                    "Software Engineer",
+                    "madhurprakash2005@gmail.com | +91 98765 43210",
+                    "EXPERIENCE",
+                    "Built a self-hosted ERP with double-entry accounting.",
+                    "EDUCATION",
+                    "B.Tech Computer Science, 2023 - 2027",
+                    "SKILLS",
+                    "Python, TypeScript, PostgreSQL",
+                ]
+            ),
+        )
+
+        response = await authed_client.post(
+            f"{api}/documents",
+            files={"file": ("resume.pdf", buffer.getvalue(), "application/pdf")},
+        )
+        assert response.status_code == 201, response.text
+
+        body = response.json()
+        document = body["document"]
+        # Stored and read, with nothing found - which is the honest outcome.
+        assert document["status"] in {"extracted", "needs_review"}
+        assert document["extracted_invoice_number"] is None
+        assert document["extracted_supplier_gstin"] is None
+        assert body["duplicate"] is None
+
+        # And it appears in the queue rather than vanishing.
+        listing = await authed_client.get(f"{api}/documents")
+        assert any(row["id"] == document["id"] for row in listing.json()["items"])
+
+    async def test_the_same_non_invoice_twice_is_still_deduplicated(
+        self, authed_client: AsyncClient, api: str
+    ) -> None:
+        """The path the production failure took: upload, then upload again."""
+        buffer = io.BytesIO()
+        _write_simple_pdf(buffer, "MADHUR PRAKASH MANGAL\nSoftware Engineer\nSKILLS\nPython")
+        data = buffer.getvalue()
+
+        first = await authed_client.post(
+            f"{api}/documents", files={"file": ("resume.pdf", data, "application/pdf")}
+        )
+        assert first.status_code == 201, first.text
+
+        second = await authed_client.post(
+            f"{api}/documents", files={"file": ("resume.pdf", data, "application/pdf")}
+        )
+        assert second.status_code == 201, second.text
+        assert second.json()["already_uploaded"] is True
+
+    async def test_a_second_upload_of_the_same_bytes_never_inserts_twice(
+        self, authed_client: AsyncClient, api: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What the advisory lock buys, and what happens if the check is ever bypassed.
+
+        Two uploads of the same file used to be able to interleave: check, check, insert,
+        insert - and the loser hit `uq_document_org_sha256`. A failed flush cannot be
+        recovered from, so that request died with "A database error occurred" instead of the
+        "you already uploaded this" answer the endpoint is built to give.
+
+        The lock closes the gap, which makes the failure unreachable by the normal path.
+        This forces it anyway - by making the pre-check miss - and asserts the remaining
+        guard reports a conflict rather than a 503, because an upload that collides is a
+        conflict about a document, not a broken database.
+        """
+        data = invoice_pdf()
+        await upload(authed_client, api, data)
+
+        from app.modules.ocr.service import DocumentService
+
+        async def blind(self: DocumentService, organization_id: uuid.UUID, digest: str) -> Any:
+            return None
+
+        monkeypatch.setattr(DocumentService, "_by_digest", blind)
+        response = await authed_client.post(
+            f"{api}/documents",
+            files={"file": ("invoice.pdf", data, "application/pdf")},
+        )
+        monkeypatch.undo()
+
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "document_upload_conflict"
+        # Nothing is queried after this. The flush that failed leaves *this* session
+        # unusable, and these tests share one session across requests where production
+        # gives each request its own - so a follow-up call here would be testing the
+        # fixture. That the insert did not land is guaranteed by the aborted transaction.
 
     async def test_rejects_a_file_that_is_not_a_document(
         self, authed_client: AsyncClient, api: str
