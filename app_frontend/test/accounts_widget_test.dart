@@ -178,6 +178,33 @@ void main() {
       // distinction is the difference between an asset and a debt.
       expect(find.text('Credit'), findsOneWidget);
     });
+
+    testWidgets('every card row offers to archive or restore it', (
+      WidgetTester tester,
+    ) async {
+      // The control the user reported missing. Asserted on the rendered label rather than
+      // on the widget type, because "the button exists in the tree" and "the button is
+      // visible on the row" are different claims and only the second one matters.
+      await pump(tester, const AccountsPanel(options: options));
+      expect(find.text('Archive'), findsOneWidget);
+
+      await tester.tap(find.text('Show archived'));
+      await tester.pumpAndSettle();
+
+      // With the archived debit card now listed, one row offers Archive and the other
+      // Restore.
+      expect(find.text('Archive'), findsOneWidget);
+      expect(find.text('Restore'), findsOneWidget);
+    });
+
+    testWidgets('both add actions are offered', (WidgetTester tester) async {
+      // Matching the web accounts page. Adding an account was previously reachable only
+      // from the recording form, so the accounts screen was the one place you could not
+      // make one.
+      await pump(tester, const AccountsPanel(options: options));
+      expect(find.text('Add an account'), findsOneWidget);
+      expect(find.text('Add a card'), findsOneWidget);
+    });
   });
 
   group('AccountsPanel standalone', () {

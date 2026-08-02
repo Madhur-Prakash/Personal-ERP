@@ -12,7 +12,7 @@
  * permanently blank.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CreditCard, Landmark, Plus, RotateCcw, Wallet } from 'lucide-react';
+import { Archive, CreditCard, Landmark, Plus, RotateCcw, Wallet } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -347,15 +347,23 @@ function CardRow({ card }: { card: PaymentCard }) {
       <Badge tone={card.kind === 'credit' ? 'warning' : 'info'}>
         {card.kind === 'credit' ? 'Credit' : 'Debit'}
       </Badge>
-      <Button variant="ghost" onClick={() => toggle.mutate()} disabled={toggle.isPending}>
+      <Button
+        variant="ghost"
+        onClick={() => toggle.mutate()}
+        disabled={toggle.isPending}
+        title={
+          card.is_active
+            ? 'Stop offering this card. Past entries still name it.'
+            : 'Offer this card again when recording a payment.'
+        }
+      >
         {card.is_active ? (
-          'Archive'
+          <Archive className="h-3.5 w-3.5" aria-hidden />
         ) : (
-          <>
-            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-            Restore
-          </>
+          <RotateCcw className="h-3.5 w-3.5" aria-hidden />
         )}
+        {card.is_active ? 'Archive' : 'Restore'}
+        <span className="sr-only"> {card.label}</span>
       </Button>
     </li>
   );

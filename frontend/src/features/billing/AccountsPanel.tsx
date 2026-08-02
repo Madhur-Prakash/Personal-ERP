@@ -16,7 +16,7 @@
  *    bank balance, because the number means the opposite thing.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeftRight, CreditCard, Landmark, RotateCcw, Wallet } from 'lucide-react';
+import { Archive, ArrowLeftRight, CreditCard, Landmark, RotateCcw, Wallet } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -489,25 +489,28 @@ function CardRow({ card }: { card: Card }) {
       <Badge tone={card.kind === 'credit' ? 'warning' : 'info'}>
         {card.kind === 'credit' ? 'Credit' : 'Debit'}
       </Badge>
-      <button
-        type="button"
+      {/* A real Button, not a bare muted `<button>`. As plain grey text this read as a
+          caption rather than a control - and it sits beside a "Show archived" toggle, so the
+          screen appeared to offer archived cards with no way to archive one. Restore was
+          worse still: an unlabelled icon with the word only in a screen-reader span. */}
+      <Button
+        variant="ghost"
         disabled={toggle.isPending}
         onClick={() => toggle.mutate()}
-        title={card.is_active ? 'Archive this card' : 'Restore this card'}
-        className="text-content-muted hover:text-content text-[12px] disabled:opacity-40"
+        title={
+          card.is_active
+            ? 'Stop offering this card. Past entries still name it.'
+            : 'Offer this card again when recording a payment.'
+        }
       >
         {card.is_active ? (
-          <>
-            <span aria-hidden>Archive</span>
-            <span className="sr-only">Archive {card.label}</span>
-          </>
+          <Archive className="h-3.5 w-3.5" aria-hidden />
         ) : (
-          <>
-            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-            <span className="sr-only">Restore {card.label}</span>
-          </>
+          <RotateCcw className="h-3.5 w-3.5" aria-hidden />
         )}
-      </button>
+        {card.is_active ? 'Archive' : 'Restore'}
+        <span className="sr-only"> {card.label}</span>
+      </Button>
     </li>
   );
 }

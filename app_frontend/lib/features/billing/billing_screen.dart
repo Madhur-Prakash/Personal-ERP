@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -724,136 +723,15 @@ class _EntryFormState extends ConsumerState<_EntryForm> {
     }
   }
 
-  /// Add a place money can sit.
+  /// Add a place money can sit, and select it.
   ///
-  /// The seeded chart has one till and one current account, which covers a business with
-  /// exactly those. A second bank, a UPI wallet, a card-settlement account, or a partner's
-  /// petty cash are all ordinary - and without this, money that moved through a wallet
-  /// gets filed as cash and no balance matches anything real.
-  /// **The bank fields appear only for a bank account** and vanish for cash in hand
-  /// rather than being disabled. Cash has no bank, no number and no holder, so the
-  /// server ignores them - and a field that will never become usable explains that
-  /// worse than no field at all.
+  /// The dialog itself lives in `accounts_panel.dart`, because the accounts screen offers
+  /// the same thing from its own button. The only part specific to this form is the last
+  /// line: having just created an account, the picker should already be pointing at it.
   Future<void> _addMoneyAccount() async {
-    final TextEditingController name = TextEditingController();
-    final TextEditingController bank = TextEditingController();
-    final TextEditingController holder = TextEditingController();
-    final TextEditingController number = TextEditingController();
-    MoneyKind kind = MoneyKind.bank;
-
-    void disposeAll() {
-      name.dispose();
-      bank.dispose();
-      holder.dispose();
-      number.dispose();
-    }
-
-    final bool? confirmed = await showAppModal<bool>(
-      context: context,
-      title: 'New account',
-      description: "A second bank, a UPI wallet, a partner's petty cash.",
-      builder: (BuildContext context) => StatefulBuilder(
-        builder: (BuildContext context, void Function(void Function()) rebuild) => Column(
-          spacing: 12,
-          children: <Widget>[
-            AppInput(
-              label: 'Account name',
-              controller: name,
-              autofocus: true,
-              required: true,
-              placeholder: 'Name of the account',
-              hint: 'What you call it on this screen.',
-            ),
-            AppSelect(
-              label: 'Behaves like',
-              value: kind.wire,
-              options: const <SelectOption>[
-                SelectOption(value: 'bank', label: 'A bank account'),
-                SelectOption(value: 'cash', label: 'Cash in hand'),
-              ],
-              onChanged: (String next) => rebuild(
-                () => kind = next == 'cash' ? MoneyKind.cash : MoneyKind.bank,
-              ),
-              // The distinction is how it gets checked, not what it is called: cash
-              // against a physical count, a bank against a statement. A UPI wallet is a
-              // bank.
-              hint: kind == MoneyKind.bank
-                  ? 'Checked against a statement'
-                  : 'Checked by counting',
-            ),
-            if (kind == MoneyKind.bank) ...<Widget>[
-              AppInput(
-                label: 'Bank name',
-                controller: bank,
-                placeholder: 'HDFC Bank',
-                hint: 'Optional.',
-              ),
-              AppInput(
-                label: 'Account holder',
-                controller: holder,
-                placeholder: 'Jhon Doe',
-                hint: 'Optional - whose account it is.',
-              ),
-              AppInput(
-                label: 'Account number',
-                controller: number,
-                placeholder: '50100123454321',
-                keyboardType: TextInputType.number,
-                inputFormatters: <TextInputFormatter>[
-                  FilteringTextInputFormatter.allow(RegExp(r'[\d\s-]')),
-                ],
-                textStyle: const TextStyle(fontFeatures: tabularFigures),
-                hint:
-                    'Optional. Stored encrypted; lists show the last four digits.',
-              ),
-            ],
-          ],
-        ),
-      ),
-      footer: (BuildContext context) => <Widget>[
-        AppButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          variant: AppButtonVariant.ghost,
-          label: 'Cancel',
-        ),
-        AppButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          label: 'Add',
-        ),
-      ],
-    );
-
-    if (confirmed != true || name.text.trim().isEmpty) {
-      disposeAll();
-      return;
-    }
-
-    final bool isBank = kind == MoneyKind.bank;
-    try {
-      final MoneyAccount created = await ref
-          .read(billingApiProvider)
-          .createMoneyAccount(
-            name.text.trim(),
-            kind,
-            // Left out entirely for cash, so the request says what it means rather
-            // than sending three blanks for the server to decide to ignore.
-            bankName: isBank ? bank.text.trim() : null,
-            holderName: isBank ? holder.text.trim() : null,
-            accountNumber: isBank ? number.text.trim() : null,
-          );
-      ref.invalidate(billingOptionsProvider);
-      ref.invalidate(accountsProvider);
-      if (!mounted) return;
-      setState(() => _accountKey = created.key);
-      context.toastSuccess(
-        'Added "${created.name}"',
-        description: created.bankName,
-      );
-    } catch (error) {
-      if (mounted) context.toastApiError(error, 'Could not add the account');
-    } finally {
-      name.dispose();
-    }
+    final MoneyAccount? created = await showAddMoneyAccountDialog(context, ref);
+    if (created == null || !mounted) return;
+    setState(() => _accountKey = created.key);
   }
 }
 

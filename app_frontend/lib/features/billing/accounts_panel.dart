@@ -72,6 +72,156 @@ List<SelectGroup> moneyAccountGroups(List<MoneyAccount> accounts) {
 MoneyAccount? accountForKey(List<MoneyAccount> accounts, String key) =>
     accounts.where((MoneyAccount a) => a.key == key).firstOrNull;
 
+/// Ask for a new place money can sit, create it, and return it.
+///
+/// The seeded chart gives one till and one current account, which covers a business with
+/// exactly those. A second bank, a UPI wallet, a card-settlement account, or a partner's
+/// petty cash are all ordinary - and without this the only choices are the seeded two, so
+/// money that moved through a wallet gets filed as cash and no balance matches anything
+/// real.
+///
+/// **The bank fields appear only for a bank account** and vanish for cash in hand rather
+/// than being disabled. Cash has no bank, no number and no holder, so the server ignores
+/// them, and a field that will never become usable explains that worse than no field at all.
+///
+/// A top-level function rather than a method, because two places offer this: the "+ Add
+/// account" link on the recording form, which also selects what it just made, and the "Add
+/// an account" button on the accounts panel, which does not. Returns null if the dialog was
+/// dismissed or the request failed - the caller decides whether that matters.
+Future<MoneyAccount?> showAddMoneyAccountDialog(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  final TextEditingController name = TextEditingController();
+  final TextEditingController bank = TextEditingController();
+  final TextEditingController holder = TextEditingController();
+  final TextEditingController number = TextEditingController();
+  MoneyKind kind = MoneyKind.bank;
+
+  void disposeAll() {
+    name.dispose();
+    bank.dispose();
+    holder.dispose();
+    number.dispose();
+  }
+
+  try {
+    final bool? confirmed = await showAppModal<bool>(
+      context: context,
+      title: 'New account',
+      description: "A second bank, a UPI wallet, a partner's petty cash.",
+      builder: (BuildContext context) => StatefulBuilder(
+        builder: (BuildContext context, void Function(void Function()) rebuild) => Column(
+          spacing: 12,
+          children: <Widget>[
+            AppInput(
+              label: 'Account name',
+              controller: name,
+              autofocus: true,
+              required: true,
+              placeholder: 'Name of the account',
+              hint: 'What you call it on this screen.',
+            ),
+            AppSelect(
+              label: 'Behaves like',
+              value: kind.wire,
+              options: const <SelectOption>[
+                SelectOption(value: 'bank', label: 'A bank account'),
+                SelectOption(value: 'cash', label: 'Cash in hand'),
+              ],
+              onChanged: (String next) => rebuild(
+                () => kind = next == 'cash' ? MoneyKind.cash : MoneyKind.bank,
+              ),
+              // The distinction is how it gets checked, not what it is called: cash
+              // against a physical count, a bank against a statement. A UPI wallet is
+              // a bank.
+              hint: kind == MoneyKind.bank
+                  ? 'Checked against a statement'
+                  : 'Checked by counting',
+            ),
+            if (kind == MoneyKind.bank) ...<Widget>[
+              AppInput(
+                label: 'Bank name',
+                controller: bank,
+                placeholder: 'HDFC Bank',
+                hint: 'Optional.',
+              ),
+              AppInput(
+                label: 'Account holder',
+                controller: holder,
+                placeholder: 'Jhon Doe',
+                hint: 'Optional - whose account it is.',
+              ),
+              AppInput(
+                label: 'Account number',
+                controller: number,
+                placeholder: '50100123454321',
+                keyboardType: TextInputType.number,
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.allow(RegExp(r'[\d\s-]')),
+                ],
+                textStyle: const TextStyle(fontFeatures: tabularFigures),
+                hint:
+                    'Optional. Stored encrypted; lists show the last four digits.',
+              ),
+            ],
+          ],
+        ),
+      ),
+      footer: (BuildContext context) => <Widget>[
+        AppButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          variant: AppButtonVariant.ghost,
+          label: 'Cancel',
+        ),
+        AppButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          label: 'Add',
+        ),
+      ],
+    );
+
+    // Checked here rather than only in the dialog: the modal's "Add" button is always
+    // live, so this is what stops a nameless account becoming a request.
+    if (confirmed != true || name.text.trim().isEmpty) return null;
+
+    final bool isBank = kind == MoneyKind.bank;
+    try {
+      final MoneyAccount created = await ref
+          .read(billingApiProvider)
+          .createMoneyAccount(
+            name.text.trim(),
+            kind,
+            // Left out entirely for cash, so the request says what it means rather than
+            // sending three blanks for the server to decide to ignore.
+            bankName: isBank ? bank.text.trim() : null,
+            holderName: isBank ? holder.text.trim() : null,
+            accountNumber: isBank ? number.text.trim() : null,
+          );
+
+      ref.invalidate(billingOptionsProvider);
+      ref.invalidate(accountsProvider);
+
+      if (context.mounted) {
+        context.toastSuccess(
+          'Added "${created.name}"',
+          description: created.bankName,
+        );
+      }
+      return created;
+    } catch (error) {
+      if (context.mounted) {
+        context.toastApiError(error, 'Could not add the account');
+      }
+      return null;
+    }
+  } finally {
+    // Every controller, on every path. This used to dispose only `name` on the success
+    // path, which leaked the three bank fields each time an account was added.
+    disposeAll();
+  }
+}
+
 // =============================================================================
 // Transfer
 // =============================================================================
@@ -360,10 +510,27 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
                 ? null
                 : 'Where your money sits, and the cards you spend on. These are the '
                       'choices offered when recording a payment.',
-            action: AppButton(
-              onPressed: _addCard,
-              variant: AppButtonVariant.secondary,
-              label: 'Add a card',
+            // Both actions, matching the web accounts page. Adding an account used to be
+            // reachable only from the "+ Add account" link on the recording form, which
+            // meant the screen dedicated to accounts was the one place you could not make
+            // one.
+            action: Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: 8,
+              children: <Widget>[
+                AppButton(
+                  onPressed: () => showAddMoneyAccountDialog(context, ref),
+                  variant: AppButtonVariant.secondary,
+                  leftIcon: LucideIcons.plus,
+                  label: 'Add an account',
+                ),
+                AppButton(
+                  onPressed: _addCard,
+                  variant: AppButtonVariant.secondary,
+                  leftIcon: LucideIcons.creditCard,
+                  label: 'Add a card',
+                ),
+              ],
             ),
           ),
           CardBody(
@@ -987,14 +1154,25 @@ class _CardRowState extends ConsumerState<_CardRow> {
                   ? BadgeTone.warning
                   : BadgeTone.info,
             ),
-            // An AppButton rather than an AppTextLink, whose `onTap` is non-nullable
-            // and so has no disabled state. Double-firing an archive is harmless, but
-            // a control that stays live while its request is in flight looks broken.
+            // `ghost` with an icon, not `link`. As a bare text link this read as a caption
+            // rather than a control - it sat next to a "Show archived" toggle, so the
+            // screen appeared to offer archived cards with no way to archive one. A box on
+            // hover and a matching icon make it look like the button it is.
+            //
+            // An AppButton rather than an AppTextLink, whose `onTap` is non-nullable and so
+            // has no disabled state. Double-firing an archive is harmless, but a control
+            // that stays live while its request is in flight looks broken.
             AppButton(
               onPressed: _busy ? null : _toggle,
-              variant: AppButtonVariant.link,
+              variant: AppButtonVariant.ghost,
               size: AppButtonSize.sm,
+              leftIcon: card.isActive
+                  ? LucideIcons.archive
+                  : LucideIcons.rotateCcw,
               label: card.isActive ? 'Archive' : 'Restore',
+              tooltip: card.isActive
+                  ? 'Stop offering this card. Past entries still name it.'
+                  : 'Offer this card again when recording a payment.',
               semanticLabel: card.isActive
                   ? 'Archive ${card.label}'
                   : 'Restore ${card.label}',

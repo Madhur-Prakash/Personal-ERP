@@ -163,7 +163,8 @@ void main() {
 
   group('initialsOf', () {
     test('takes the first and last initials', () {
-      expect(initialsOf('Jhon Doe'), 'PS');
+      expect(initialsOf('Jhon Doe'), 'JD');
+      // Three names still yields two letters: the first and the *last*, not the first two.
       expect(initialsOf('Priya Anand Sharma'), 'PS');
     });
 
