@@ -26,6 +26,10 @@ void main() {
     name: 'Primary Bank Account',
     isDefault: false,
     kind: MoneyAccountKind.bank,
+    code: '1120',
+    bankName: 'HDFC Bank',
+    holderName: 'Priya Sharma',
+    accountNumberLast4: '4321',
   );
   // The same account under a second name - what a debit card is.
   const MoneyAccount debitCard = MoneyAccount(
@@ -116,7 +120,11 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Accounts & cards'), findsOneWidget);
       expect(find.text('Cash on Hand'), findsOneWidget);
-      expect(find.text('Primary Bank Account'), findsWidgets);
+      // `textContaining`, not `text`: the name is rendered as rich text so the last four
+      // digits can be dimmed beside it, and an exact match would miss the whole span.
+      expect(find.textContaining('Primary Bank Account'), findsWidgets);
+      // The bank and holder take the place of the account code on the second line.
+      expect(find.text('HDFC Bank · Priya Sharma'), findsOneWidget);
 
       // The debit card must NOT appear among the cash and bank accounts, even though it
       // carries a bank account's id - it belongs in the card list.
@@ -169,6 +177,37 @@ void main() {
       // The badge is the only thing on this row saying which of the two it is, and the
       // distinction is the difference between an asset and a debt.
       expect(find.text('Credit'), findsOneWidget);
+    });
+  });
+
+  group('AccountsPanel standalone', () {
+    testWidgets('drops its own heading, keeps the action', (
+      WidgetTester tester,
+    ) async {
+      // On the Accounts screen the page header has already said "Accounts & cards", so
+      // the card must not say it again - but "Add a card" is the point of that header row
+      // and has to survive.
+      await pump(
+        tester,
+        const AccountsPanel(options: options, standalone: true),
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Accounts & cards'), findsNothing);
+      expect(find.text('Add a card'), findsOneWidget);
+      expect(find.text('Cash on Hand'), findsOneWidget);
+    });
+
+    testWidgets('an account with details shows them under its name', (
+      WidgetTester tester,
+    ) async {
+      await pump(
+        tester,
+        const AccountsPanel(options: options, standalone: true),
+      );
+      // The bank and holder replace the account code on the second line, and the tail of
+      // the number sits beside the name.
+      expect(find.textContaining('HDFC Bank'), findsWidgets);
     });
   });
 

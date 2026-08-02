@@ -58,6 +58,14 @@ const List<NavSection> navSections = <NavSection>[
         icon: LucideIcons.indianRupee,
         permission: 'journal:read',
       ),
+      // Straight after Billing, because it is the setup that screen depends on: the
+      // accounts and cards it offers when recording a payment.
+      NavItem(
+        label: 'Accounts',
+        path: '/accounts',
+        icon: LucideIcons.landmark,
+        permission: 'account:read',
+      ),
       NavItem(
         label: 'Accounting',
         path: '/accounting',

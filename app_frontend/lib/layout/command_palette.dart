@@ -120,6 +120,12 @@ class _CommandPaletteState extends State<_CommandPalette> {
             ),
           if (auth.can('account:read'))
             _Command(
+              icon: LucideIcons.landmark,
+              label: 'Accounts & cards',
+              run: () => _run(() => router.go('/accounts')),
+            ),
+          if (auth.can('account:read'))
+            _Command(
               icon: LucideIcons.wallet,
               label: 'Accounting',
               run: () => _run(() => router.go('/accounting')),

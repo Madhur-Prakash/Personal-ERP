@@ -191,6 +191,16 @@ class _AppButtonState extends State<AppButton> {
       ),
     );
 
+    // Hover only. **There must be no second tap recognizer below the `InkWell`**, and
+    // that is the whole reason the press-state callbacks live on the `InkWell` rather
+    // than on a `GestureDetector` here, which is where they used to be.
+    //
+    // Two competing tap recognizers enter the same gesture arena, and the deeper one
+    // wins. So a `GestureDetector` nested inside the `InkWell` - even one that only
+    // declares `onTapDown`/`onTapUp` to animate the press - claimed every tap, and
+    // `InkWell.onTap` never fired. `onPressed` was silently dead on every button in the
+    // app: nothing logged, nothing threw, and the button still animated on press, which
+    // is what made it look like the callbacks were the broken part.
     Widget button = MouseRegion(
       cursor: _enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hovered = true),
@@ -198,36 +208,35 @@ class _AppButtonState extends State<AppButton> {
         _hovered = false;
         _pressed = false;
       }),
-      child: GestureDetector(
-        onTapDown: _enabled ? (_) => setState(() => _pressed = true) : null,
-        onTapUp: _enabled ? (_) => setState(() => _pressed = false) : null,
-        onTapCancel: _enabled ? () => setState(() => _pressed = false) : null,
-        child: Focus(
-          canRequestFocus: _enabled,
-          child: Builder(
-            builder: (BuildContext context) {
-              final bool focused = Focus.of(context).hasPrimaryFocus;
-              return Container(
-                decoration: focused
-                    ? BoxDecoration(
-                        // `focus-visible:ring-2 ring-offset-2` - drawn as an outer
-                        // ring so it never eats into the button's own box.
-                        borderRadius: BorderRadius.circular(radius + 2),
-                        border: Border.all(color: t.ring, width: 2),
-                      )
-                    : null,
-                padding: focused ? const EdgeInsets.all(2) : EdgeInsets.zero,
-                child: pressable,
-              );
-            },
-          ),
+      child: Focus(
+        canRequestFocus: _enabled,
+        child: Builder(
+          builder: (BuildContext context) {
+            final bool focused = Focus.of(context).hasPrimaryFocus;
+            return Container(
+              decoration: focused
+                  ? BoxDecoration(
+                      // `focus-visible:ring-2 ring-offset-2` - drawn as an outer
+                      // ring so it never eats into the button's own box.
+                      borderRadius: BorderRadius.circular(radius + 2),
+                      border: Border.all(color: t.ring, width: 2),
+                    )
+                  : null,
+              padding: focused ? const EdgeInsets.all(2) : EdgeInsets.zero,
+              child: pressable,
+            );
+          },
         ),
       ),
     );
 
-    // A gesture detector alone would not answer to Enter or Space, which is how a
-    // keyboard user presses a button. `InkWell` under a transparent Material gives
-    // that plus the activation semantics, without Material's own painting.
+    // `InkWell` rather than a bare gesture detector because it answers to Enter and
+    // Space, which is how a keyboard user presses a button, and carries the activation
+    // semantics with it. Under a transparent `Material` so none of Material's own
+    // painting shows through.
+    //
+    // It owns *all* tap handling: the callback and the press animation both. One
+    // recognizer means nothing can outrank it - see the note above.
     button = Semantics(
       button: true,
       enabled: _enabled,
@@ -237,6 +246,9 @@ class _AppButtonState extends State<AppButton> {
         borderRadius: BorderRadius.circular(radius),
         child: InkWell(
           onTap: _enabled ? widget.onPressed : null,
+          onTapDown: _enabled ? (_) => setState(() => _pressed = true) : null,
+          onTapUp: _enabled ? (_) => setState(() => _pressed = false) : null,
+          onTapCancel: _enabled ? () => setState(() => _pressed = false) : null,
           borderRadius: BorderRadius.circular(radius),
           splashColor: isLink ? Colors.transparent : null,
           highlightColor: Colors.transparent,

@@ -29,30 +29,21 @@ import { NumberInput } from '@/components/ui/NumberInput';
 import { Select } from '@/components/ui/Select';
 import { transferableAccounts } from '@/features/billing/accountPicker';
 import {
+  NETWORK_LABELS,
+  isPlausibleCardNumber,
+  normaliseCardNumber,
+  passesLuhn,
+} from '@/features/billing/cards';
+import {
   type BillingOptions,
   type Card,
   type CardKind,
-  type CardNetwork,
   type MoneyAccount,
   billingApi,
 } from '@/features/billing/api';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { formatMoney } from '@/lib/format';
-
-const NETWORK_LABELS: Record<CardNetwork, string> = {
-  visa: 'Visa',
-  mastercard: 'Mastercard',
-  rupay: 'RuPay',
-  amex: 'Amex',
-  discover: 'Discover',
-  diners: 'Diners Club',
-  jcb: 'JCB',
-  maestro: 'Maestro',
-  // Not "Unknown": the card works perfectly well, the software just does not claim to
-  // recognise the scheme from its leading digits.
-  other: 'Card',
-};
 
 // ---------------------------------------------------------------------------
 // Transfer
@@ -522,29 +513,6 @@ function CardRow({ card }: { card: Card }) {
 }
 
 /**
- * The Luhn check digit, so a typo is caught before a round trip.
- *
- * A duplicate of the server's check, and deliberately so: the server remains the
- * authority, this only saves someone a request to be told they mistyped one digit. Safe to
- * duplicate because Luhn is a fixed algorithm that cannot drift - unlike the network
- * detection, which is a table of issuer ranges and is left entirely to the server.
- */
-function passesLuhn(digits: string): boolean {
-  if (!/^\d+$/.test(digits)) return false;
-  let total = 0;
-  const parity = digits.length % 2;
-  for (let index = 0; index < digits.length; index += 1) {
-    let value = Number(digits[index]);
-    if (index % 2 === parity) {
-      value *= 2;
-      if (value > 9) value -= 9;
-    }
-    total += value;
-  }
-  return total % 10 === 0;
-}
-
-/**
  * Register a card from its number.
  *
  * **The number is never stored, here or on the server.** It is held in state while the
@@ -568,8 +536,8 @@ function AddCardForm({
   const [holderName, setHolderName] = useState('');
   const [bankId, setBankId] = useState(banks[0]?.id ?? '');
 
-  const digits = number.replace(/[\s-]/g, '');
-  const longEnough = digits.length >= 12;
+  const digits = normaliseCardNumber(number);
+  const longEnough = isPlausibleCardNumber(digits);
   const numberLooksWrong = longEnough && !passesLuhn(digits);
 
   const add = useMutation({

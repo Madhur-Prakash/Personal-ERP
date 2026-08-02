@@ -8,6 +8,7 @@ import 'features/auth/login_screen.dart';
 import 'features/auth/password_screens.dart';
 import 'features/auth/passwordless_screens.dart';
 import 'features/auth/register_screen.dart';
+import 'features/billing/accounts_screen.dart';
 import 'features/billing/billing_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/documents/documents_screen.dart';
@@ -78,6 +79,7 @@ const Set<String> _signInPaths = <String>{
 /// same underlying capability would be security theatre.
 const Map<String, String> _requiredPermissions = <String, String>{
   '/billing': 'journal:read',
+  '/accounts': 'account:read',
   '/accounting': 'account:read',
   '/invoices': 'invoice:read',
   '/inventory': 'inventory:read',
@@ -178,6 +180,7 @@ final Provider<GoRouter> routerProvider = Provider<GoRouter>((Ref ref) {
         routes: <RouteBase>[
           GoRoute(path: '/', builder: (_, _) => const DashboardScreen()),
           GoRoute(path: '/billing', builder: (_, _) => const BillingScreen()),
+          GoRoute(path: '/accounts', builder: (_, _) => const AccountsScreen()),
           GoRoute(
             path: '/accounting',
             // The selected tab lives in the URL, not in widget state, so it survives a

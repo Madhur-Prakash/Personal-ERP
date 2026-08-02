@@ -305,7 +305,21 @@ export interface AuditEntry {
   resource_id: string | null;
   ip_address: string | null;
   request_id: string | null;
-  changes: Record<string, { before: unknown; after: unknown }>;
+  /**
+   * What changed, **in more than one shape** - which is why the value is `unknown`
+   * rather than the `{ before, after }` pair it used to claim to be.
+   *
+   * Most writers go through the audit service's `diff()` and produce exactly that pair
+   * per field. Others - document upload, re-extract, confirm-into-bill - use this column
+   * as a flat snapshot instead: `{ status: 'uploaded', duplicate_of: null }`.
+   *
+   * Typing it as the pair was a lie the compiler could not catch, and it crashed the
+   * audit page outright: `change.before` on a `null` value throws, so one uploaded
+   * document made the whole page unrenderable. Audit rows are immutable and those
+   * entries are already written, so the reader has to cope with both shapes forever -
+   * `unknown` is what forces it to. Narrow with `asFieldDiff` in `AuditPage`.
+   */
+  changes: Record<string, unknown>;
   context: Record<string, unknown>;
   created_at: string;
 }

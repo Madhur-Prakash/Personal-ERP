@@ -29,6 +29,30 @@ function renderDiffValue(value: unknown): string {
   return '-';
 }
 
+/**
+ * A before/after pair, or `null` if this entry is not one.
+ *
+ * **`changes` is not uniformly shaped, and assuming it was crashed this page.** Writers
+ * that go through the audit service's `diff()` produce `{ field: { before, after } }`.
+ * Document upload, re-extract, and confirm-into-bill instead use the column as a flat
+ * snapshot - `{ status: 'uploaded', duplicate_of: null }` - so reading `.before` off the
+ * value threw `Cannot read properties of null` and took the entire page down with it. One
+ * uploaded document was enough.
+ *
+ * Both shapes are handled rather than one being migrated, because audit rows are immutable
+ * by design: the mixed-shape entries already in the table cannot be rewritten, so any
+ * reader has to cope with them for as long as the log is kept.
+ *
+ * The `in` checks matter - a snapshot value could legitimately be an object (a nested
+ * payload), and that must render as a value rather than as an empty "- → -" diff.
+ */
+function asFieldDiff(value: unknown): { before: unknown; after: unknown } | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  if (!('before' in value) && !('after' in value)) return null;
+  const pair = value as { before?: unknown; after?: unknown };
+  return { before: pair.before ?? null, after: pair.after ?? null };
+}
+
 const SEVERITY_TONE: Record<AuditSeverity, BadgeTone> = {
   info: 'neutral',
   warning: 'warning',
@@ -166,20 +190,34 @@ export function AuditPage() {
                           changed" is usually the reason someone opened this. */}
                       {Object.keys(entry.changes).length > 0 && (
                         <dl className="border-border mt-2 space-y-1 border-l-2 pl-3">
-                          {Object.entries(entry.changes).map(([field, change]) => (
-                            <div key={field} className="flex flex-wrap gap-1.5 text-[11px]">
-                              <dt className="text-content-secondary font-medium">{field}:</dt>
-                              <dd className="text-content-muted">
-                                <span className="line-through">
-                                  {renderDiffValue(change.before)}
-                                </span>
-                                {' → '}
-                                <span className="text-content">
-                                  {renderDiffValue(change.after)}
-                                </span>
-                              </dd>
-                            </div>
-                          ))}
+                          {Object.entries(entry.changes).map(([field, value]) => {
+                            const diff = asFieldDiff(value);
+                            return (
+                              <div key={field} className="flex flex-wrap gap-1.5 text-[11px]">
+                                <dt className="text-content-secondary font-medium">{field}:</dt>
+                                <dd className="text-content-muted">
+                                  {diff ? (
+                                    <>
+                                      <span className="line-through">
+                                        {renderDiffValue(diff.before)}
+                                      </span>
+                                      {' → '}
+                                      <span className="text-content">
+                                        {renderDiffValue(diff.after)}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    /* A snapshot rather than a change: showing it as
+                                       "- → value" would invent a previous value that was
+                                       never recorded. */
+                                    <span className="text-content">
+                                      {renderDiffValue(value)}
+                                    </span>
+                                  )}
+                                </dd>
+                              </div>
+                            );
+                          })}
                         </dl>
                       )}
                     </div>

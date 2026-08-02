@@ -301,11 +301,50 @@ class AuditActor {
   );
 }
 
+/// One line of an audit entry's detail, in **either** of the two shapes the column holds.
+///
+/// Most writers go through the backend's `diff()` and produce a before/after pair. Others -
+/// document upload, re-extract, confirm-into-bill - use the same column as a flat snapshot,
+/// so the value is a bare string, number, or null rather than a pair.
+///
+/// Both are kept because audit rows are immutable: entries of both shapes are already in the
+/// table and cannot be rewritten. This used to drop the snapshots on the floor - the guard
+/// was `if (entry.value is Map)` - which meant an uploaded document showed an audit row with
+/// no detail under it at all. Silently losing the record is a poor outcome for an audit log.
+/// (The web client had the same misreading and fared worse: it crashed the page.)
 class AuditChange {
-  const AuditChange({this.before, this.after});
+  /// A field that changed from one value to another.
+  const AuditChange.diff({this.before, this.after})
+    : value = null,
+      isDiff = true;
+
+  /// A recorded fact with no previous value - a snapshot, not a change.
+  const AuditChange.snapshot(this.value)
+    : before = null,
+      after = null,
+      isDiff = false;
 
   final Object? before;
   final Object? after;
+
+  /// Set only when [isDiff] is false.
+  final Object? value;
+
+  /// Whether to render this as "old → new" or as a single value. Rendering a snapshot as
+  /// "- → value" would invent a previous value that was never recorded.
+  final bool isDiff;
+}
+
+/// Read one entry of the `changes` map, whichever shape it is in.
+///
+/// A pair only counts as a diff if it actually carries `before` or `after`. That check is
+/// not pedantry: a snapshot value can legitimately be a nested object, and treating one as a
+/// diff would show an empty "- → -" where there is real content to display.
+AuditChange _readChange(Object? raw) {
+  if (raw is Map && (raw.containsKey('before') || raw.containsKey('after'))) {
+    return AuditChange.diff(before: raw['before'], after: raw['after']);
+  }
+  return AuditChange.snapshot(raw);
 }
 
 class AuditEntry {
@@ -345,11 +384,7 @@ class AuditEntry {
       ipAddress: strOrNull(json, 'ip_address'),
       changes: <String, AuditChange>{
         for (final MapEntry<String, dynamic> entry in raw.entries)
-          if (entry.value is Map)
-            entry.key: AuditChange(
-              before: (entry.value as Map<dynamic, dynamic>)['before'],
-              after: (entry.value as Map<dynamic, dynamic>)['after'],
-            ),
+          entry.key: _readChange(entry.value),
       },
       createdAt: str(json, 'created_at'),
     );

@@ -313,9 +313,20 @@ class _TransferFormState extends ConsumerState<TransferForm> {
 /// Placed below the day book on purpose: it is setup, and the screen's job is
 /// recording.
 class AccountsPanel extends ConsumerStatefulWidget {
-  const AccountsPanel({super.key, required this.options});
+  const AccountsPanel({
+    super.key,
+    required this.options,
+    this.standalone = false,
+  });
 
   final BillingOptions options;
+
+  /// True when this *is* the screen rather than a panel at the foot of one.
+  ///
+  /// Only suppresses the card's own title and description, because the page header has
+  /// already said both and repeating them reads as a bug. The "Add a card" action stays
+  /// either way - it is the point of the header, not decoration.
+  final bool standalone;
 
   @override
   ConsumerState<AccountsPanel> createState() => _AccountsPanelState();
@@ -344,10 +355,11 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           CardHeader(
-            title: 'Accounts & cards',
-            description:
-                'Where your money sits, and the cards you spend on. These are the '
-                'choices offered when recording a payment.',
+            title: widget.standalone ? null : 'Accounts & cards',
+            description: widget.standalone
+                ? null
+                : 'Where your money sits, and the cards you spend on. These are the '
+                      'choices offered when recording a payment.',
             action: AppButton(
               onPressed: _addCard,
               variant: AppButtonVariant.secondary,

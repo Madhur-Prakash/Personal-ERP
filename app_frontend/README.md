@@ -208,11 +208,23 @@ tips, the reversal-not-delete flow, the exact wording of every explanation - is 
 flutter test
 ```
 
-82 unit and widget tests plus one integration test.
+92 unit and widget tests plus one integration test.
 
 The unit tests cover what must not be approximately right: the money path (exact decimal
 formatting, `BigInt` summation, scale-insensitive comparison), the OKLCH conversion, the
 date rules, the decimal input filter, and the card-number checks.
+
+`test/interaction_test.dart` asserts that pressing a button calls its callback. That sounds
+too trivial to test, and it is there because its absence let a bug ship in which **every
+button in the app was dead**. `AppButton` wrapped its content in an `InkWell` carrying
+`onPressed`, and *inside* that put a `GestureDetector` declaring `onTapDown`/`onTapUp` to
+animate the press. Two tap recognizers, one gesture arena, and the deeper one wins - so the
+`GestureDetector` claimed every tap and `InkWell.onTap` never fired.
+
+Nothing logged, nothing threw, `flutter analyze` was clean, and the button still animated
+under the cursor, so it read as "the callbacks are broken" rather than "the tap is stolen two
+widgets down". **All tap handling now lives on the `InkWell` alone** - callback and press
+animation both. Adding a gesture detector beneath it would reintroduce this exactly.
 
 `test/accounts_widget_test.dart` pumps the accounts panel and the transfer form in both
 themes and at a narrow window. That is a narrow question - *does it build* - and it has its

@@ -36,7 +36,7 @@ sales, purchasing and inventory, document intelligence, and analytics; see
 | RBAC - 42 permissions, 5 seeded roles, custom roles, per-member overrides | Done |
 | Immutable audit trail with field-level diffs | Done |
 | **Billing** - record money in and out with just a date, an amount, and a note. No customer or supplier needed; posts real double-entry, so the dashboard and every report update immediately | Done |
-| Accounts & cards - add bank accounts with their bank, holder and account number (**encrypted; no card PAN is stored at all**), register credit and debit cards from the card number, choose the account on any payment, and transfer between your own accounts | Done |
+| Accounts & cards - a screen of their own on web and desktop: add bank accounts with their bank, holder and account number (**encrypted; no card PAN is stored at all**), register credit and debit cards from the card number, choose the account on any payment, and transfer between your own accounts | Done |
 | Double-entry accounting - chart of accounts, journals, period locks, trial balance, P&L, balance sheet, cash flow | Done |
 | Sales - customers, leads, quotations, orders, invoices with GST, payment allocation, receivables ageing | Done |
 | Purchasing & inventory - suppliers, POs, goods receipt, weighted-average valuation, bills, input GST, payables ageing | Done |
@@ -114,8 +114,13 @@ which is also what an auditor expects to find. The original stays on the record.
 
 #### Accounts and cards
 
-The same screen manages where money sits. Two decisions there are worth stating outright,
-because both are easy to get wrong and expensive to get wrong:
+**Accounts** is its own entry in the sidebar, on both the website and the desktop app: every
+bank account, cash box and card in one list, with every detail editable in place - which
+bank, whose name, the account number. The same panel also sits at the foot of Billing, so a
+card can be added without leaving the screen you were recording on.
+
+Two decisions there are worth stating outright, because both are easy to get wrong and
+expensive to get wrong:
 
 **No card number is ever stored.** Adding a card asks for its number, checks the Luhn
 digit, works out the scheme and the last four digits, and throws the rest away. There is

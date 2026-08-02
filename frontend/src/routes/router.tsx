@@ -19,6 +19,7 @@ import { RegisterPage } from '@/features/auth/RegisterPage';
 import { AccountingPage } from '@/features/accounting/AccountingPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { AnalyticsPage } from '@/features/analytics/AnalyticsPage';
+import { AccountsPage } from '@/features/billing/AccountsPage';
 import { BillingPage } from '@/features/billing/BillingPage';
 import { DocumentsPage } from '@/features/documents/DocumentsPage';
 import { InventoryPage } from '@/features/inventory/InventoryPage';
@@ -250,6 +251,16 @@ const billingRoute = createRoute({
   component: BillingPage,
 });
 
+// Accounts and cards. Guarded on `account:read` rather than `journal:read`, because this
+// screen is about the chart of accounts rather than about the day book - and the account
+// number behind it is the most sensitive thing either screen shows.
+const accountsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/accounts',
+  beforeLoad: requirePermission('account:read'),
+  component: AccountsPage,
+});
+
 const accountingRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/accounting',
@@ -359,6 +370,7 @@ const routeTree = rootRoute.addChildren([
     auditRoute,
     settingsRoute,
     billingRoute,
+    accountsRoute,
     accountingRoute,
     invoicesRoute,
     inventoryRoute,

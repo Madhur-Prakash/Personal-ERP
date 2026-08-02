@@ -295,17 +295,26 @@ class _AuditRowState extends State<_AuditRow> {
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
-                                  TextSpan(
-                                    text: _renderValue(change.value.before),
-                                    style: const TextStyle(
-                                      decoration: TextDecoration.lineThrough,
+                                  // A snapshot is printed as one value. Showing it as
+                                  // "- → value" would invent a previous value that was
+                                  // never recorded - see [AuditChange].
+                                  if (change.value.isDiff) ...<InlineSpan>[
+                                    TextSpan(
+                                      text: _renderValue(change.value.before),
+                                      style: const TextStyle(
+                                        decoration: TextDecoration.lineThrough,
+                                      ),
                                     ),
-                                  ),
-                                  const TextSpan(text: ' → '),
-                                  TextSpan(
-                                    text: _renderValue(change.value.after),
-                                    style: TextStyle(color: t.content),
-                                  ),
+                                    const TextSpan(text: ' → '),
+                                    TextSpan(
+                                      text: _renderValue(change.value.after),
+                                      style: TextStyle(color: t.content),
+                                    ),
+                                  ] else
+                                    TextSpan(
+                                      text: _renderValue(change.value.value),
+                                      style: TextStyle(color: t.content),
+                                    ),
                                 ],
                               ),
                               style: TextStyle(

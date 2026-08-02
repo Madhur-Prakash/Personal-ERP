@@ -14,6 +14,7 @@ import {
   Boxes,
   FileText,
   IndianRupee,
+  Landmark,
   LayoutDashboard,
   ScanLine,
   Settings,
@@ -50,6 +51,9 @@ export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       // First: for most users this is the only screen they open.
       { label: 'Billing', to: '/billing', icon: IndianRupee, permission: 'journal:read' },
+      // Straight after Billing, because it is the setup that screen depends on: the
+      // accounts and cards it offers when recording a payment.
+      { label: 'Accounts', to: '/accounts', icon: Landmark, permission: 'account:read' },
       { label: 'Accounting', to: '/accounting', icon: Wallet, permission: 'account:read' },
       { label: 'Sales', to: '/invoices', icon: FileText, permission: 'invoice:read' },
       { label: 'Inventory', to: '/inventory', icon: Boxes, permission: 'inventory:read' },
