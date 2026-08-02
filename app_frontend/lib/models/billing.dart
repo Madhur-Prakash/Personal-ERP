@@ -137,6 +137,8 @@ class MoneyAccount {
     this.bankName,
     this.holderName,
     this.accountNumberLast4,
+    this.isActive = true,
+    this.canArchive = false,
   });
 
   final String id;
@@ -169,6 +171,17 @@ class MoneyAccount {
   /// accounts apart has no use for the rest. Fetch [BankDetails] for that.
   final String? accountNumberLast4;
 
+  /// False once archived. An archived account never reaches a payment picker.
+  final bool isActive;
+
+  /// Whether archiving is permitted at all.
+  ///
+  /// **A capability flag from the server, not a rule to re-derive here.** A seeded
+  /// account - "Cash on Hand", "Primary Bank Account" - cannot be deactivated,
+  /// because later modules post to it by role. Offering the control anyway would
+  /// make a request that always fails.
+  final bool canArchive;
+
   bool get isCard => cardId != null;
 
   /// A stable, unique identity for one entry in a picker.
@@ -200,6 +213,10 @@ class MoneyAccount {
     bankName: strOrNull(json, 'bank_name'),
     holderName: strOrNull(json, 'holder_name'),
     accountNumberLast4: strOrNull(json, 'account_number_last4'),
+    isActive: json['is_active'] is bool ? json['is_active'] as bool : true,
+    canArchive: json['can_archive'] is bool
+        ? json['can_archive'] as bool
+        : false,
   );
 }
 

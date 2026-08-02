@@ -69,7 +69,7 @@ from app.modules.accounting.service import (
     FiscalCalendarService,
     PostingService,
 )
-from app.modules.billing.cards import inspect_card_number
+from app.modules.billing.cards import MAX_DIGITS, MIN_DIGITS, inspect_card_number
 from app.modules.billing.models import (
     BankAccountDetail,
     CardKind,
@@ -994,11 +994,14 @@ class BillingService:
 
         identity = inspect_card_number(card_number)
         if identity is None:
-            # Deliberately does not echo what was submitted. The 422 handler forwards
-            # only messages, but a message quoting the digits would defeat that.
+            # Shape only - the wrong number of digits, or something that is not digits. A
+            # failed check digit is *not* refused here; see `CardIdentity.checksum_ok`.
+            #
+            # Deliberately does not echo what was submitted. The 422 handler forwards only
+            # messages, but a message quoting the digits would defeat that.
             raise ValidationError(
-                "That does not look like a card number. Check the digits and try again - "
-                "only the last four are kept.",
+                f"A card number is {MIN_DIGITS} to {MAX_DIGITS} digits. Check what you "
+                "entered and try again - only the last four are kept.",
                 details={"fields": {"card_number": "Enter a valid card number"}},
             )
 
@@ -1057,6 +1060,10 @@ class BillingService:
                 "kind": kind.value,
                 "network": identity.network.value,
                 "last4": identity.last4,
+                # A verdict about the number, never a piece of it. Worth recording: if a
+                # user later says the last four do not match their card, this line says
+                # whether the number they typed was self-consistent at the time.
+                "checksum_ok": identity.checksum_ok,
             },
         )
         return Card(

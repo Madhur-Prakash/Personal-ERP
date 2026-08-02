@@ -13,7 +13,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, CreditCard, Landmark, Plus, RotateCcw, Wallet } from 'lucide-react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/Badge';
@@ -54,8 +54,7 @@ export function AccountsPage() {
   // for archived accounts. `options` deliberately never carries them.
   const { data: allAccounts, isLoading } = useQuery({
     queryKey: ['money-accounts', showArchived],
-    queryFn: () =>
-      billingApi.moneyAccounts(showArchived ? { include_archived: true } : undefined),
+    queryFn: () => billingApi.moneyAccounts(showArchived ? { include_archived: true } : undefined),
   });
 
   const { data: cards } = useQuery({
@@ -75,6 +74,14 @@ export function AccountsPage() {
   // Only an active account can back a new debit card.
   const banks = accounts.filter((account) => account.kind === 'bank' && account.is_active);
   const listed = cards ?? options?.cards ?? [];
+
+  // Archived things go in their own group rather than sitting among the live ones with a
+  // badge. Interleaved, "Archived" reads as a property of one row you have to notice; in its
+  // own section it reads as a state, which is what it is.
+  const activeAccounts = accounts.filter((account) => account.is_active);
+  const archivedAccounts = accounts.filter((account) => !account.is_active);
+  const activeCards = listed.filter((card) => card.is_active);
+  const archivedCards = listed.filter((card) => !card.is_active);
 
   return (
     <div>
@@ -126,9 +133,9 @@ export function AccountsPage() {
                 </p>
                 <p className="mt-2">Lists show the last four digits only.</p>
                 <p className="mt-2">
-                  Archiving an account stops it being offered when recording a payment. Entries
-                  that already used it keep its name. The accounts created with your books cannot
-                  be archived - the software posts to them by role.
+                  Archiving an account stops it being offered when recording a payment. Entries that
+                  already used it keep its name. The accounts created with your books cannot be
+                  archived - the software posts to them by role.
                 </p>
               </InfoTip>
             </div>
@@ -146,11 +153,21 @@ export function AccountsPage() {
               description="Add a bank account or a cash box to start recording payments."
             />
           ) : (
-            <ul className="divide-border divide-y">
-              {accounts.map((account) => (
-                <AccountRow key={account.id} account={account} />
-              ))}
-            </ul>
+            <>
+              <ul className="divide-border divide-y">
+                {activeAccounts.map((account) => (
+                  <AccountRow key={account.id} account={account} />
+                ))}
+              </ul>
+              <ArchivedGroup
+                count={archivedAccounts.length}
+                note="No longer offered when recording a payment. Entries that used them keep their names."
+              >
+                {archivedAccounts.map((account) => (
+                  <AccountRow key={account.id} account={account} />
+                ))}
+              </ArchivedGroup>
+            </>
           )}
         </CardBody>
       </Card>
@@ -176,14 +193,57 @@ export function AccountsPage() {
               description="Add one to record what you spend on it. Only the network and last four digits are stored."
             />
           ) : (
-            <ul className="divide-border divide-y">
-              {listed.map((card) => (
-                <CardRow key={card.id} card={card} />
-              ))}
-            </ul>
+            <>
+              <ul className="divide-border divide-y">
+                {activeCards.map((card) => (
+                  <CardRow key={card.id} card={card} />
+                ))}
+              </ul>
+              <ArchivedGroup
+                count={archivedCards.length}
+                note="No longer offered when recording a payment. Past entries still name them."
+              >
+                {archivedCards.map((card) => (
+                  <CardRow key={card.id} card={card} />
+                ))}
+              </ArchivedGroup>
+            </>
           )}
         </CardBody>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * A labelled group for archived rows, or nothing at all when there are none.
+ *
+ * Its own section rather than an "Archived" badge on rows mixed in with the live ones.
+ * Interleaved, the badge is a property of one row you have to notice; under a heading it is
+ * a state, which is what archiving actually is - and it stops a closed account sitting in the
+ * middle of the list you are reading down.
+ *
+ * Renders nothing when empty, so the caller does not have to guard as well as pass the count.
+ */
+function ArchivedGroup({
+  count,
+  note,
+  children,
+}: {
+  count: number;
+  note: string;
+  children: ReactNode;
+}) {
+  if (count === 0) return null;
+
+  return (
+    <div className="border-border mt-4 border-t pt-4">
+      <div className="mb-1 flex items-center gap-2">
+        <Archive className="text-content-muted h-3.5 w-3.5" aria-hidden />
+        <h4 className="text-content-secondary text-[12px] font-medium">Archived ({count})</h4>
+      </div>
+      <p className="text-content-muted mb-1 text-[11px]">{note}</p>
+      <ul className="divide-border divide-y">{children}</ul>
     </div>
   );
 }
@@ -192,11 +252,33 @@ export function AccountsPage() {
 // One account, expandable into its details
 // ---------------------------------------------------------------------------
 function AccountRow({ account }: { account: MoneyAccount }) {
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const subtitle = [account.bank_name, account.holder_name].filter(Boolean).join(' · ');
 
+  const toggle = useMutation({
+    mutationFn: () =>
+      account.is_active
+        ? billingApi.archiveMoneyAccount(account.id)
+        : billingApi.restoreMoneyAccount(account.id),
+    onSuccess: (updated) => {
+      void queryClient.invalidateQueries({ queryKey: ['money-accounts'] });
+      // The pickers on the recording form come from this payload, and an archived account
+      // must leave them.
+      void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      toast.success(updated.is_active ? `Restored ${updated.name}` : `Archived ${updated.name}`, {
+        description: updated.is_active
+          ? 'It can be chosen when recording a payment again.'
+          : 'Past entries still name it; it is no longer offered.',
+      });
+    },
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : 'Could not update the account'),
+  });
+
   return (
-    <li className="py-3">
+    <li className={cn('py-3', !account.is_active && 'opacity-60')}>
       <div className="flex items-center gap-3">
         <span className="text-content-muted shrink-0" aria-hidden>
           {account.kind === 'cash' ? (
@@ -220,11 +302,36 @@ function AccountRow({ account }: { account: MoneyAccount }) {
           </span>
         </span>
         {account.is_default && <Badge tone="primary">Default</Badge>}
+        {/* No "Archived" badge - the section heading above these rows already says it, and
+            saying it twice on the same row is noise. */}
         <Badge tone="neutral">{account.kind === 'cash' ? 'Cash' : 'Bank'}</Badge>
         {/* Cash in hand has no bank, no number and no holder, so there is nothing to open. */}
         {account.kind !== 'cash' && (
           <Button variant="ghost" onClick={() => setOpen((shown) => !shown)}>
             {open ? 'Close' : account.bank_name ? 'Edit details' : 'Add details'}
+          </Button>
+        )}
+        {/* Only where the server says it is allowed. A seeded account cannot be
+            deactivated - later modules post to it by role - so `can_archive` is false and
+            no button appears, rather than one that always fails. */}
+        {account.can_archive && (
+          <Button
+            variant="ghost"
+            onClick={() => toggle.mutate()}
+            disabled={toggle.isPending}
+            title={
+              account.is_active
+                ? 'Stop offering this account. Entries that used it keep its name.'
+                : 'Offer this account again when recording a payment.'
+            }
+          >
+            {account.is_active ? (
+              <Archive className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {account.is_active ? 'Archive' : 'Restore'}
+            <span className="sr-only"> {account.name}</span>
           </Button>
         )}
       </div>

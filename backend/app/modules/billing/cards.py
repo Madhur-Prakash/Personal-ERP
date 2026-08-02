@@ -33,11 +33,22 @@ class CardIdentity:
     """What is safe to keep about a card.
 
     Deliberately does *not* carry the number it came from - there is nowhere for a
-    caller to accidentally read it back out of.
+    caller to accidentally read it back out of. ``checksum_ok`` is a verdict *about* the
+    number, not a piece of it.
     """
 
     network: CardNetwork
     last4: str
+
+    #: Whether the number passed its Luhn check digit.
+    #:
+    #: **Advisory, not a gate.** It used to be one, and refusing the save was the wrong
+    #: trade for this product: nothing here is ever charged, the number is discarded within
+    #: the request, and the only lasting artefact is a four-digit label. So a failed
+    #: checksum is worth telling the user about - it usually means a typo, and a wrong label
+    #: defeats the point of storing one - but not worth refusing an entry the user is
+    #: deliberately making about their own card.
+    checksum_ok: bool
 
 
 def normalise_card_number(raw: str) -> str:
@@ -157,8 +168,19 @@ def inspect_card_number(raw: str) -> CardIdentity | None:
     Returning ``None`` rather than raising keeps this module free of the app's exception
     hierarchy - the caller owns the message, because the caller knows whether it is
     answering a form field or a script.
+
+    **``None`` means the wrong shape - not a failed check digit.** Length and charset are
+    structural: twelve to nineteen digits and nothing else is a card number, and anything
+    outside that is not one, so there is nothing sensible to store. A failed Luhn digit is
+    a different kind of claim - "this is probably a typo" - and it comes back on
+    :attr:`CardIdentity.checksum_ok` for the caller to surface rather than refusing the
+    save. See that field for why.
     """
     digits = normalise_card_number(raw)
-    if not is_plausible_card_number(digits) or not passes_luhn(digits):
+    if not is_plausible_card_number(digits):
         return None
-    return CardIdentity(network=detect_network(digits), last4=digits[-4:])
+    return CardIdentity(
+        network=detect_network(digits),
+        last4=digits[-4:],
+        checksum_ok=passes_luhn(digits),
+    )

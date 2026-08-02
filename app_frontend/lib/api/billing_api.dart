@@ -102,6 +102,35 @@ class BillingApi {
     ),
   );
 
+  /// Everywhere money can sit, optionally including archived accounts.
+  ///
+  /// Separate from [options] because that payload feeds the recording form's pickers and
+  /// must never carry an archived account - a picker offering a closed bank account is a
+  /// picker that posts to it.
+  Future<List<MoneyAccount>> moneyAccounts({
+    bool includeArchived = false,
+  }) async {
+    final List<dynamic> rows = await _client.get<List<dynamic>>(
+      '/billing/money-accounts',
+      query: <String, dynamic>{if (includeArchived) 'include_archived': true},
+    );
+    return rows.cast<Json>().map(MoneyAccount.fromJson).toList(growable: false);
+  }
+
+  /// Stop offering an account without deleting it - entries still name it.
+  ///
+  /// Refused for a seeded account, which later modules post to by role. Check
+  /// [MoneyAccount.canArchive] before offering the control.
+  Future<MoneyAccount> archiveMoneyAccount(String id) async =>
+      MoneyAccount.fromJson(
+        await _client.post<Json>('/billing/money-accounts/$id/archive'),
+      );
+
+  Future<MoneyAccount> restoreMoneyAccount(String id) async =>
+      MoneyAccount.fromJson(
+        await _client.post<Json>('/billing/money-accounts/$id/restore'),
+      );
+
   /// One account's details, **with the account number in full.**
   ///
   /// A separate request from [options] on purpose: decrypting an account number is a

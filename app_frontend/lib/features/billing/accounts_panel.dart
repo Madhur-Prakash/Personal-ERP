@@ -508,8 +508,37 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
         ref.watch(billingCardsProvider(_showArchived)).valueOrNull ??
         widget.options.cards;
 
-    final List<MoneyAccount> accounts = widget.options.transferableAccounts
-        .where((MoneyAccount a) => !a.isCard)
+    // The dedicated list, because only that one can be asked for archived accounts - the
+    // options payload feeds the pickers and deliberately never carries one. Falls back to
+    // options while the request is in flight so the list does not blink empty.
+    final List<MoneyAccount> accounts =
+        (ref.watch(moneyAccountsProvider(_showArchived)).valueOrNull ??
+                widget.options.moneyAccounts)
+            .where((MoneyAccount a) => !a.isCard)
+            .fold<List<MoneyAccount>>(<MoneyAccount>[], (
+              List<MoneyAccount> seen,
+              MoneyAccount a,
+            ) {
+              // A debit card resolves to the bank account it draws on, so the raw list
+              // holds that account twice.
+              if (!seen.any((MoneyAccount kept) => kept.id == a.id)) seen.add(a);
+              return seen;
+            });
+
+    // Archived things go in their own group rather than sitting among the live ones with a
+    // badge. Interleaved, "Archived" is a property of one row you have to notice; under a
+    // heading it is a state, which is what it is.
+    final List<MoneyAccount> activeAccounts = accounts
+        .where((MoneyAccount a) => a.isActive)
+        .toList(growable: false);
+    final List<MoneyAccount> archivedAccounts = accounts
+        .where((MoneyAccount a) => !a.isActive)
+        .toList(growable: false);
+    final List<PaymentCard> activeCards = cards
+        .where((PaymentCard c) => c.isActive)
+        .toList(growable: false);
+    final List<PaymentCard> archivedCards = cards
+        .where((PaymentCard c) => !c.isActive)
         .toList(growable: false);
 
     return AppCard(
@@ -576,13 +605,40 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
                               'make it useless.',
                             ),
                             infoText('Lists show the last four digits only.'),
+                            infoText(
+                              'Archiving an account stops it being offered when '
+                              'recording a payment. Entries that already used it keep '
+                              'its name. The accounts created with your books cannot '
+                              'be archived - the software posts to them by role.',
+                            ),
                           ],
+                        ),
+                        const Spacer(),
+                        AppTextLink(
+                          label: _showArchived
+                              ? 'Hide archived'
+                              : 'Show archived',
+                          fontSize: 12,
+                          onTap: () =>
+                              setState(() => _showArchived = !_showArchived),
                         ),
                       ],
                     ),
                     for (final (int index, MoneyAccount account)
-                        in accounts.indexed)
+                        in activeAccounts.indexed)
                       _AccountRow(account: account, divided: index > 0),
+                    if (archivedAccounts.isNotEmpty)
+                      _ArchivedGroup(
+                        count: archivedAccounts.length,
+                        note:
+                            'No longer offered when recording a payment. Entries that '
+                            'used them keep their names.',
+                        children: <Widget>[
+                          for (final (int index, MoneyAccount account)
+                              in archivedAccounts.indexed)
+                            _AccountRow(account: account, divided: index > 0),
+                        ],
+                      ),
                   ],
                 ),
                 Column(
@@ -631,9 +687,23 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
                         'No cards yet. Add one to record what you spend on it.',
                         style: TextStyle(fontSize: 13, color: t.contentMuted),
                       )
-                    else
-                      for (final (int index, PaymentCard card) in cards.indexed)
+                    else ...<Widget>[
+                      for (final (int index, PaymentCard card)
+                          in activeCards.indexed)
                         _CardRow(card: card, divided: index > 0),
+                      if (archivedCards.isNotEmpty)
+                        _ArchivedGroup(
+                          count: archivedCards.length,
+                          note:
+                              'No longer offered when recording a payment. Past '
+                              'entries still name them.',
+                          children: <Widget>[
+                            for (final (int index, PaymentCard card)
+                                in archivedCards.indexed)
+                              _CardRow(card: card, divided: index > 0),
+                          ],
+                        ),
+                    ],
                   ],
                 ),
               ],
@@ -815,6 +885,64 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
   }
 }
 
+/// A labelled group for archived rows.
+///
+/// Its own section rather than an "Archived" badge on rows mixed in with the live ones.
+/// Interleaved, the badge is a property of one row you have to notice; under a heading it is
+/// a state, which is what archiving actually is - and it keeps a closed account out of the
+/// middle of the list you are reading down.
+class _ArchivedGroup extends StatelessWidget {
+  const _ArchivedGroup({
+    required this.count,
+    required this.note,
+    required this.children,
+  });
+
+  final int count;
+  final String note;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppTokens t = context.tokens;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.only(top: 12),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: t.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            spacing: 6,
+            children: <Widget>[
+              Icon(LucideIcons.archive, size: 13, color: t.contentMuted),
+              Text(
+                'Archived ($count)',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: t.contentSecondary,
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 2),
+            child: Text(
+              note,
+              style: TextStyle(fontSize: 11, color: t.contentMuted),
+            ),
+          ),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
 /// One cash or bank account, with its details editable in place.
 ///
 /// Editable here and not only on the add form, because the account most organizations
@@ -837,6 +965,35 @@ class _AccountRow extends ConsumerStatefulWidget {
 
 class _AccountRowState extends ConsumerState<_AccountRow> {
   bool _editing = false;
+  bool _busy = false;
+
+  Future<void> _toggleArchived() async {
+    setState(() => _busy = true);
+    final MoneyAccount account = widget.account;
+    try {
+      final MoneyAccount updated = account.isActive
+          ? await ref.read(billingApiProvider).archiveMoneyAccount(account.id)
+          : await ref.read(billingApiProvider).restoreMoneyAccount(account.id);
+
+      // The lists and the pickers built from them. Not the ledger: archiving posts
+      // nothing, so no balance or report has changed.
+      invalidateMoneyAccounts(ref);
+
+      if (!mounted) return;
+      context.toastSuccess(
+        updated.isActive
+            ? 'Restored ${updated.name}'
+            : 'Archived ${updated.name}',
+        description: updated.isActive
+            ? 'It can be chosen when recording a payment again.'
+            : 'Past entries still name it; it is no longer offered.',
+      );
+    } catch (error) {
+      if (mounted) context.toastApiError(error, 'Could not update the account');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -901,13 +1058,32 @@ class _AccountRowState extends ConsumerState<_AccountRow> {
               if (account.kind != MoneyAccountKind.cash)
                 AppButton(
                   onPressed: () => setState(() => _editing = !_editing),
-                  variant: AppButtonVariant.link,
+                  variant: AppButtonVariant.ghost,
                   size: AppButtonSize.sm,
                   label: _editing
                       ? 'Close'
                       : account.bankName == null
                       ? 'Add details'
-                      : 'Edit',
+                      : 'Edit details',
+                ),
+              // Only where the server says it is allowed. A seeded account cannot be
+              // deactivated - later modules post to it by role - so `canArchive` is false
+              // and no button appears, rather than one that always fails.
+              if (account.canArchive)
+                AppButton(
+                  onPressed: _busy ? null : _toggleArchived,
+                  variant: AppButtonVariant.ghost,
+                  size: AppButtonSize.sm,
+                  leftIcon: account.isActive
+                      ? LucideIcons.archive
+                      : LucideIcons.rotateCcw,
+                  label: account.isActive ? 'Archive' : 'Restore',
+                  tooltip: account.isActive
+                      ? 'Stop offering this account. Entries that used it keep its name.'
+                      : 'Offer this account again when recording a payment.',
+                  semanticLabel: account.isActive
+                      ? 'Archive ${account.name}'
+                      : 'Restore ${account.name}',
                 ),
             ],
           ),

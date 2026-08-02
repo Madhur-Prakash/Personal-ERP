@@ -68,8 +68,7 @@ export function TransferForm({
   const queryClient = useQueryClient();
   const accounts = transferableAccounts(options.money_accounts);
 
-  const defaultFrom =
-    accounts.find((account) => account.is_default)?.id ?? accounts[0]?.id ?? '';
+  const defaultFrom = accounts.find((account) => account.is_default)?.id ?? accounts[0]?.id ?? '';
 
   const [fromId, setFromId] = useState(defaultFrom);
   // Defaulted too, rather than left blank. **The first account that is not the "from"**,

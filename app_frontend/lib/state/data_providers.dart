@@ -349,6 +349,24 @@ final AutoDisposeFutureProvider<BillingSummary> billingSummaryProvider =
       return retrying(() => ref.read(billingApiProvider).summary());
     });
 
+/// Every place money can sit, keyed by whether archived ones are wanted.
+///
+/// Separate from [billingOptionsProvider] because only this one can be asked for archived
+/// accounts. That payload feeds the recording form's pickers and must never carry one.
+final AutoDisposeFutureProviderFamily<List<MoneyAccount>, bool>
+moneyAccountsProvider =
+    FutureProvider.autoDispose.family<List<MoneyAccount>, bool>((
+      Ref ref,
+      bool includeArchived,
+    ) {
+      bindCache(ref);
+      return retrying(
+        () => ref
+            .read(billingApiProvider)
+            .moneyAccounts(includeArchived: includeArchived),
+      );
+    });
+
 /// One account's bank details, **including the full account number.**
 ///
 /// Its own provider keyed by account id rather than part of [billingOptionsProvider],
@@ -713,6 +731,17 @@ void invalidateCards(WidgetRef ref, {bool ledgerChanged = false}) {
 /// description of an account, not a posting, so no balance or report has changed.
 void invalidateBankDetails(WidgetRef ref) {
   ref.invalidate(bankDetailsProvider);
+  ref.invalidate(moneyAccountsProvider);
+  ref.invalidate(billingOptionsProvider);
+  ref.invalidate(accountsProvider);
+}
+
+/// Everything archiving or restoring an account invalidates.
+///
+/// The account lists and the pickers built from them. **Not the ledger** - archiving posts
+/// nothing, so no balance or report changes; the account simply stops being offered.
+void invalidateMoneyAccounts(WidgetRef ref) {
+  ref.invalidate(moneyAccountsProvider);
   ref.invalidate(billingOptionsProvider);
   ref.invalidate(accountsProvider);
 }

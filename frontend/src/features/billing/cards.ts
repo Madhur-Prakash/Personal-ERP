@@ -42,6 +42,31 @@ export function isPlausibleCardNumber(digits: string): boolean {
 }
 
 /**
+ * Why the card number is not acceptable yet, or `null` when it is.
+ *
+ * **This exists because the "Add card" button used to disable itself in silence.** Type
+ * eleven digits and nothing happened: no message, no error, a greyed-out button, and no way
+ * to tell that one more digit was needed. The rules were only ever expressed as a boolean
+ * for the button's `disabled` prop, which is not something a person can read.
+ *
+ * Returns a message for every state that blocks saving, and counts digits out loud while
+ * the number is too short - "11 of at least 12 digits" answers the question the greyed-out
+ * button raises, where "Invalid" would not.
+ */
+export function cardNumberProblem(digits: string): string | null {
+  if (digits === '') return null;
+  if (!/^\d+$/.test(digits)) return 'Digits only.';
+  if (digits.length < MIN_DIGITS) {
+    return `${digits.length} of at least ${MIN_DIGITS} digits.`;
+  }
+  if (digits.length > MAX_DIGITS) {
+    return `A card number is at most ${MAX_DIGITS} digits.`;
+  }
+  if (!passesLuhn(digits)) return 'Check that number - a digit looks wrong.';
+  return null;
+}
+
+/**
  * The Luhn check digit, so a typo is caught before a round trip.
  *
  * A duplicate of the server's check, deliberately: the server stays the authority, this

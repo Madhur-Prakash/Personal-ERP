@@ -132,14 +132,31 @@ class TestCardNumberHandling:
         assert identity is not None
         assert identity.last4 == "1111"
         assert identity.network is CardNetwork.VISA
+        assert identity.checksum_ok is True
         # The returned object has nowhere to read a number back out of. Asserted rather
         # than assumed, because a field added later would silently reintroduce one.
+        # `checksum_ok` is a verdict *about* the number, not a piece of it.
         assert not hasattr(identity, "card_number")
-        assert set(type(identity).__slots__) == {"network", "last4"}
+        assert set(type(identity).__slots__) == {"network", "last4", "checksum_ok"}
 
-    def test_rubbish_is_rejected_rather_than_stored(self) -> None:
+    def test_the_wrong_shape_is_rejected_rather_than_stored(self) -> None:
+        # Length and charset only. Twelve to nineteen digits and nothing else is a card
+        # number; outside that there is nothing sensible to store.
         for value in ("", "abcd", "4111", "41111111111111119999999"):
             assert inspect_card_number(value) is None
+
+    def test_a_failed_check_digit_is_reported_rather_than_refused(self) -> None:
+        """**Advisory, not a gate** - see `CardIdentity.checksum_ok`.
+
+        Nothing here is ever charged and the number is discarded within the request, so the
+        only lasting artefact is a four-digit label. Worth warning about, because it usually
+        means a typo and a wrong label defeats the point of storing one; not worth refusing
+        an entry somebody is deliberately making about their own card.
+        """
+        identity = inspect_card_number("4111111111111112")
+        assert identity is not None
+        assert identity.checksum_ok is False
+        assert identity.last4 == "1112"
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +204,10 @@ class TestNoCardNumberIsPersisted:
         very likely in a client-side log, which is worse than storing it deliberately
         because nobody would think to look.
         """
-        bad = "4111111111111112"  # valid shape, wrong check digit
+        # Too short to be a card number, so it is refused on shape. A *wrong check digit*
+        # is no longer refused - see `test_a_failed_check_digit_is_reported_rather_than
+        # _refused` - so it cannot be used to drive the rejection path any more.
+        bad = "41111111111"
         response = await authed_client.post(
             f"{api}/billing/cards",
             json={"label": "Typo", "kind": "credit", "card_number": bad},
@@ -195,6 +215,14 @@ class TestNoCardNumberIsPersisted:
         assert response.status_code == 422, response.text
         assert bad not in response.text
         assert bad[:6] not in response.text
+
+    async def test_a_mistyped_number_is_accepted_and_keeps_its_last_four(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The check digit does not block the save, and the label still comes from the tail."""
+        card = await add_card(authed_client, api, number="4111111111111112")
+        assert card["last4"] == "1112"
+        assert card["network"] == "visa"
 
 
 # ---------------------------------------------------------------------------
