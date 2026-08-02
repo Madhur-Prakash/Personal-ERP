@@ -176,20 +176,27 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('shows an archived card only once asked', (
+    testWidgets('archived rows appear only once asked, in their own group', (
       WidgetTester tester,
     ) async {
       await pump(tester, const AccountsPanel(options: options));
 
-      // The default view is the active card alone.
+      // The default view is the active rows alone - no group, no heading.
       expect(find.textContaining('HDFC Millennia'), findsWidgets);
-      expect(find.text('Show archived'), findsOneWidget);
+      expect(find.textContaining('Archived ('), findsNothing);
+      expect(find.textContaining('Old current account'), findsNothing);
 
-      await tester.tap(find.text('Show archived'));
+      // Both sections share one toggle, so there are two of them on screen.
+      await tester.tap(find.text('Show archived').first);
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
-      expect(find.text('Hide archived'), findsOneWidget);
+      expect(find.text('Hide archived'), findsWidgets);
+
+      // Grouped under a heading rather than sitting among the live rows with a badge - one
+      // group for the closed account, one for the archived card.
+      expect(find.textContaining('Archived ('), findsNWidgets(2));
+      expect(find.textContaining('Old current account'), findsOneWidget);
     });
 
     testWidgets('names the card kinds, since one is a liability', (
