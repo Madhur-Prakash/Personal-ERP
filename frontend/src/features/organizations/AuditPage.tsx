@@ -210,9 +210,7 @@ export function AuditPage() {
                                     /* A snapshot rather than a change: showing it as
                                        "- → value" would invent a previous value that was
                                        never recorded. */
-                                    <span className="text-content">
-                                      {renderDiffValue(value)}
-                                    </span>
+                                    <span className="text-content">{renderDiffValue(value)}</span>
                                   )}
                                 </dd>
                               </div>
