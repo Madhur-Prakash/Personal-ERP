@@ -330,6 +330,34 @@ The Luhn check is duplicated client-side, which is safe because Luhn is a fixed 
 that cannot drift. The issuer-range table that identifies the scheme is **not** duplicated
 - it lives only on the server.
 
+### Bank account numbers - encrypted, not discarded
+
+A **bank account number is stored in full**, Fernet-encrypted with the same key material as
+`app_user.totp_secret`. That is the opposite decision to the one above, and the difference is
+the point rather than an oversight:
+
+| | Card number | Bank account number |
+| --- | --- | --- |
+| Still needed after entry? | No - the last four digits identify the card | Yes - you quote it to be paid, print it on invoices, match it to statements |
+| Brings the DB into PCI DSS scope? | Yes | No |
+| Stored | Never, in any form | In full, encrypted |
+
+Discarding an account number would stop the software doing its job; keeping a PAN would take
+on a compliance regime for no benefit. Both answers follow from the same reasoning.
+
+The protections that apply to the stored number:
+
+- **Encrypted at rest**, so it is not legible in a stolen dump or a database screenshot. A
+  test reads the column directly and asserts the plaintext does not appear in it.
+- **`account_number_last4` is kept separately in the clear**, so lists render without
+  decrypting a row per line - the same trick as a card's last four digits.
+- **One route returns it**, `GET /billing/money-accounts/{id}/details`, behind
+  `account:read`. It is deliberately not a field on the account list that every load of the
+  billing screen fetches, so decrypting is an explicit act rather than ambient.
+- **It is never logged.** The account-creation log line carries the bank name and the last
+  four digits only.
+- Both clients set `autoComplete="off"` on the field, for the same reason the card field does.
+
 ---
 
 ## Transport and headers

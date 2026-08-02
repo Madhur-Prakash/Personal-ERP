@@ -29,6 +29,7 @@ follow from that shape with no guessing.
 from __future__ import annotations
 
 import datetime as dt
+import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -49,6 +50,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.core.pagination import PageParams
+from app.core.security import decrypt_secret, encrypt_secret
 from app.db.types import ZERO
 from app.modules.accounting.coa_template import SystemAccount
 from app.modules.accounting.models import (
@@ -68,7 +70,12 @@ from app.modules.accounting.service import (
     PostingService,
 )
 from app.modules.billing.cards import inspect_card_number
-from app.modules.billing.models import CardKind, CardNetwork, PaymentCard
+from app.modules.billing.models import (
+    BankAccountDetail,
+    CardKind,
+    CardNetwork,
+    PaymentCard,
+)
 from app.modules.organizations.models import Organization
 from app.modules.users.models import User
 
@@ -171,9 +178,33 @@ class MoneyAccount:
     card_last4: str | None = None
     card_network: str | None = None
 
+    #: Who the account belongs to and which bank it is at. Present for a bank account that
+    #: was given them, absent for cash in hand and for a credit card - a card's
+    #: counterparty is its issuer, which the network already names.
+    bank_name: str | None = None
+    holder_name: str | None = None
+    #: The tail of the account number. **Not the whole number**, which is deliberate: this
+    #: list is what fills the picker on the recording screen, and shipping a full account
+    #: number to a client that only needs to tell two accounts apart is a payload nobody
+    #: asked for. The full value is on the account's own detail response.
+    account_number_last4: str | None = None
+
     @property
     def is_card(self) -> bool:
         return self.card_id is not None
+
+    @property
+    def subtitle(self) -> str | None:
+        """The line under the name: "HDFC Bank ··4321", or nothing to say."""
+        parts = [
+            part
+            for part in (self.bank_name, self.card_network)
+            if part
+        ]
+        tail = self.account_number_last4 or self.card_last4
+        if tail:
+            parts.append(f"··{tail}")
+        return " · ".join(parts) or None
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +219,35 @@ class Card:
     account_id: uuid.UUID
     account_name: str
     is_active: bool
+    holder_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BankDetails:
+    """Who a bank account belongs to and which number it is.
+
+    ``account_number`` is the full number, decrypted. Returned to a caller that has
+    already passed the account-read guard, because the whole point of keeping it is to be
+    able to quote it - masking it here would leave it stored and useless. ``last4`` is
+    carried separately so a list can render without decrypting every row.
+    """
+
+    bank_name: str | None = None
+    holder_name: str | None = None
+    account_number: str | None = None
+    account_number_last4: str | None = None
+
+    @property
+    def is_empty(self) -> bool:
+        """Nothing worth persisting - which is the normal case for cash in hand."""
+        return not any(
+            (self.bank_name, self.holder_name, self.account_number)
+        )
+
+
+#: Stands in for "this account has no details", so the lookups below can read
+#: ``details.get(id, _NO_BANK_DETAILS).bank_name`` instead of guarding each field.
+_NO_BANK_DETAILS: Final = BankDetails()
 
 
 @dataclass(frozen=True, slots=True)
@@ -382,6 +442,9 @@ class BillingService:
         *,
         name: str,
         kind: MoneyKind,
+        bank_name: str | None = None,
+        holder_name: str | None = None,
+        account_number: str | None = None,
         ctx: RequestContext | None = None,
     ) -> MoneyAccount:
         """Add a cash box or a bank account.
@@ -393,10 +456,16 @@ class BillingService:
         so money that moved through a wallet gets filed as cash and the balances stop
         matching anything real.
 
-        Only a name and whether it behaves like cash or a bank. The subtype is what
-        matters to the software: both are cash-equivalent for the cash flow statement,
-        but they reconcile differently - cash against a physical count, a bank against
-        a statement - so they are separate subtypes rather than one.
+        Only a name and whether it behaves like cash or a bank are required. The subtype
+        is what matters to the software: both are cash-equivalent for the cash flow
+        statement, but they reconcile differently - cash against a physical count, a bank
+        against a statement - so they are separate subtypes rather than one.
+
+        ``bank_name``, ``holder_name`` and ``account_number`` are the facts a person needs
+        and the ledger does not. All three are optional and all three are ignored for a
+        cash box, which has no bank, no number, and no holder - see
+        :class:`~app.modules.billing.models.BankAccountDetail`. The number is encrypted
+        before it is written.
         """
         await self.ensure_books(organization_id)
 
@@ -444,9 +513,31 @@ class BillingService:
             ctx,
         )
 
+        # Only a bank account gets a detail row. A cash box has nothing to put in one, and
+        # writing an all-null row would mean every later read has to tell "no details" from
+        # "a row of nothings".
+        details = BankDetails()
+        if kind is MoneyKind.BANK:
+            details = await self._save_bank_details(
+                organization_id,
+                account.id,
+                bank_name=bank_name,
+                holder_name=holder_name,
+                account_number=account_number,
+            )
+
         log.info(
             "money account created",
-            extra={"name": cleaned, "code": account.code, "kind": kind.value},
+            extra={
+                "name": cleaned,
+                "code": account.code,
+                "kind": kind.value,
+                # The bank and the tail, never the number itself. This is the one place a
+                # full account number is in scope, and a log line is exactly where it must
+                # not end up.
+                "bank": details.bank_name,
+                "account_last4": details.account_number_last4,
+            },
         )
         return MoneyAccount(
             id=account.id,
@@ -459,7 +550,66 @@ class BillingService:
                 MoneyAccountKind.BANK if kind is MoneyKind.BANK else MoneyAccountKind.CASH
             ),
             is_default=False,
+            bank_name=details.bank_name,
+            holder_name=details.holder_name,
+            account_number_last4=details.account_number_last4,
         )
+
+    async def _save_bank_details(
+        self,
+        organization_id: uuid.UUID,
+        account_id: uuid.UUID,
+        *,
+        bank_name: str | None,
+        holder_name: str | None,
+        account_number: str | None,
+    ) -> BankDetails:
+        """Write (or update) the human facts about a bank account.
+
+        Returns what was stored, so the caller does not have to reassemble it. The account
+        number is encrypted here and nowhere else, and the last four digits are peeled off
+        first so a list can be rendered without decrypting anything.
+        """
+        bank = (bank_name or "").strip() or None
+        holder = (holder_name or "").strip() or None
+        # Spaces and dashes are how people write these on paper; the stored value is the
+        # digits so that two spellings of one account compare equal.
+        digits = re.sub(r"[\s-]", "", account_number or "") or None
+
+        if digits is not None and not digits.isdigit():
+            raise ValidationError(
+                "An account number should be digits only.", code="account_number_invalid"
+            )
+
+        details = BankDetails(
+            bank_name=bank,
+            holder_name=holder,
+            account_number=digits,
+            account_number_last4=digits[-4:] if digits else None,
+        )
+        if details.is_empty:
+            return details
+
+        existing = (
+            await self.session.execute(
+                select(BankAccountDetail).where(
+                    BankAccountDetail.account_id == account_id
+                )
+            )
+        ).scalar_one_or_none()
+
+        row = existing or BankAccountDetail(
+            organization_id=organization_id, account_id=account_id
+        )
+        row.bank_name = bank
+        row.holder_name = holder
+        row.account_number_encrypted = encrypt_secret(digits) if digits else None
+        row.account_number_last4 = details.account_number_last4
+        if existing is None:
+            self.session.add(row)
+        await self.session.flush()
+
+        return details
 
     @staticmethod
     def _next_code(existing: Sequence[Account], parent_code: str) -> str:
@@ -508,6 +658,12 @@ class BillingService:
         cash = [a for a in rows if a.subtype.is_cash_equivalent]
         by_id = {a.id: a for a in rows}
 
+        # One query for every detail row rather than one per account. The full numbers are
+        # not decrypted here - only the bank, the holder, and the tail are needed to fill a
+        # picker, and decrypting a column nobody is going to read would be work done purely
+        # to widen the blast radius of a log line.
+        details = await self._bank_details_by_account(organization_id)
+
         # Cash is the default: a business recording movements by hand is far more often
         # dealing in cash than reconciling a bank feed. A card is never the default -
         # spending on credit is a deliberate choice, not a fallback.
@@ -527,6 +683,11 @@ class BillingService:
                     if a.subtype is AccountSubtype.CASH
                     else MoneyAccountKind.BANK
                 ),
+                bank_name=details.get(a.id, _NO_BANK_DETAILS).bank_name,
+                holder_name=details.get(a.id, _NO_BANK_DETAILS).holder_name,
+                account_number_last4=details.get(
+                    a.id, _NO_BANK_DETAILS
+                ).account_number_last4,
             )
             for a in cash
         ]
@@ -552,10 +713,118 @@ class BillingService:
                     card_id=card.id,
                     card_last4=card.last4,
                     card_network=card.network.value,
+                    # A debit card inherits its account's bank, because it *is* that
+                    # account - "SBI Debit ··1234" under "State Bank of India" is the same
+                    # fact stated twice, and it is what someone reconciling expects to see.
+                    # A credit card has no bank of its own; the network names the issuer.
+                    bank_name=(
+                        details.get(card.account_id, _NO_BANK_DETAILS).bank_name
+                        if card.kind is CardKind.DEBIT
+                        else None
+                    ),
+                    holder_name=card.holder_name,
                 )
             )
 
         return accounts
+
+    async def _bank_details_by_account(
+        self, organization_id: uuid.UUID
+    ) -> dict[uuid.UUID, BankDetails]:
+        """Every detail row for the organization, keyed by account, **without decrypting**.
+
+        The full number is left in its ciphertext here on purpose - see
+        :meth:`bank_details` for the one path that unlocks it. Callers filling a list need
+        the bank and the last four and nothing more.
+        """
+        rows = (
+            (
+                await self.session.execute(
+                    select(BankAccountDetail).where(
+                        BankAccountDetail.organization_id == organization_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {
+            row.account_id: BankDetails(
+                bank_name=row.bank_name,
+                holder_name=row.holder_name,
+                account_number_last4=row.account_number_last4,
+            )
+            for row in rows
+        }
+
+    async def bank_details(
+        self, organization_id: uuid.UUID, account_id: uuid.UUID
+    ) -> BankDetails:
+        """One account's details, **with the number decrypted.**
+
+        Separate from the list path so that reading a full account number is an explicit
+        act with its own route and its own permission check, rather than something that
+        rides along on every page load of the recording screen.
+        """
+        row = (
+            await self.session.execute(
+                select(BankAccountDetail).where(
+                    BankAccountDetail.organization_id == organization_id,
+                    BankAccountDetail.account_id == account_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if row is None:
+            return BankDetails()
+
+        return BankDetails(
+            bank_name=row.bank_name,
+            holder_name=row.holder_name,
+            account_number=(
+                decrypt_secret(row.account_number_encrypted)
+                if row.account_number_encrypted
+                else None
+            ),
+            account_number_last4=row.account_number_last4,
+        )
+
+    async def update_bank_details(
+        self,
+        organization_id: uuid.UUID,
+        account_id: uuid.UUID,
+        *,
+        bank_name: str | None,
+        holder_name: str | None,
+        account_number: str | None,
+    ) -> BankDetails:
+        """Fill in or correct an account's details after the fact.
+
+        Needed because the seeded chart creates "Primary Bank Account" before anyone has
+        said which bank that is, so without this the one account most organizations
+        actually use is the only one that could never carry its own details.
+        """
+        # Resolved out of the organization's own accounts rather than fetched by id, which
+        # is what makes this tenant-safe: an id belonging to another organization simply is
+        # not in this list, so it 404s instead of being written to. Same approach as
+        # `create_card` uses for the account a debit card draws on.
+        rows = await self.accounts.list_for_org(organization_id, postable_only=True)
+        account = next((a for a in rows if a.id == account_id), None)
+        if account is None:
+            raise NotFoundError("That account does not exist.", code="account_not_found")
+        if not account.subtype.is_cash_equivalent:
+            raise BusinessRuleError(
+                "Only a cash or bank account can carry bank details.",
+                code="not_a_money_account",
+            )
+
+        return await self._save_bank_details(
+            organization_id,
+            account_id,
+            bank_name=bank_name,
+            holder_name=holder_name,
+            account_number=account_number,
+        )
 
     # -----------------------------------------------------------------------
     # Cards
@@ -588,6 +857,7 @@ class BillingService:
             account_id=row.account_id,
             account_name=row.account.name,
             is_active=row.is_active,
+            holder_name=row.holder_name,
         )
 
     async def create_card(
@@ -598,6 +868,7 @@ class BillingService:
         label: str,
         kind: CardKind,
         card_number: str,
+        holder_name: str | None = None,
         bank_account_id: uuid.UUID | None = None,
         ctx: RequestContext | None = None,
     ) -> Card:
@@ -675,6 +946,7 @@ class BillingService:
             network=identity.network,
             last4=identity.last4,
             account_id=account.id,
+            holder_name=(holder_name or "").strip() or None,
         )
         self.session.add(card)
         await self.session.flush()
@@ -682,7 +954,8 @@ class BillingService:
         log.info(
             "payment card added",
             # Label, kind, network, and last four only. The number is not in scope here
-            # and must never be added to this call.
+            # and must never be added to this call. The holder's name is left out too -
+            # it is not a secret, but it is a person's name in a log nobody needs.
             extra={
                 "label": cleaned_label,
                 "kind": kind.value,
@@ -699,6 +972,7 @@ class BillingService:
             account_id=account.id,
             account_name=account.name,
             is_active=True,
+            holder_name=card.holder_name,
         )
 
     async def _create_card_liability_account(

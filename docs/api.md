@@ -274,7 +274,9 @@ capability would be security theatre.
 | GET | `/summary` | Money in, money out, net, and a count for a window |
 | GET | `/{id}` | One entry |
 | POST | `/{id}/reverse` | Cancel it by posting the mirror entry |
-| POST | `/money-accounts` | Add a cash box or bank account. `account:write` |
+| POST | `/money-accounts` | Add a cash box or bank account, with optional bank details. `account:write` |
+| GET | `/money-accounts/{id}/details` | Bank, holder, and **the full account number**. `account:read` |
+| PUT | `/money-accounts/{id}/details` | Set or clear them. `account:write` |
 | POST | `/categories` | Add an income or expense category from a name alone |
 | GET | `/cards` | Cards on file. `?include_archived=true` for the retired ones |
 | POST | `/cards` | Register a card from its number. `account:write` |
@@ -324,6 +326,37 @@ Worth knowing:
   money-in and money-out totals ignore it - counting one would show income that never
   arrived from anywhere. Paying off a credit card is a transfer into the card's
   liability account.
+
+#### Bank details - the opposite decision, deliberately
+
+A **bank account number is stored in full**, Fernet-encrypted, where a card number is not
+stored at all. That contrast is intentional, not an inconsistency:
+
+- You must quote a bank account number to be paid, print it on an invoice, and match it
+  against a statement. Software that discarded it could not do the job. A card number has no
+  remaining use here once the last four digits are known.
+- A PAN brings the whole database into PCI DSS scope. A bank account number does not.
+
+It is still encrypted at rest, with the same key material as `app_user.totp_secret`, because
+it should not be legible in a stolen dump. `account_number_last4` is kept in the clear beside
+it so a list renders without decrypting a row per line.
+
+- **`GET /money-accounts/{id}/details` is the only route that returns the full number**, and
+  it is separate from `/options` on purpose: decrypting is then a deliberate request behind
+  `account:read`, rather than something every load of the recording screen does for every
+  account. `MoneyAccountRead` has no `account_number` field at all.
+- **`PUT` replaces the whole set.** An omitted or blank field is cleared, which is how a
+  number entered by mistake is removed. Note that `account_number` has a minimum length, so
+  clients must *omit* it to clear rather than send `""`.
+- **Only a cash-equivalent account can carry details.** "Which bank is Sales Revenue at" is
+  not a question; asking it is a 422. A cash box may be asked and is silently given no row -
+  it has no bank, no number, and no holder.
+- The update route exists because the seeded chart creates "Primary Bank Account" before
+  anyone has said which bank that is. Without it, the one account most organizations actually
+  use would be the only one that could never carry its own details.
+- **A cardholder name is kept in the clear.** PCI DSS permits retaining it - it is the PAN and
+  the authentication data (CVV, PIN, stripe) that may not be kept - and a name alone cannot
+  be used to transact.
 
 ### Health - `/health` (unversioned, public)
 

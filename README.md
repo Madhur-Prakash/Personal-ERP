@@ -36,7 +36,7 @@ sales, purchasing and inventory, document intelligence, and analytics; see
 | RBAC - 42 permissions, 5 seeded roles, custom roles, per-member overrides | Done |
 | Immutable audit trail with field-level diffs | Done |
 | **Billing** - record money in and out with just a date, an amount, and a note. No customer or supplier needed; posts real double-entry, so the dashboard and every report update immediately | Done |
-| Accounts & cards - add bank accounts, register credit and debit cards from the card number (**no PAN is stored**), choose the account on any payment, and transfer between your own accounts | Done |
+| Accounts & cards - add bank accounts with their bank, holder and account number (**encrypted; no card PAN is stored at all**), register credit and debit cards from the card number, choose the account on any payment, and transfer between your own accounts | Done |
 | Double-entry accounting - chart of accounts, journals, period locks, trial balance, P&L, balance sheet, cash flow | Done |
 | Sales - customers, leads, quotations, orders, invoices with GST, payment allocation, receivables ageing | Done |
 | Purchasing & inventory - suppliers, POs, goods receipt, weighted-average valuation, bills, input GST, payables ageing | Done |
@@ -123,6 +123,14 @@ no column for a PAN and no field to return one in - a test queries
 `information_schema.columns` to keep it that way. Storing one would put this entire
 database inside PCI DSS scope, and the last four digits are what a card receipt and a
 bank statement both print anyway.
+
+**A bank account number is stored in full, encrypted** - the opposite call, for a reason.
+You have to quote an account number to be paid, print it on an invoice, and match it to a
+statement, so throwing it away would stop the software doing its job; and unlike a card
+number it carries no scheme obligations. It is encrypted at rest with the same key material
+as a 2FA secret, only the last four digits are shown in lists, and one route behind
+`account:read` returns the whole thing. Alongside it you can record which bank the account
+is at, whose name it is in, and the name on a card.
 
 **A credit card is a liability, not a place you have money.** Registering one creates an
 account under Current Liabilities, so spending on it increases what you owe rather than

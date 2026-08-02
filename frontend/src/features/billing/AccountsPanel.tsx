@@ -247,23 +247,20 @@ export function AccountsPanel({ options }: { options: BillingOptions }) {
         )}
 
         <section>
-          <h3 className="text-content-secondary mb-2 text-[13px] font-medium">Cash & bank</h3>
+          <h3 className="text-content-secondary mb-2 flex items-center gap-1.5 text-[13px] font-medium">
+            Cash &amp; bank
+            <InfoTip label="Cash and bank">
+              <p>
+                An account number is stored <strong>encrypted</strong>, and stored in full - unlike
+                a card number, which is never kept at all. You need the account number to be paid
+                and to match a statement, so keeping only four digits would make it useless.
+              </p>
+              <p className="mt-2">Lists show the last four digits only.</p>
+            </InfoTip>
+          </h3>
           <ul className="divide-border divide-y">
             {accounts.map((account) => (
-              <li key={account.id} className="flex items-center gap-3 py-2.5">
-                <span className="text-content-muted shrink-0" aria-hidden>
-                  {account.kind === 'cash' ? (
-                    <Wallet className="h-4 w-4" />
-                  ) : (
-                    <Landmark className="h-4 w-4" />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="text-content block truncate text-[13px]">{account.name}</span>
-                  <span className="text-content-muted block text-[11px]">{account.code}</span>
-                </span>
-                {account.is_default && <Badge tone="primary">Default</Badge>}
-              </li>
+              <AccountRow key={account.id} account={account} />
             ))}
           </ul>
         </section>
@@ -309,6 +306,160 @@ export function AccountsPanel({ options }: { options: BillingOptions }) {
   );
 }
 
+/**
+ * One cash or bank account, with its details editable in place.
+ *
+ * Editable here rather than only on the add form, because the account most organizations
+ * actually use - "Primary Bank Account" - is created by the chart template before anyone
+ * has said which bank it is. Without this it would be the only account that could never
+ * carry its own details.
+ */
+function AccountRow({ account }: { account: MoneyAccount }) {
+  const [editing, setEditing] = useState(false);
+  const subtitle = [account.bank_name, account.holder_name].filter(Boolean).join(' · ');
+
+  return (
+    <li className="py-2.5">
+      <div className="flex items-center gap-3">
+        <span className="text-content-muted shrink-0" aria-hidden>
+          {account.kind === 'cash' ? (
+            <Wallet className="h-4 w-4" />
+          ) : (
+            <Landmark className="h-4 w-4" />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="text-content block truncate text-[13px]">
+            {account.name}
+            {account.account_number_last4 && (
+              <span className="text-content-muted tabular-nums">
+                {' '}
+                ··{account.account_number_last4}
+              </span>
+            )}
+          </span>
+          <span className="text-content-muted block truncate text-[11px]">
+            {subtitle || account.code}
+          </span>
+        </span>
+        {account.is_default && <Badge tone="primary">Default</Badge>}
+        {/* Only a bank account has details to give. Cash in hand has no bank, no number
+            and no holder, so there is nothing here to open. */}
+        {account.kind !== 'cash' && (
+          <button
+            type="button"
+            onClick={() => setEditing((open) => !open)}
+            className="text-content-muted hover:text-content text-[12px]"
+          >
+            {editing ? 'Close' : account.bank_name ? 'Edit' : 'Add details'}
+          </button>
+        )}
+      </div>
+
+      {editing && <BankDetailsForm account={account} onDone={() => setEditing(false)} />}
+    </li>
+  );
+}
+
+/**
+ * Which bank, whose name, which number.
+ *
+ * Loads the existing values first, **including the full account number** - this is the one
+ * place it is fetched, and it is fetched because the alternative is an edit form that
+ * silently wipes a number the user cannot see. Saving `PUT`s the whole set, so clearing a
+ * field clears it on the server.
+ */
+function BankDetailsForm({ account, onDone }: { account: MoneyAccount; onDone: () => void }) {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ['bank-details', account.id],
+    queryFn: () => billingApi.bankDetails(account.id),
+  });
+
+  const [bankName, setBankName] = useState<string | null>(null);
+  const [holderName, setHolderName] = useState<string | null>(null);
+  const [accountNumber, setAccountNumber] = useState<string | null>(null);
+
+  // `null` means "not touched yet", so the fetched value shows through without an effect
+  // syncing server state into local state - the pattern that goes wrong the moment the
+  // request resolves a second time.
+  const bank = bankName ?? data?.bank_name ?? '';
+  const holder = holderName ?? data?.holder_name ?? '';
+  const number = accountNumber ?? data?.account_number ?? '';
+
+  const save = useMutation({
+    mutationFn: () =>
+      // Empty fields are omitted, not sent as `""`. Both mean "cleared" to a `PUT`, but
+      // the account number has a minimum length, so an empty string comes back as a
+      // validation error instead of removing the number.
+      billingApi.saveBankDetails(account.id, {
+        ...(bank.trim() ? { bank_name: bank.trim() } : {}),
+        ...(holder.trim() ? { holder_name: holder.trim() } : {}),
+        ...(number.trim() ? { account_number: number.trim() } : {}),
+      }),
+    onSuccess: (saved) => {
+      void queryClient.invalidateQueries({ queryKey: ['bank-details', account.id] });
+      // The picker builds its subtitle from this payload.
+      void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
+      toast.success(`Saved details for ${account.name}`, {
+        description: saved.bank_name ?? undefined,
+      });
+      onDone();
+    },
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : 'Could not save the details'),
+  });
+
+  const digits = number.replace(/[\s-]/g, '');
+  const numberLooksWrong = digits !== '' && !/^\d+$/.test(digits);
+
+  return (
+    <div className="border-border bg-surface-sunken/50 mt-2 space-y-3 rounded-lg border border-dashed p-3">
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Input
+          label="Bank name"
+          autoFocus
+          placeholder="HDFC Bank"
+          value={bank}
+          onChange={(event) => setBankName(event.target.value)}
+          disabled={isLoading}
+        />
+        <Input
+          label="Account holder"
+          placeholder="Priya Sharma"
+          value={holder}
+          onChange={(event) => setHolderName(event.target.value)}
+          disabled={isLoading}
+        />
+        <Input
+          label="Account number"
+          autoComplete="off"
+          inputMode="numeric"
+          placeholder="50100123454321"
+          value={number}
+          onChange={(event) => setAccountNumber(event.target.value)}
+          disabled={isLoading}
+          className="tabular-nums"
+          error={numberLooksWrong ? 'Digits only.' : undefined}
+          hint={isLoading ? 'Loading…' : 'Stored encrypted. Clear it to remove it.'}
+        />
+      </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onDone} disabled={save.isPending}>
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          onClick={() => save.mutate()}
+          disabled={isLoading || numberLooksWrong || save.isPending}
+        >
+          {save.isPending ? 'Saving…' : 'Save details'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function CardRow({ card }: { card: Card }) {
   const queryClient = useQueryClient();
 
@@ -338,8 +489,10 @@ function CardRow({ card }: { card: Card }) {
         <span className="text-content block truncate text-[13px]">
           {card.label} <span className="text-content-muted tabular-nums">··{card.last4}</span>
         </span>
-        <span className="text-content-muted block text-[11px]">
-          {NETWORK_LABELS[card.network]} · {card.account_name}
+        <span className="text-content-muted block truncate text-[11px]">
+          {[NETWORK_LABELS[card.network], card.holder_name, card.account_name]
+            .filter(Boolean)
+            .join(' · ')}
         </span>
       </span>
       <Badge tone={card.kind === 'credit' ? 'warning' : 'info'}>
@@ -412,6 +565,7 @@ function AddCardForm({
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState<CardKind>('credit');
   const [number, setNumber] = useState('');
+  const [holderName, setHolderName] = useState('');
   const [bankId, setBankId] = useState(banks[0]?.id ?? '');
 
   const digits = number.replace(/[\s-]/g, '');
@@ -424,12 +578,14 @@ function AddCardForm({
         label: label.trim(),
         kind,
         card_number: number,
+        ...(holderName.trim() ? { holder_name: holderName.trim() } : {}),
         ...(kind === 'debit' && bankId ? { bank_account_id: bankId } : {}),
       }),
     onSuccess: (card) => {
       // Cleared first, before anything can await: the number has done its only job.
       setNumber('');
       setLabel('');
+      setHolderName('');
 
       void queryClient.invalidateQueries({ queryKey: ['billing-cards'] });
       void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
@@ -502,18 +658,30 @@ function AddCardForm({
           error={numberLooksWrong ? 'Check that number - a digit looks wrong.' : undefined}
           hint="Only the network and the last four digits are kept. The number itself is never stored."
         />
-        {needsBank && (
-          <Select
-            label="Draws on"
-            value={bankId}
-            onChange={(event) => setBankId(event.target.value)}
-            options={banks.map((account) => ({ value: account.id, label: account.name }))}
-            placeholder={banks.length === 0 ? 'No bank accounts yet' : undefined}
-            hint="A debit card spends from an account you already have, so it gets no account of its own."
-            error={banks.length === 0 ? 'Add a bank account first.' : undefined}
-          />
-        )}
+        <Input
+          label="Name on the card"
+          /* Off as well. This one *is* stored, but it sits beside the number field and
+             letting the browser treat this form as a saved-card form is the thing to
+             avoid - it is what would offer to fill, and keep, the number next to it. */
+          autoComplete="off"
+          placeholder="Priya Sharma"
+          value={holderName}
+          onChange={(event) => setHolderName(event.target.value)}
+          hint="Optional. Kept as typed - unlike the number."
+        />
       </div>
+
+      {needsBank && (
+        <Select
+          label="Draws on"
+          value={bankId}
+          onChange={(event) => setBankId(event.target.value)}
+          options={banks.map((account) => ({ value: account.id, label: account.name }))}
+          placeholder={banks.length === 0 ? 'No bank accounts yet' : undefined}
+          hint="A debit card spends from an account you already have, so it gets no account of its own."
+          error={banks.length === 0 ? 'Add a bank account first.' : undefined}
+        />
+      )}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel} disabled={add.isPending}>

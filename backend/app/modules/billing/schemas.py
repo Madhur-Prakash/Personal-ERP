@@ -85,16 +85,76 @@ class CreateCategoryRequest(BaseSchema):
     direction: Direction
 
 
-class CreateMoneyAccountRequest(BaseSchema):
+#: A bank's name, an account holder's name. Stripped, so a field holding only spaces is
+#: treated as blank rather than stored as whitespace that looks filled in on screen.
+PartyName = Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]
+
+#: An account number as typed. Spaces and dashes are how people write these down, so they
+#: are accepted and stripped; letters are not, because an account number has none.
+AccountNumber = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=4, max_length=34, pattern=r"^[\d\s-]+$"
+    ),
+]
+
+
+class BankDetailsFields(BaseSchema):
+    """The facts about a bank account that the ledger has no use for.
+
+    All optional, because cash in hand has none of them and a first entry should not be
+    blocked on paperwork. Shared by the create and update requests so the two cannot drift.
+    """
+
+    #: "HDFC Bank", "State Bank of India". Free text - a fixed list of banks is a list that
+    #: is wrong the week a new one launches or two merge.
+    bank_name: PartyName | None = None
+    #: Whose account it is. Usually the business or its proprietor.
+    holder_name: PartyName | None = None
+    #: **Stored encrypted, and stored in full** - unlike a card number. It is what you
+    #: quote to be paid and match against a statement, so keeping only four digits would
+    #: make it useless. See `billing/models.py` for the contrast.
+    account_number: AccountNumber | None = None
+
+
+class CreateMoneyAccountRequest(BankDetailsFields):
     """Add a cash box or bank account.
 
-    A name and which of the two it behaves like. Everything else - the account code,
-    the parent group, the subtype - is derived, for the same reason the category form
-    derives them: nobody should need the chart of accounts to add a UPI wallet.
+    A name and which of the two it behaves like are all that is required. Everything else -
+    the account code, the parent group, the subtype - is derived, for the same reason the
+    category form derives them: nobody should need the chart of accounts to add a UPI
+    wallet.
+
+    The inherited bank fields are **ignored for a cash account**, which has no bank, no
+    number and no holder.
     """
 
     name: Annotated[str, Field(min_length=1, max_length=150)]
     kind: MoneyKind = MoneyKind.BANK
+
+
+class UpdateBankDetailsRequest(BankDetailsFields):
+    """Fill in or correct an account's details after the fact.
+
+    Needed because the seeded chart creates "Primary Bank Account" before anyone has said
+    which bank that is - so without this, the one account most organizations actually use
+    would be the only one that could never carry its own details.
+    """
+
+
+class BankDetailsRead(ResponseSchema):
+    """One account's details, **with the number in full.**
+
+    Its own response rather than part of `MoneyAccountRead`, so that reading a full account
+    number is a deliberate request against its own route, instead of something that rides
+    along on every load of the recording screen.
+    """
+
+    account_id: uuid.UUID
+    bank_name: str | None = None
+    holder_name: str | None = None
+    account_number: str | None = None
+    account_number_last4: str | None = None
 
 
 class MoneyAccountRead(ResponseSchema):
@@ -111,6 +171,13 @@ class MoneyAccountRead(ResponseSchema):
     card_id: uuid.UUID | None = None
     card_last4: str | None = None
     card_network: str | None = None
+
+    #: Who the account belongs to and which bank it is at, for the line under the name.
+    bank_name: str | None = None
+    holder_name: str | None = None
+    #: The tail only. **Never the full number** on this list - it fills a picker, and a
+    #: client that just needs to tell two accounts apart has no use for the whole thing.
+    account_number_last4: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +209,14 @@ class AddCardRequest(BaseSchema):
         ),
     ]
 
+    #: The name embossed on the card. Optional - on a sole proprietor's own card it is
+    #: simply their own name and typing it adds nothing.
+    #:
+    #: **Kept in the clear, unlike the number.** PCI DSS permits retaining a cardholder
+    #: name; it is the PAN and the authentication data that may not be kept. A name alone
+    #: cannot be used to transact.
+    holder_name: PartyName | None = None
+
     #: Required for a debit card, ignored for a credit card. A debit card is a way of
     #: using a bank account you already have, so it names that account rather than
     #: creating one - which would double-count the same money.
@@ -162,6 +237,8 @@ class CardRead(ResponseSchema):
     account_id: uuid.UUID
     account_name: str
     is_active: bool
+    #: The name on the card, if it was given.
+    holder_name: str | None = None
 
 
 # ---------------------------------------------------------------------------

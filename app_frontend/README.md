@@ -208,7 +208,7 @@ tips, the reversal-not-delete flow, the exact wording of every explanation - is 
 flutter test
 ```
 
-74 unit and widget tests plus one integration test.
+82 unit and widget tests plus one integration test.
 
 The unit tests cover what must not be approximately right: the money path (exact decimal
 formatting, `BigInt` summation, scale-insensitive comparison), the OKLCH conversion, the

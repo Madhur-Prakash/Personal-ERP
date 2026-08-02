@@ -183,6 +183,93 @@ void main() {
     });
   });
 
+  group('bank details on an account', () {
+    test('the subtitle prefers the bank and holder over the account code', () {
+      const MoneyAccount account = MoneyAccount(
+        id: 'acct-bank',
+        name: 'HDFC Current',
+        isDefault: false,
+        kind: MoneyAccountKind.bank,
+        code: '1121',
+        bankName: 'HDFC Bank',
+        holderName: 'Priya Sharma',
+      );
+      expect(account.subtitle, 'HDFC Bank · Priya Sharma');
+    });
+
+    test('the code is the fallback when nothing has been recorded', () {
+      // The seeded "Primary Bank Account" starts like this - created by the chart
+      // template before anyone has said which bank it is.
+      const MoneyAccount account = MoneyAccount(
+        id: 'acct-bank',
+        name: 'Primary Bank Account',
+        isDefault: false,
+        kind: MoneyAccountKind.bank,
+        code: '1120',
+      );
+      expect(account.subtitle, '1120');
+    });
+
+    test('a half-filled account shows what it has', () {
+      const MoneyAccount account = MoneyAccount(
+        id: 'acct-bank',
+        name: 'HDFC Current',
+        isDefault: false,
+        kind: MoneyAccountKind.bank,
+        code: '1121',
+        bankName: 'HDFC Bank',
+      );
+      expect(account.subtitle, 'HDFC Bank');
+    });
+
+    test('the picker payload carries the tail but never the whole number', () {
+      final MoneyAccount account = MoneyAccount.fromJson(<String, dynamic>{
+        'id': 'acct-bank',
+        'name': 'HDFC Current',
+        'is_default': false,
+        'kind': 'bank',
+        'code': '1121',
+        'bank_name': 'HDFC Bank',
+        'holder_name': 'Priya Sharma',
+        'account_number_last4': '4321',
+      });
+      expect(account.accountNumberLast4, '4321');
+      // There is no field on this model that could hold the full number, which is what
+      // keeps it off the payload that every load of the billing screen fetches.
+      expect(account.bankName, 'HDFC Bank');
+    });
+
+    test(
+      'BankDetails carries the full number, because that is its whole job',
+      () {
+        final BankDetails details = BankDetails.fromJson(<String, dynamic>{
+          'account_id': 'acct-bank',
+          'bank_name': 'HDFC Bank',
+          'holder_name': 'Priya Sharma',
+          'account_number': '50100123454321',
+          'account_number_last4': '4321',
+        });
+        // Kept in order to be quoted on an invoice and matched against a statement, so it
+        // must survive the round trip intact rather than being masked here.
+        expect(details.accountNumber, '50100123454321');
+        expect(details.accountNumberLast4, '4321');
+      },
+    );
+
+    test('an account with no details decodes to empty rather than throwing', () {
+      // A cash box will never have any, and the API answers with nulls rather than a 404.
+      final BankDetails details = BankDetails.fromJson(<String, dynamic>{
+        'account_id': 'acct-cash',
+        'bank_name': null,
+        'holder_name': null,
+        'account_number': null,
+        'account_number_last4': null,
+      });
+      expect(details.accountNumber, isNull);
+      expect(details.bankName, isNull);
+    });
+  });
+
   group('PaymentCard', () {
     test('carries no number - only what a receipt already prints', () {
       final PaymentCard card = PaymentCard.fromJson(<String, dynamic>{
@@ -199,6 +286,40 @@ void main() {
       expect(card.kind, CardKind.credit);
       // Four digits as a String: a card ending 0042 is not the number 42.
       expect(card.last4, isA<String>());
+    });
+
+    test('the holder name is kept, unlike the number', () {
+      final PaymentCard card = PaymentCard.fromJson(<String, dynamic>{
+        'id': 'card-1',
+        'label': 'HDFC Millennia',
+        'kind': 'credit',
+        'network': 'visa',
+        'last4': '4242',
+        'account_id': 'acct-1',
+        'account_name': 'HDFC Millennia',
+        'is_active': true,
+        'holder_name': 'Priya Sharma',
+      });
+      // PCI DSS permits retaining a cardholder name; it is the number and the
+      // authentication data that may not be kept. A name alone cannot transact.
+      expect(card.holderName, 'Priya Sharma');
+      expect(card.subtitle, 'Visa · Priya Sharma · HDFC Millennia');
+    });
+
+    test('the subtitle omits a holder name that was never given', () {
+      final PaymentCard card = PaymentCard.fromJson(<String, dynamic>{
+        'id': 'card-1',
+        'label': 'HDFC Millennia',
+        'kind': 'credit',
+        'network': 'visa',
+        'last4': '4242',
+        'account_id': 'acct-1',
+        'account_name': 'HDFC Millennia',
+        'is_active': true,
+      });
+      expect(card.holderName, isNull);
+      // No empty segment and no stray separator.
+      expect(card.subtitle, 'Visa · HDFC Millennia');
     });
 
     test('keeps a leading zero in the last four digits', () {

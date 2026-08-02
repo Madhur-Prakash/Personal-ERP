@@ -349,6 +349,22 @@ final AutoDisposeFutureProvider<BillingSummary> billingSummaryProvider =
       return retrying(() => ref.read(billingApiProvider).summary());
     });
 
+/// One account's bank details, **including the full account number.**
+///
+/// Its own provider keyed by account id rather than part of [billingOptionsProvider],
+/// mirroring the API: decrypting a number is a deliberate request, not something every
+/// load of the billing screen does for every account.
+final AutoDisposeFutureProviderFamily<BankDetails, String> bankDetailsProvider =
+    FutureProvider.autoDispose.family<BankDetails, String>((
+      Ref ref,
+      String accountId,
+    ) {
+      bindCache(ref);
+      return retrying(
+        () => ref.read(billingApiProvider).bankDetails(accountId),
+      );
+    });
+
 /// Cards on file, keyed by whether archived ones are wanted.
 ///
 /// Separate from [billingOptionsProvider] rather than folded into it, because that
@@ -688,6 +704,17 @@ void invalidateCards(WidgetRef ref, {bool ledgerChanged = false}) {
   ref.invalidate(billingCardsProvider);
   ref.invalidate(billingOptionsProvider);
   if (ledgerChanged) invalidateLedger(ref);
+}
+
+/// Everything editing an account's bank details invalidates.
+///
+/// The details themselves and the picker payload, which carries the bank name and the last
+/// four digits for the line under each account. **Not the ledger** - a bank name is a
+/// description of an account, not a posting, so no balance or report has changed.
+void invalidateBankDetails(WidgetRef ref) {
+  ref.invalidate(bankDetailsProvider);
+  ref.invalidate(billingOptionsProvider);
+  ref.invalidate(accountsProvider);
 }
 
 /// Everything a stock or product change invalidates.

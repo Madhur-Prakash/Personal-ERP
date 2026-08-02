@@ -363,13 +363,31 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   spacing: 8,
                   children: <Widget>[
-                    Text(
-                      'Cash & bank',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: t.contentSecondary,
-                      ),
+                    Row(
+                      children: <Widget>[
+                        Text(
+                          'Cash & bank',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: t.contentSecondary,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        InfoTip(
+                          label: 'Cash and bank',
+                          children: <Widget>[
+                            infoText(
+                              'An account number is stored encrypted, and stored in '
+                              'full - unlike a card number, which is never kept at '
+                              'all. You need the account number to be paid and to '
+                              'match a statement, so keeping only four digits would '
+                              'make it useless.',
+                            ),
+                            infoText('Lists show the last four digits only.'),
+                          ],
+                        ),
+                      ],
                     ),
                     for (final (int index, MoneyAccount account)
                         in accounts.indexed)
@@ -443,6 +461,7 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
   Future<void> _addCard() async {
     final TextEditingController label = TextEditingController();
     final TextEditingController number = TextEditingController();
+    final TextEditingController holder = TextEditingController();
     final List<MoneyAccount> banks = widget.options.transferableAccounts
         .where((MoneyAccount a) => !a.isCard && a.kind == MoneyAccountKind.bank)
         .toList(growable: false);
@@ -514,6 +533,16 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
                 hint: 'Only the network and the last four digits are kept.',
                 onChanged: (_) => rebuild(() {}),
               ),
+              AppInput(
+                label: 'Name on the card',
+                controller: holder,
+                placeholder: 'Priya Sharma',
+                // No `autofillHints` here either. This field *is* stored, but it sits
+                // beside the number, and letting the platform treat this as a
+                // saved-card form is exactly what would offer to fill - and keep -
+                // the number next to it.
+                hint: 'Optional. Kept as typed, unlike the number.',
+              ),
               if (kind == CardKind.debit)
                 AppSelect(
                   label: 'Draws on',
@@ -559,6 +588,7 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
         (debit && bankId.isEmpty)) {
       label.dispose();
       number.dispose();
+      holder.dispose();
       return;
     }
 
@@ -569,6 +599,7 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
             label: name,
             kind: kind,
             cardNumber: typed,
+            holderName: holder.text.trim(),
             bankAccountId: debit ? bankId : null,
           );
 
@@ -593,7 +624,13 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
   }
 }
 
-class _AccountRow extends StatelessWidget {
+/// One cash or bank account, with its details editable in place.
+///
+/// Editable here and not only on the add form, because the account most organizations
+/// actually use - "Primary Bank Account" - is created by the chart template before anyone
+/// has said which bank it is. Without this it would be the only account that could never
+/// carry its own details.
+class _AccountRow extends ConsumerStatefulWidget {
   const _AccountRow({required this.account, required this.divided});
 
   final MoneyAccount account;
@@ -604,33 +641,237 @@ class _AccountRow extends StatelessWidget {
   final bool divided;
 
   @override
+  ConsumerState<_AccountRow> createState() => _AccountRowState();
+}
+
+class _AccountRowState extends ConsumerState<_AccountRow> {
+  bool _editing = false;
+
+  @override
   Widget build(BuildContext context) {
     final AppTokens t = context.tokens;
+    final MoneyAccount account = widget.account;
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
-        border: divided ? Border(top: BorderSide(color: t.border)) : null,
+        border: widget.divided
+            ? Border(top: BorderSide(color: t.border))
+            : null,
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            spacing: 12,
+            children: <Widget>[
+              Icon(
+                account.kind == MoneyAccountKind.cash
+                    ? LucideIcons.wallet
+                    : LucideIcons.landmark,
+                size: 16,
+                color: t.contentMuted,
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text.rich(
+                      TextSpan(
+                        children: <InlineSpan>[
+                          TextSpan(text: account.name),
+                          if (account.accountNumberLast4 != null)
+                            TextSpan(
+                              text: ' ··${account.accountNumberLast4}',
+                              style: TextStyle(
+                                color: t.contentMuted,
+                                fontFeatures: const <FontFeature>[
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: t.content),
+                    ),
+                    Text(
+                      account.subtitle,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: t.contentMuted),
+                    ),
+                  ],
+                ),
+              ),
+              if (account.isDefault)
+                const AppBadge('Default', tone: BadgeTone.primary),
+              // Cash in hand has no bank, no number and no holder, so there is nothing
+              // here to open.
+              if (account.kind != MoneyAccountKind.cash)
+                AppButton(
+                  onPressed: () => setState(() => _editing = !_editing),
+                  variant: AppButtonVariant.link,
+                  size: AppButtonSize.sm,
+                  label: _editing
+                      ? 'Close'
+                      : account.bankName == null
+                      ? 'Add details'
+                      : 'Edit',
+                ),
+            ],
+          ),
+          if (_editing)
+            _BankDetailsForm(
+              account: account,
+              onDone: () => setState(() => _editing = false),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Which bank, whose name, which number.
+///
+/// Loads the existing values first, **including the full account number** - this is the one
+/// place the app fetches it, and it does so because the alternative is an edit form that
+/// silently wipes a number the user cannot see. Saving replaces the whole set, so clearing
+/// a field clears it on the server.
+class _BankDetailsForm extends ConsumerStatefulWidget {
+  const _BankDetailsForm({required this.account, required this.onDone});
+
+  final MoneyAccount account;
+  final VoidCallback onDone;
+
+  @override
+  ConsumerState<_BankDetailsForm> createState() => _BankDetailsFormState();
+}
+
+class _BankDetailsFormState extends ConsumerState<_BankDetailsForm> {
+  final TextEditingController _bank = TextEditingController();
+  final TextEditingController _holder = TextEditingController();
+  final TextEditingController _number = TextEditingController();
+
+  /// Whether the fetched values have been copied into the controllers yet.
+  ///
+  /// A one-shot latch rather than a rebuild-time assignment: the provider can emit more
+  /// than once, and re-seeding on a later emission would throw away whatever the user had
+  /// typed in the meantime.
+  bool _seeded = false;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _bank.dispose();
+    _holder.dispose();
+    _number.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await ref
+          .read(billingApiProvider)
+          .saveBankDetails(
+            widget.account.id,
+            bankName: _bank.text.trim(),
+            holderName: _holder.text.trim(),
+            accountNumber: _number.text.trim(),
+          );
+      invalidateBankDetails(ref);
+      if (!mounted) return;
+      context.toastSuccess('Saved details for ${widget.account.name}');
+      widget.onDone();
+    } catch (error) {
+      if (mounted) context.toastApiError(error, 'Could not save the details');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppTokens t = context.tokens;
+    final AsyncValue<BankDetails> details = ref.watch(
+      bankDetailsProvider(widget.account.id),
+    );
+
+    final BankDetails? loaded = details.valueOrNull;
+    if (loaded != null && !_seeded) {
+      _seeded = true;
+      _bank.text = loaded.bankName ?? '';
+      _holder.text = loaded.holderName ?? '';
+      _number.text = loaded.accountNumber ?? '';
+    }
+
+    final bool loading = loaded == null;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: t.surfaceSunken,
+        borderRadius: BorderRadius.circular(Radii.lg),
+        border: Border.all(color: t.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         spacing: 12,
         children: <Widget>[
-          Icon(
-            account.kind == MoneyAccountKind.cash
-                ? LucideIcons.wallet
-                : LucideIcons.landmark,
-            size: 16,
-            color: t.contentMuted,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: 12,
+            children: <Widget>[
+              Expanded(
+                child: AppInput(
+                  label: 'Bank name',
+                  controller: _bank,
+                  autofocus: true,
+                  enabled: !loading,
+                  placeholder: 'HDFC Bank',
+                ),
+              ),
+              Expanded(
+                child: AppInput(
+                  label: 'Account holder',
+                  controller: _holder,
+                  enabled: !loading,
+                  placeholder: 'Priya Sharma',
+                ),
+              ),
+            ],
           ),
-          Expanded(
-            child: Text(
-              account.name,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 13, color: t.content),
-            ),
+          AppInput(
+            label: 'Account number',
+            controller: _number,
+            enabled: !loading,
+            placeholder: '50100123454321',
+            keyboardType: TextInputType.number,
+            inputFormatters: <TextInputFormatter>[
+              FilteringTextInputFormatter.allow(RegExp(r'[\d\s-]')),
+            ],
+            textStyle: const TextStyle(fontFeatures: tabularFigures),
+            hint: loading
+                ? 'Loading…'
+                : 'Stored encrypted. Clear it to remove it.',
           ),
-          if (account.isDefault)
-            const AppBadge('Default', tone: BadgeTone.primary),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            spacing: 8,
+            children: <Widget>[
+              AppButton(
+                onPressed: _saving ? null : widget.onDone,
+                variant: AppButtonVariant.ghost,
+                label: 'Cancel',
+              ),
+              AppButton(
+                onPressed: loading || _saving ? null : _save,
+                loading: _saving,
+                label: _saving ? 'Saving…' : 'Save details',
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -721,7 +962,7 @@ class _CardRowState extends ConsumerState<_CardRow> {
                     style: TextStyle(fontSize: 13, color: t.content),
                   ),
                   Text(
-                    '${card.network.label} · ${card.accountName}',
+                    card.subtitle,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 11, color: t.contentMuted),
                   ),

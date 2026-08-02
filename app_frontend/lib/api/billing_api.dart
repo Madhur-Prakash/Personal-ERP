@@ -78,13 +78,67 @@ class BillingApi {
 
   /// Add a place money can sit - a second bank, a UPI wallet, a partner's petty
   /// cash. The seeded chart only has one till and one current account.
-  Future<MoneyAccount> createMoneyAccount(String name, MoneyKind kind) async =>
-      MoneyAccount.fromJson(
-        await _client.post<Json>(
-          '/billing/money-accounts',
-          body: <String, dynamic>{'name': name, 'kind': kind.wire},
-        ),
+  ///
+  /// The bank fields are optional and are **ignored for a cash account**, which has
+  /// no bank, no number and no holder.
+  Future<MoneyAccount> createMoneyAccount(
+    String name,
+    MoneyKind kind, {
+    String? bankName,
+    String? holderName,
+    String? accountNumber,
+  }) async => MoneyAccount.fromJson(
+    await _client.post<Json>(
+      '/billing/money-accounts',
+      body: <String, dynamic>{
+        'name': name,
+        'kind': kind.wire,
+        if (bankName != null && bankName.isNotEmpty) 'bank_name': bankName,
+        if (holderName != null && holderName.isNotEmpty)
+          'holder_name': holderName,
+        if (accountNumber != null && accountNumber.isNotEmpty)
+          'account_number': accountNumber,
+      },
+    ),
+  );
+
+  /// One account's details, **with the account number in full.**
+  ///
+  /// A separate request from [options] on purpose: decrypting an account number is a
+  /// deliberate act with its own permission check, rather than something that rides
+  /// along on every load of the billing screen for every account.
+  Future<BankDetails> bankDetails(String accountId) async =>
+      BankDetails.fromJson(
+        await _client.get<Json>('/billing/money-accounts/$accountId/details'),
       );
+
+  /// Set which bank an account is at, whose it is, and its number.
+  ///
+  /// A `PUT` that replaces the whole set, so passing null or empty **clears** a field -
+  /// which is how a number entered by mistake is removed. This is also the only way the
+  /// seeded "Primary Bank Account" ever gets its details, since the chart template
+  /// creates it before anyone has said which bank it is.
+  ///
+  /// An empty value is **omitted rather than sent as `""`**. Both mean "cleared" to a
+  /// `PUT`, but the account number has a minimum length, so an empty string would be
+  /// rejected as too short - turning "remove this number" into a validation error.
+  Future<BankDetails> saveBankDetails(
+    String accountId, {
+    String? bankName,
+    String? holderName,
+    String? accountNumber,
+  }) async => BankDetails.fromJson(
+    await _client.put<Json>(
+      '/billing/money-accounts/$accountId/details',
+      body: <String, dynamic>{
+        if (bankName != null && bankName.isNotEmpty) 'bank_name': bankName,
+        if (holderName != null && holderName.isNotEmpty)
+          'holder_name': holderName,
+        if (accountNumber != null && accountNumber.isNotEmpty)
+          'account_number': accountNumber,
+      },
+    ),
+  );
 
   Future<List<PaymentCard>> cards({bool includeArchived = false}) async {
     final List<dynamic> rows = await _client.get<List<dynamic>>(
@@ -105,6 +159,7 @@ class BillingApi {
     required String label,
     required CardKind kind,
     required String cardNumber,
+    String? holderName,
     String? bankAccountId,
   }) async => PaymentCard.fromJson(
     await _client.post<Json>(
@@ -113,6 +168,8 @@ class BillingApi {
         'label': label,
         'kind': kind.wire,
         'card_number': cardNumber,
+        if (holderName != null && holderName.isNotEmpty)
+          'holder_name': holderName,
         // Required for a debit card, ignored for a credit card: a debit card is a
         // way of using an account you already have, so it names that account
         // instead of creating one that would double-count the same money.

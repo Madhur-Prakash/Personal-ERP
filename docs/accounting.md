@@ -194,6 +194,14 @@ counting it would report income that never arrived from anywhere and an expense 
 bought nothing. Paying off a credit card is exactly this: money out of a bank account and
 into the card's liability account, reducing the debt.
 
+**Which bank an account is at is not the ledger's business.** An `account` row knows a code,
+a name and a subtype - everything a posting needs. The bank name, the holder, and the account
+number live in `bank_account_detail`, keyed one-to-one to the account, because every one of
+those fields is nullable and meaningless for the great majority of accounts: revenue,
+expenses, receivables. Putting them on `account` would add four permanently-empty columns to
+the one table every posting joins, and would make the accounting core depend on what the
+billing module happens to want.
+
 That tagging is also what makes the day book's reconstruction work. `BillingService`
 rebuilds its simple two-line view by finding the **income or expense line** and treating
 whatever is left as the money leg - not the other way round. Looking for a cash-equivalent

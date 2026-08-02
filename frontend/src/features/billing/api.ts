@@ -57,6 +57,44 @@ export interface MoneyAccount {
   card_id: string | null;
   card_last4: string | null;
   card_network: string | null;
+
+  /** Which bank the account is at, and whose it is. Absent for cash in hand. */
+  bank_name: string | null;
+  holder_name: string | null;
+  /** The tail only. The **full** number is never on this payload - it fills a picker, and
+   *  a client that just needs to tell two accounts apart has no use for the whole thing.
+   *  Fetch {@link BankDetails} when it is actually needed. */
+  account_number_last4: string | null;
+}
+
+/**
+ * One account's details, **including the full account number.**
+ *
+ * Its own request rather than a field on {@link MoneyAccount}, so decrypting an account
+ * number is a deliberate act behind its own permission check instead of something every
+ * load of the billing screen does for every account.
+ */
+export interface BankDetails {
+  account_id: string;
+  bank_name: string | null;
+  holder_name: string | null;
+  account_number: string | null;
+  account_number_last4: string | null;
+}
+
+/**
+ * The facts about a bank account the ledger has no use for.
+ *
+ * All optional: cash in hand has none of them, and a first account should not be blocked
+ * on paperwork. Ignored entirely for a cash account.
+ */
+export interface BankDetailsBody {
+  bank_name?: string;
+  holder_name?: string;
+  /** As typed - spaces and dashes are stripped server-side. Stored **encrypted**, and
+   *  stored in full, unlike a card number: it is what you quote to be paid and match
+   *  against a statement, so keeping only four digits would make it useless. */
+  account_number?: string;
 }
 
 export interface Card {
@@ -70,6 +108,9 @@ export interface Card {
   account_id: string;
   account_name: string;
   is_active: boolean;
+  /** The name embossed on the card, if it was given. Kept in the clear - PCI DSS permits
+   *  retaining a cardholder name; it is the number and the CVV that may not be kept. */
+  holder_name: string | null;
 }
 
 export interface BillingOptions {
@@ -90,6 +131,8 @@ export interface AddCardBody {
   /** As typed or pasted; spaces and dashes are fine. **Never stored** - the server keeps
    *  the network and the last four digits and discards the rest. */
   card_number: string;
+  /** The name on the card. Optional. */
+  holder_name?: string;
   /** Required for a debit card, ignored for a credit card. */
   bank_account_id?: string;
 }
@@ -186,9 +229,26 @@ export const billingApi = {
   /**
    * Add a place money can sit - a second bank, a UPI wallet, a partner's petty cash.
    * The seeded chart only has one till and one current account.
+   *
+   * `details` are ignored for a cash account, which has no bank, number, or holder.
    */
-  createMoneyAccount: (name: string, kind: MoneyKind) =>
-    api.post<MoneyAccount>('/billing/money-accounts', { name, kind }),
+  createMoneyAccount: (name: string, kind: MoneyKind, details?: BankDetailsBody) =>
+    api.post<MoneyAccount>('/billing/money-accounts', { name, kind, ...details }),
+
+  /** One account's details, with the account number in full. */
+  bankDetails: (accountId: string) =>
+    api.get<BankDetails>(`/billing/money-accounts/${accountId}/details`),
+
+  /**
+   * Set which bank an account is at, whose it is, and its number.
+   *
+   * A `PUT` because it replaces the whole set - sending a blank field clears it, which is
+   * how someone removes a number they entered by mistake. This is also the only way the
+   * seeded "Primary Bank Account" ever gets its details, since it exists before anyone has
+   * said which bank it is.
+   */
+  saveBankDetails: (accountId: string, body: BankDetailsBody) =>
+    api.put<BankDetails>(`/billing/money-accounts/${accountId}/details`, body),
 
   cards: (params?: { include_archived?: boolean }) => api.get<Card[]>('/billing/cards', { params }),
 

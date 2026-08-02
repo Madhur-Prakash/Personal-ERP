@@ -21,6 +21,7 @@ from app.modules.auth.dependencies import (
 )
 from app.modules.billing.schemas import (
     AddCardRequest,
+    BankDetailsRead,
     BillingOptions,
     BillingSummary,
     CardRead,
@@ -33,6 +34,7 @@ from app.modules.billing.schemas import (
     ReverseEntryRequest,
     TransferRead,
     TransferRequest,
+    UpdateBankDetailsRequest,
 )
 from app.modules.billing.service import BillingService, Card, Direction, Entry, MoneyAccount
 from app.modules.organizations.models import Organization
@@ -56,6 +58,9 @@ def _account_response(account: MoneyAccount) -> MoneyAccountRead:
         card_id=account.card_id,
         card_last4=account.card_last4,
         card_network=account.card_network,
+        bank_name=account.bank_name,
+        holder_name=account.holder_name,
+        account_number_last4=account.account_number_last4,
     )
 
 
@@ -69,6 +74,7 @@ def _card_response(card: Card) -> CardRead:
         account_id=card.account_id,
         account_name=card.account_name,
         is_active=card.is_active,
+        holder_name=card.holder_name,
     )
 
 
@@ -219,9 +225,81 @@ async def create_money_account(
     a wallet gets filed as cash and no balance matches anything real.
     """
     account = await service.create_money_account(
-        organization_id, user, name=data.name, kind=data.kind, ctx=ctx
+        organization_id,
+        user,
+        name=data.name,
+        kind=data.kind,
+        bank_name=data.bank_name,
+        holder_name=data.holder_name,
+        account_number=data.account_number,
+        ctx=ctx,
     )
     return _account_response(account)
+
+
+@router.get(
+    "/money-accounts/{account_id}/details",
+    response_model=BankDetailsRead,
+    summary="One account's bank details",
+)
+async def get_bank_details(
+    account_id: uuid.UUID,
+    organization_id: ActiveOrganizationId,
+    service: BillingDep,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_READ))],
+) -> BankDetailsRead:
+    """The bank, the holder, and **the full account number.**
+
+    Its own route rather than a field on the picker payload, so that decrypting an account
+    number is a deliberate request behind its own permission check instead of something
+    every load of the recording screen does for every account.
+
+    Returns empty fields rather than a 404 when an account has no details - "this account
+    has nothing recorded" is an answer, and a cash box will never have any.
+    """
+    details = await service.bank_details(organization_id, account_id)
+    return BankDetailsRead(
+        account_id=account_id,
+        bank_name=details.bank_name,
+        holder_name=details.holder_name,
+        account_number=details.account_number,
+        account_number_last4=details.account_number_last4,
+    )
+
+
+@router.put(
+    "/money-accounts/{account_id}/details",
+    response_model=BankDetailsRead,
+    summary="Set an account's bank details",
+)
+async def put_bank_details(
+    account_id: uuid.UUID,
+    data: UpdateBankDetailsRequest,
+    organization_id: ActiveOrganizationId,
+    service: BillingDep,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> BankDetailsRead:
+    """Fill in or correct which bank an account is at, whose it is, and its number.
+
+    A `PUT` because it replaces the whole set: sending a blank field clears it, which is how
+    someone removes a number they entered by mistake. The seeded "Primary Bank Account"
+    exists before anyone has said which bank it is, so this is the only way that account -
+    the one most organizations actually use - ever gets its details.
+    """
+    details = await service.update_bank_details(
+        organization_id,
+        account_id,
+        bank_name=data.bank_name,
+        holder_name=data.holder_name,
+        account_number=data.account_number,
+    )
+    return BankDetailsRead(
+        account_id=account_id,
+        bank_name=details.bank_name,
+        holder_name=details.holder_name,
+        account_number=details.account_number,
+        account_number_last4=details.account_number_last4,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +351,7 @@ async def add_card(
         label=data.label,
         kind=data.kind,
         card_number=data.card_number,
+        holder_name=data.holder_name,
         bank_account_id=data.bank_account_id,
         ctx=ctx,
     )

@@ -1,4 +1,13 @@
-"""Payment cards - identifying which card money moved on.
+"""Payment cards and bank-account details - identifying where money moved.
+
+Two tables, and the contrast between them is the thing to understand before editing
+either. :class:`BankAccountDetail` stores an account number **in full**, encrypted;
+:class:`PaymentCard` stores no card number at all, in any form. That is not an
+inconsistency - a bank account number is what you quote to get paid and match against a
+statement, so an ERP cannot do its job without it, whereas a card number has no use here
+once the last four digits are known, and keeping one would bring the whole database into
+PCI DSS scope.
+
 
 **The full card number is never stored, and this module is written so that it cannot
 be.** A Primary Account Number is the one field that brings an entire database into PCI
@@ -136,6 +145,16 @@ class PaymentCard(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
         ForeignKey("account.id", ondelete="RESTRICT"), nullable=False, index=True
     )
 
+    #: Whose name is embossed on the card. Optional, because on a sole proprietor's own
+    #: card it is simply their own name and typing it adds nothing.
+    #:
+    #: **Stored in the clear, unlike the number.** Under PCI DSS a cardholder name is
+    #: cardholder data and may be retained; it is the PAN and the authentication data
+    #: (CVV, PIN, magnetic stripe) that may not. A name on its own cannot be used to
+    #: transact, so protecting it like a credential would be theatre - what makes this
+    #: safe is the absence of everything it would need to be paired with.
+    holder_name: Mapped[str | None] = mapped_column(String(120))
+
     #: Archived rather than deleted, for the same reason a product is: entries already
     #: reference the account, and the card is how someone recognises them.
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -164,3 +183,66 @@ class PaymentCard(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
     def display_name(self) -> str:
         """What the picker shows: "Business Amex ··4242"."""
         return f"{self.label} ··{self.last4}"
+
+
+class BankAccountDetail(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
+    """The human facts about a bank account, which the chart of accounts has no room for.
+
+    An :class:`~app.modules.accounting.models.Account` knows a code, a name, and a
+    subtype - everything the ledger needs and nothing a person does. "Which of my three
+    HDFC accounts is 1120?" is not answerable from the chart, and it is the question
+    someone reconciling a statement actually has.
+
+    Its own table rather than columns on ``account``, for two reasons. Every field here is
+    nullable and meaningless for the great majority of accounts - revenue, expenses,
+    receivables - so putting them on ``account`` would add four permanently-empty columns
+    to the one table every posting joins. And it keeps the accounting core free of a
+    dependency on what the billing module happens to want, which is the same reason
+    :class:`PaymentCard` lives here.
+
+    **Cash in hand gets no row.** There is no bank, no number, and no holder.
+    """
+
+    #: One row per account, enforced by the unique constraint below. ``CASCADE`` here
+    #: rather than ``RESTRICT`` as on :attr:`PaymentCard.account_id`: this row is a
+    #: description of an account, not a record of something that happened, so if the
+    #: account can be deleted at all then its description should go with it.
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("account.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    #: "HDFC Bank", "State Bank of India". Free text on purpose - a fixed list of banks is
+    #: a list that is wrong the week a new one launches or two merge.
+    bank_name: Mapped[str | None] = mapped_column(String(120))
+
+    #: Whose account it is. Usually the business or its proprietor, but a partner's petty
+    #: cash float or a director's account used for expenses are both ordinary.
+    holder_name: Mapped[str | None] = mapped_column(String(120))
+
+    #: **Fernet-encrypted at rest**, like a TOTP secret - see
+    #: :func:`app.core.security.encrypt_secret`.
+    #:
+    #: Unlike a card number this *is* stored in full, and the difference is not
+    #: inconsistency. A bank account number is what you must quote to be paid, print on an
+    #: invoice, and match against a statement, so an ERP that discarded it would be unable
+    #: to do the job. It also carries none of a PAN's scheme obligations. But it is still
+    #: the kind of thing that should not be legible in a stolen dump or a database
+    #: screenshot, and the key material for this already exists and is mandatory in
+    #: production, so there is no cost to encrypting it.
+    account_number_encrypted: Mapped[str | None] = mapped_column(String(500))
+
+    #: The last four digits, in the clear, so a list can show "··4321" without decrypting
+    #: a row per line. The same trick as :attr:`PaymentCard.last4`, and for the same
+    #: reason: the tail of the number is what people recognise it by, and it is what a
+    #: statement header prints.
+    account_number_last4: Mapped[str | None] = mapped_column(String(4))
+
+    organization: Mapped[Organization] = relationship(lazy="raise")
+    account: Mapped[Account] = relationship(lazy="raise")
+
+    __table_args__ = (
+        UniqueConstraint("account_id", name="uq_bank_account_detail_account"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"<BankAccountDetail {self.bank_name} ··{self.account_number_last4}>"

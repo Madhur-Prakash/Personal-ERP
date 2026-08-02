@@ -133,6 +133,10 @@ class MoneyAccount {
     required this.kind,
     this.cardId,
     this.cardLast4,
+    this.code = '',
+    this.bankName,
+    this.holderName,
+    this.accountNumberLast4,
   });
 
   final String id;
@@ -151,6 +155,20 @@ class MoneyAccount {
   final String? cardId;
   final String? cardLast4;
 
+  /// The chart-of-accounts code, for the line under the name when there is nothing
+  /// more useful to put there.
+  final String code;
+
+  /// Which bank the account is at, and whose it is. Both absent for cash in hand,
+  /// which has neither.
+  final String? bankName;
+  final String? holderName;
+
+  /// The tail of the account number. **Never the whole number** - this model is
+  /// built from the picker payload, and a client that only needs to tell two
+  /// accounts apart has no use for the rest. Fetch [BankDetails] for that.
+  final String? accountNumberLast4;
+
   bool get isCard => cardId != null;
 
   /// A stable, unique identity for one entry in a picker.
@@ -161,6 +179,16 @@ class MoneyAccount {
   /// use this for the widget's value.
   String get key => cardId ?? id;
 
+  /// The line under the name: "HDFC Bank · Priya Sharma", or the account code when
+  /// nothing has been recorded.
+  String get subtitle {
+    final String detail = <String?>[
+      bankName,
+      holderName,
+    ].whereType<String>().join(' · ');
+    return detail.isEmpty ? code : detail;
+  }
+
   factory MoneyAccount.fromJson(Json json) => MoneyAccount(
     id: str(json, 'id'),
     name: str(json, 'name'),
@@ -168,6 +196,39 @@ class MoneyAccount {
     kind: MoneyAccountKind.parse(strOrNull(json, 'kind')),
     cardId: strOrNull(json, 'card_id'),
     cardLast4: strOrNull(json, 'card_last4'),
+    code: strOrNull(json, 'code') ?? '',
+    bankName: strOrNull(json, 'bank_name'),
+    holderName: strOrNull(json, 'holder_name'),
+    accountNumberLast4: strOrNull(json, 'account_number_last4'),
+  );
+}
+
+/// One account's details, **including the full account number.**
+///
+/// Its own model rather than fields on [MoneyAccount], mirroring the API: decrypting
+/// an account number is a deliberate request behind its own permission check, not
+/// something every load of the billing screen does for every account.
+class BankDetails {
+  const BankDetails({
+    this.bankName,
+    this.holderName,
+    this.accountNumber,
+    this.accountNumberLast4,
+  });
+
+  final String? bankName;
+  final String? holderName;
+
+  /// The number in full. Stored encrypted server-side, and returned here because the
+  /// whole reason for keeping it is to be able to quote it.
+  final String? accountNumber;
+  final String? accountNumberLast4;
+
+  factory BankDetails.fromJson(Json json) => BankDetails(
+    bankName: strOrNull(json, 'bank_name'),
+    holderName: strOrNull(json, 'holder_name'),
+    accountNumber: strOrNull(json, 'account_number'),
+    accountNumberLast4: strOrNull(json, 'account_number_last4'),
   );
 }
 
@@ -182,6 +243,7 @@ class PaymentCard {
     required this.accountId,
     required this.accountName,
     required this.isActive,
+    this.holderName,
   });
 
   final String id;
@@ -198,7 +260,21 @@ class PaymentCard {
   final String accountName;
   final bool isActive;
 
+  /// The name embossed on the card, if it was given.
+  ///
+  /// **Kept in the clear, unlike the number.** PCI DSS permits retaining a cardholder
+  /// name; it is the number and the authentication data that may not be kept. A name
+  /// on its own cannot be used to transact.
+  final String? holderName;
+
   String get displayName => '$label ··$last4';
+
+  /// The line under the name: "Visa · Priya Sharma · HDFC Millennia".
+  String get subtitle => <String?>[
+    network.label,
+    holderName,
+    accountName,
+  ].whereType<String>().where((String s) => s.isNotEmpty).join(' · ');
 
   factory PaymentCard.fromJson(Json json) => PaymentCard(
     id: str(json, 'id'),
@@ -209,6 +285,7 @@ class PaymentCard {
     accountId: str(json, 'account_id'),
     accountName: strOrNull(json, 'account_name') ?? '',
     isActive: boolOf(json, 'is_active'),
+    holderName: strOrNull(json, 'holder_name'),
   );
 }
 

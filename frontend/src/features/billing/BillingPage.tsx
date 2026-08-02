@@ -578,6 +578,11 @@ function NewCategoryRow({
  * exactly those. A second bank, a UPI wallet, a card-settlement account, or a partner's
  * petty cash are all ordinary - and without this, money that moved through a wallet gets
  * filed as cash and no balance matches anything real.
+ *
+ * **The bank fields appear only when the account is a bank**, and disappear for cash in
+ * hand rather than being greyed out. Cash has no bank, no number and no holder, so the
+ * server ignores them - and a disabled field that will never become enabled is a worse
+ * explanation of that than no field at all.
  */
 function NewMoneyAccountRow({
   onCancel,
@@ -589,59 +594,129 @@ function NewMoneyAccountRow({
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [kind, setKind] = useState<MoneyKind>('bank');
+  const [bankName, setBankName] = useState('');
+  const [holderName, setHolderName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
 
   const create = useMutation({
-    mutationFn: () => billingApi.createMoneyAccount(name.trim(), kind),
+    mutationFn: () =>
+      billingApi.createMoneyAccount(
+        name.trim(),
+        kind,
+        // Omitted entirely for cash, so the request says what it means rather than
+        // sending three blanks the server has to decide to ignore.
+        kind === 'bank'
+          ? {
+              ...(bankName.trim() ? { bank_name: bankName.trim() } : {}),
+              ...(holderName.trim() ? { holder_name: holderName.trim() } : {}),
+              ...(accountNumber.trim() ? { account_number: accountNumber.trim() } : {}),
+            }
+          : undefined,
+      ),
     onSuccess: (account) => {
       void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
       void queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      toast.success(`Added "${account.name}"`);
+      toast.success(`Added "${account.name}"`, {
+        description: account.bank_name
+          ? `${account.bank_name}${account.account_number_last4 ? ` ··${account.account_number_last4}` : ''}`
+          : undefined,
+      });
       onCreated(account);
     },
     onError: (error) =>
       toast.error(error instanceof ApiError ? error.message : 'Could not add the account'),
   });
 
-  const canSave = name.trim().length > 0;
+  const digits = accountNumber.replace(/[\s-]/g, '');
+  const numberLooksWrong = digits !== '' && !/^\d+$/.test(digits);
+  const canSave = name.trim().length > 0 && !numberLooksWrong;
+
+  /** Enter saves, Escape cancels - without submitting the entry form this sits inside. */
+  const keys = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (canSave) create.mutate();
+    }
+    if (event.key === 'Escape') onCancel();
+  };
 
   return (
-    <div className="border-border bg-surface-sunken/50 flex flex-wrap items-end gap-2 rounded-lg border border-dashed p-3">
-      <div className="min-w-[12rem] flex-1">
-        <Input
-          label="New account"
-          autoFocus
-          placeholder="UPI wallet"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              if (canSave) create.mutate();
-            }
-            if (event.key === 'Escape') onCancel();
-          }}
-        />
+    <div className="border-border bg-surface-sunken/50 space-y-3 rounded-lg border border-dashed p-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[12rem] flex-1">
+          <Input
+            label="Account name"
+            autoFocus
+            placeholder="Name of the account"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={keys}
+            hint="What you call it on this screen."
+          />
+        </div>
+        <div className="w-44">
+          <Select
+            label="Behaves like"
+            value={kind}
+            onChange={(event) => setKind(event.target.value as MoneyKind)}
+            options={[
+              { value: 'bank', label: 'A bank account' },
+              { value: 'cash', label: 'Cash in hand' },
+            ]}
+            /* The distinction is how it gets checked, not what it is called: cash against
+               a physical count, a bank against a statement. A UPI wallet is a bank. */
+            hint={kind === 'bank' ? 'Checked against a statement' : 'Checked by counting'}
+          />
+        </div>
       </div>
-      <div className="w-44">
-        <Select
-          label="Behaves like"
-          value={kind}
-          onChange={(event) => setKind(event.target.value as MoneyKind)}
-          options={[
-            { value: 'bank', label: 'A bank account' },
-            { value: 'cash', label: 'Cash in hand' },
-          ]}
-          /* The distinction is how it gets checked, not what it is called: cash against
-             a physical count, a bank against a statement. A UPI wallet is a bank. */
-          hint={kind === 'bank' ? 'Checked against a statement' : 'Checked by counting'}
-        />
+
+      {kind === 'bank' && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Input
+            label="Bank name"
+            placeholder="HDFC Bank"
+            value={bankName}
+            onChange={(event) => setBankName(event.target.value)}
+            onKeyDown={keys}
+            hint="Optional."
+          />
+          <Input
+            label="Account holder"
+            placeholder="Priya Sharma"
+            value={holderName}
+            onChange={(event) => setHolderName(event.target.value)}
+            onKeyDown={keys}
+            hint="Optional - whose account it is."
+          />
+          <Input
+            label="Account number"
+            /* Off, like the card field. Nothing here wants the browser's saved values,
+               and an account number is not something to invite it to store either. */
+            autoComplete="off"
+            inputMode="numeric"
+            placeholder="50100123454321"
+            value={accountNumber}
+            onChange={(event) => setAccountNumber(event.target.value)}
+            onKeyDown={keys}
+            className="tabular-nums"
+            error={numberLooksWrong ? 'Digits only.' : undefined}
+            hint="Optional. Stored encrypted; only the last four digits are shown in lists."
+          />
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onCancel} disabled={create.isPending}>
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          onClick={() => create.mutate()}
+          disabled={!canSave || create.isPending}
+        >
+          {create.isPending ? 'Adding…' : 'Add'}
+        </Button>
       </div>
-      <Button type="button" onClick={() => create.mutate()} disabled={!canSave || create.isPending}>
-        {create.isPending ? 'Adding…' : 'Add'}
-      </Button>
-      <Button type="button" variant="ghost" onClick={onCancel} disabled={create.isPending}>
-        Cancel
-      </Button>
     </div>
   );
 }

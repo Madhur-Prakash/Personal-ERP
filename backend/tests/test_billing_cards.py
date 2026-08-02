@@ -69,9 +69,12 @@ async def add_card(
     label: str = "Business card",
     kind: str = "credit",
     number: str = VISA,
+    holder_name: str | None = None,
     bank_account_id: str | None = None,
 ) -> dict:
     body: dict = {"label": label, "kind": kind, "card_number": number}
+    if holder_name is not None:
+        body["holder_name"] = holder_name
     if bank_account_id is not None:
         body["bank_account_id"] = bank_account_id
     response = await client.post(f"{api}/billing/cards", json=body)
@@ -589,3 +592,243 @@ class TestTransfers:
             },
         )
         assert response.status_code == 422, response.text
+
+
+# ---------------------------------------------------------------------------
+# Bank details - the facts a person needs and the ledger does not
+# ---------------------------------------------------------------------------
+class TestBankDetails:
+    """Which bank, whose name, which number.
+
+    The mirror image of `TestNoCardNumberIsPersisted`, and deliberately so: here the number
+    *is* kept, because it is what you quote to be paid and reconcile against. What these
+    prove is that keeping it does not mean leaving it lying around in plaintext.
+    """
+
+    async def test_an_account_can_be_created_with_its_details(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        response = await authed_client.post(
+            f"{api}/billing/money-accounts",
+            json={
+                "name": "HDFC Current",
+                "kind": "bank",
+                "bank_name": "HDFC Bank",
+                "holder_name": "Priya Sharma",
+                "account_number": "50100123454321",
+            },
+        )
+        assert response.status_code == 201, response.text
+        created = response.json()
+        assert created["bank_name"] == "HDFC Bank"
+        assert created["holder_name"] == "Priya Sharma"
+        # The tail comes back; the whole number does not, on this route.
+        assert created["account_number_last4"] == "4321"
+        assert "account_number" not in created
+
+    async def test_the_number_is_not_readable_in_the_table(
+        self, authed_client: AsyncClient, api: str, db: AsyncSession, books: Organization
+    ) -> None:
+        """Encrypted at rest, like a TOTP secret.
+
+        Read straight out of the column rather than through the service, because the point
+        is what a stolen dump would contain.
+        """
+        number = "50100123454321"
+        await authed_client.post(
+            f"{api}/billing/money-accounts",
+            json={"name": "HDFC Current", "kind": "bank", "account_number": number},
+        )
+
+        stored = (
+            await db.execute(
+                text("SELECT account_number_encrypted FROM bank_account_detail")
+            )
+        ).scalar_one()
+
+        assert stored is not None
+        assert number not in stored
+        # Fernet tokens are versioned and base64; this is a cheap shape check that we are
+        # looking at a ciphertext rather than at something merely rearranged.
+        assert stored.startswith("gAAAAA")
+
+    async def test_the_full_number_comes_back_from_its_own_route(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Kept in order to be quoted, so it must survive the round trip intact."""
+        created = (
+            await authed_client.post(
+                f"{api}/billing/money-accounts",
+                json={
+                    "name": "HDFC Current",
+                    "kind": "bank",
+                    "account_number": "50100123454321",
+                },
+            )
+        ).json()
+
+        details = (
+            await authed_client.get(
+                f"{api}/billing/money-accounts/{created['id']}/details"
+            )
+        ).json()
+        assert details["account_number"] == "50100123454321"
+        assert details["account_number_last4"] == "4321"
+
+    async def test_spaces_and_dashes_are_stripped(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Two spellings of one account must compare equal, so the digits are stored."""
+        created = (
+            await authed_client.post(
+                f"{api}/billing/money-accounts",
+                json={
+                    "name": "HDFC Current",
+                    "kind": "bank",
+                    "account_number": "5010 0123-45 4321",
+                },
+            )
+        ).json()
+
+        details = (
+            await authed_client.get(
+                f"{api}/billing/money-accounts/{created['id']}/details"
+            )
+        ).json()
+        assert details["account_number"] == "50100123454321"
+
+    async def test_letters_are_rejected(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        response = await authed_client.post(
+            f"{api}/billing/money-accounts",
+            json={"name": "Nonsense", "kind": "bank", "account_number": "50100ABC4321"},
+        )
+        assert response.status_code == 422, response.text
+
+    async def test_details_are_optional(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """A first account must not be blocked on paperwork."""
+        response = await authed_client.post(
+            f"{api}/billing/money-accounts", json={"name": "Petty cash", "kind": "cash"}
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["bank_name"] is None
+        assert response.json()["account_number_last4"] is None
+
+    async def test_a_cash_box_gets_no_detail_row(
+        self, authed_client: AsyncClient, api: str, db: AsyncSession, books: Organization
+    ) -> None:
+        """Cash has no bank, no number and no holder, so there is nothing to store.
+
+        Asserted because an all-null row would force every later read to tell "no details"
+        from "a row of nothings".
+        """
+        await authed_client.post(
+            f"{api}/billing/money-accounts",
+            json={
+                "name": "Till two",
+                "kind": "cash",
+                "bank_name": "Ignored Bank",
+                "account_number": "50100123454321",
+            },
+        )
+        count = (
+            await db.execute(text("SELECT count(*) FROM bank_account_detail"))
+        ).scalar_one()
+        assert count == 0
+
+    async def test_the_seeded_bank_account_can_be_filled_in_afterwards(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The account most organizations actually use exists before anyone names its bank.
+
+        Without the update route this one - "Primary Bank Account", created by the chart
+        template - would be the only account that could never carry its own details.
+        """
+        accounts = await money_accounts(authed_client, api)
+        bank = next(a for a in accounts if a["kind"] == "bank")
+
+        response = await authed_client.put(
+            f"{api}/billing/money-accounts/{bank['id']}/details",
+            json={
+                "bank_name": "State Bank of India",
+                "holder_name": "Priya Sharma",
+                "account_number": "30987654321098",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["account_number_last4"] == "1098"
+
+        # And it shows up on the picker payload the forms are built from.
+        refreshed = await money_accounts(authed_client, api)
+        updated = next(a for a in refreshed if a["id"] == bank["id"])
+        assert updated["bank_name"] == "State Bank of India"
+        assert updated["account_number_last4"] == "1098"
+
+    async def test_a_blank_number_clears_one_entered_by_mistake(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """`PUT` replaces the whole set, which is how a wrong number gets removed."""
+        accounts = await money_accounts(authed_client, api)
+        bank = next(a for a in accounts if a["kind"] == "bank")
+        url = f"{api}/billing/money-accounts/{bank['id']}/details"
+
+        await authed_client.put(
+            url, json={"bank_name": "HDFC Bank", "account_number": "50100123454321"}
+        )
+        cleared = (await authed_client.put(url, json={"bank_name": "HDFC Bank"})).json()
+
+        assert cleared["bank_name"] == "HDFC Bank"
+        assert cleared["account_number"] is None
+        assert cleared["account_number_last4"] is None
+
+    async def test_details_cannot_be_hung_on_a_revenue_account(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """"Which bank is Sales Revenue at" is not a question, so it is refused."""
+        options = (await authed_client.get(f"{api}/billing/options")).json()
+        category = options["categories"][0]
+
+        response = await authed_client.put(
+            f"{api}/billing/money-accounts/{category['id']}/details",
+            json={"bank_name": "HDFC Bank"},
+        )
+        assert response.status_code == 422, response.text
+
+    async def test_another_organizations_account_is_not_writable(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """Tenant isolation, on a route that takes an account id from the caller."""
+        import uuid as _uuid
+
+        response = await authed_client.put(
+            f"{api}/billing/money-accounts/{_uuid.uuid4()}/details",
+            json={"bank_name": "HDFC Bank"},
+        )
+        assert response.status_code == 404, response.text
+
+
+class TestCardHolderName:
+    async def test_the_name_on_the_card_is_kept(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        card = await add_card(authed_client, api, holder_name="Priya Sharma")
+        assert card["holder_name"] == "Priya Sharma"
+
+        listed = (await authed_client.get(f"{api}/billing/cards")).json()
+        assert listed[0]["holder_name"] == "Priya Sharma"
+
+    async def test_it_is_optional(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """On a sole proprietor's own card it is simply their own name."""
+        card = await add_card(authed_client, api)
+        assert card["holder_name"] is None
+
+    async def test_a_blank_name_is_not_stored_as_whitespace(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        card = await add_card(authed_client, api, holder_name="   ")
+        assert card["holder_name"] is None
