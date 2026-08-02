@@ -51,12 +51,53 @@ ifeq ($(OS),Windows_NT)
   # `PATH` is special-cased by MSYS and still translated, so recipes continue to
   # find `uv`, `npm`, and `docker` normally. Verified, not assumed.
   export MSYS2_ENV_CONV_EXCL := *
+
+  # The same translation applies to command-line *arguments*, and that bites the desktop
+  # client specifically: `flutter build --dart-define=API_V1_PREFIX=/api/v1` reaches the
+  # compiler as `C:/Program Files/Git/api/v1`, and the value is then baked into the binary.
+  # The app's own environment validation catches it and refuses to start - which is the
+  # validation working, but only after a two-minute build. Switched off here so the target
+  # is correct from either shell.
+  export MSYS2_ARG_CONV_EXCL := *
 endif
 
 COMPOSE      := docker compose
 COMPOSE_PROD := docker compose -f docker-compose.prod.yml
 BACKEND      := cd backend &&
 FRONTEND     := cd frontend &&
+DESKTOP      := cd app_frontend &&
+
+# Where the desktop client points.
+#
+# The web app reads `VITE_API_BASE_URL` from `.env` at build time; Flutter has no such
+# mechanism, so the equivalent is `--dart-define` and it has to be passed on every `run`
+# and `build`. Overridable for a real deployment:
+#
+#   make desktop API_BASE_URL=https://erp.example.com
+#
+# `127.0.0.1` rather than `localhost`, matching the default compiled into the client:
+# `docker compose` may publish the port on IPv4 only, and a name that resolves to `::1`
+# first then fails with "connection refused" against a server that is running.
+API_BASE_URL   ?= http://127.0.0.1:8000
+API_V1_PREFIX  ?= /api/v1
+
+# `=` rather than `:=` on purpose. An immediately-expanded assignment would capture these
+# two variables before the defaults above are set - and because the values then arrive
+# empty, the build succeeds and produces a binary that refuses to start. Recursive
+# expansion resolves them at use, which also lets an override on the command line win.
+DESKTOP_ENV   = --dart-define=API_BASE_URL=$(API_BASE_URL)                 --dart-define=API_V1_PREFIX=$(API_V1_PREFIX)
+
+# The desktop target to run. Defaults to whichever this machine is.
+ifeq ($(OS),Windows_NT)
+  DESKTOP_DEVICE ?= windows
+else
+  UNAME_S := $(shell uname -s)
+  ifeq ($(UNAME_S),Darwin)
+    DESKTOP_DEVICE ?= macos
+  else
+    DESKTOP_DEVICE ?= linux
+  endif
+endif
 
 .PHONY: help
 help: ## Show this help
@@ -113,6 +154,10 @@ dev-api: ## Run the API on the host with reload
 .PHONY: dev-web
 dev-web: ## Run the Vite dev server on the host
 	$(FRONTEND) npm run dev
+
+.PHONY: desktop
+desktop: ## Run the Flutter desktop client on the host
+	$(DESKTOP) flutter run -d $(DESKTOP_DEVICE) $(DESKTOP_ENV)
 
 .PHONY: logs
 logs: ## Tail all container logs
@@ -175,31 +220,39 @@ db-reset: ## Drop and rebuild the database from migrations
 check: lint typecheck test ## Run every check CI runs
 
 .PHONY: lint
-lint: ## Lint both sides
+lint: ## Lint every surface
 	$(BACKEND) uv run ruff check .
 	$(FRONTEND) npm run lint
+	$(DESKTOP) dart format --output=none --set-exit-if-changed lib test
 
 .PHONY: format
-format: ## Format both sides
+format: ## Format every surface
 	$(BACKEND) uv run ruff format . && uv run ruff check --fix .
 	$(FRONTEND) npm run format
+	$(DESKTOP) dart format lib test
 
 .PHONY: typecheck
-typecheck: ## Type check both sides
+typecheck: ## Type check every surface
 	$(BACKEND) uv run mypy app
 	$(FRONTEND) npx tsc -b
+	$(DESKTOP) flutter analyze
 
 .PHONY: test
-test: ## Run backend tests (needs PostgreSQL and Redis)
+test: ## Run backend tests (needs PostgreSQL and Redis) and desktop tests
 	$(BACKEND) uv run pytest -q
+	$(DESKTOP) flutter test
 
 .PHONY: test-cov
 test-cov: ## Run backend tests with a coverage report
 	$(BACKEND) uv run pytest --cov --cov-report=term-missing --cov-report=html
 
 .PHONY: build
-build: ## Build the frontend for production
+build: ## Build the web frontend for production
 	$(FRONTEND) npm run build
+
+.PHONY: build-desktop
+build-desktop: ## Build a release desktop binary for this platform
+	$(DESKTOP) flutter build $(DESKTOP_DEVICE) --release $(DESKTOP_ENV)
 
 # -----------------------------------------------------------------------------
 # Production

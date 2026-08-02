@@ -29,6 +29,7 @@ sales, purchasing and inventory, document intelligence, and analytics; see
 | Monorepo, Docker Compose (dev + prod) | Done |
 | FastAPI backend, PostgreSQL 17, Redis 7 | Done |
 | React 19 + TypeScript + Vite frontend | Done |
+| Flutter desktop client - Windows, macOS, Linux; the same screens against the same API, staying signed in across restarts | Done |
 | Authentication - password, email verification, magic link, email OTP, password reset, TOTP 2FA with recovery codes | Done |
 | Sessions - refresh-token rotation with reuse detection, device history, remote revocation | Done |
 | Multi-tenancy - organizations, members, invitations | Done |
@@ -65,6 +66,7 @@ make up             # starts the whole stack
 | Service | URL |
 | --- | --- |
 | Frontend | http://localhost:5173 |
+| Desktop client | `make desktop` - a native window, not a URL |
 | API | http://localhost:8000 |
 | API docs | http://localhost:8000/docs |
 | Mailpit (all outbound email) | http://localhost:8025 |
@@ -189,6 +191,7 @@ uv run alembic downgrade -1                        # roll back one
 ```bash
 uv run uvicorn app.main:app --reload   # backend  → :8000
 npm run dev                            # frontend → :5173
+make desktop                           # desktop client → a native window
 ```
 
 ### Frontend equivalents
@@ -235,6 +238,12 @@ non-mutating form, which is what CI uses.
 │       ├── features/        auth, dashboard, organizations, settings, theme
 │       ├── lib/             HTTP client, env validation, formatting
 │       └── routes/          TanStack Router tree
+├── app_frontend/            Flutter desktop client · Windows · macOS · Linux
+│   └── lib/
+│       ├── theme/           The web app's oklch tokens, converted at runtime
+│       ├── widgets/         The same design system, rendered natively
+│       ├── features/        One directory per screen, mirroring frontend/src/features
+│       └── core/            Env, HTTP client with a cookie jar, exact-decimal money
 ├── infra/
 │   ├── nginx/               Edge reverse proxy, TLS, rate limiting
 │   └── scripts/             Backup and restore
@@ -326,6 +335,11 @@ PostgreSQL 17, Redis 7, Pydantic v2, Argon2id, PyJWT, pyotp, aiosmtplib, logifyx
 Router + Query + Table, React Hook Form, Zod, Recharts, cmdk, Sonner, Lucide,
 Motion.
 
+**Desktop** - Flutter 3.44, Dart 3.12, Material 3, Riverpod, go_router, Dio with a
+persisted cookie jar, fl_chart, Lucide. Same API, same design tokens; see
+[app_frontend/README.md](app_frontend/README.md) for the four places a native window
+honestly differs from a browser.
+
 **Infrastructure** - Docker, Nginx, Let's Encrypt, GitHub Actions.
 
 ---
@@ -341,6 +355,10 @@ backend    alembic: applies, reverses, and reports zero drift
 frontend   tsc -b: 0 errors
 frontend   eslint: 0 problems (type-aware rules enabled)
 frontend   vite build: succeeds, 0 vulnerabilities in the dependency tree
+desktop    flutter analyze: 0 issues
+desktop    42 tests passing, including a live session round-trip against the API
+desktop    Windows release binary builds, starts, and restores its session
+           across three consecutive relaunches with no token reuse detected
 compose    dev and prod files validate
 docker     both production images build, run non-root, and pass health checks
 live       full auth journey exercised against the production image:
