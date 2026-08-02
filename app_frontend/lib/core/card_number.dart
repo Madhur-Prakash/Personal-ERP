@@ -52,3 +52,41 @@ bool passesLuhn(String digits) {
   }
   return total % 10 == 0;
 }
+
+/// Why the number is not acceptable yet, or null when it is.
+///
+/// **This exists because the "Add card" button used to disable itself in silence.** Eleven
+/// digits produced no message, no error, and a greyed-out button with no way to tell that
+/// one more digit was needed - the rules lived only as a boolean for `onPressed`, which is
+/// not something a person can read.
+///
+/// Counts digits out loud while the number is short: "11 of at least 12 digits" answers the
+/// question a greyed-out button raises, where "Invalid" would not.
+String? cardNumberProblem(String digits) {
+  if (digits.isEmpty) return null;
+  if (!RegExp(r'^\d+$').hasMatch(digits)) return 'Digits only.';
+  if (digits.length < minCardDigits) {
+    return '${digits.length} of at least $minCardDigits digits.';
+  }
+  if (digits.length > maxCardDigits) {
+    return 'A card number is at most $maxCardDigits digits.';
+  }
+  return null;
+}
+
+/// A checksum warning, or null. **Does not block saving.**
+///
+/// Separate from [cardNumberProblem] because the two carry different force. Length and
+/// charset are structural: outside 12-19 digits there is nothing sensible to store, so those
+/// refuse the save. A failed Luhn digit is a suspicion - "this is probably a typo" - and the
+/// server treats it the same way.
+///
+/// Blocking on it was the wrong trade for this product. Nothing here is ever charged, the
+/// number is discarded within the request, and the only lasting artefact is a four-digit
+/// label. Worth saying out loud, because a wrong label defeats the point of keeping one; not
+/// worth refusing an entry somebody is deliberately making about their own card.
+String? cardNumberWarning(String digits) {
+  if (!isPlausibleCardNumber(digits) || passesLuhn(digits)) return null;
+  return 'That does not look like a valid card number - check the digits. '
+      'You can still save it.';
+}

@@ -739,11 +739,11 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
       builder: (BuildContext context) => StatefulBuilder(
         builder: (BuildContext context, void Function(void Function()) rebuild) {
           final String digits = normaliseCardNumber(number.text);
-          // Only complained about once it *could* be a card number - flagging a
-          // check-digit failure after four digits would just mean "you have not
-          // finished typing", shown as an error.
-          final bool looksWrong =
-              isPlausibleCardNumber(digits) && !passesLuhn(digits);
+          // Two different things: the blocking problem (wrong length or charset) and the
+          // advisory warning (failed check digit). See `core/card_number.dart` - a bad
+          // check digit is worth saying, not worth refusing.
+          final String? problem = cardNumberProblem(digits);
+          final String? warning = cardNumberWarning(digits);
 
           return Column(
             spacing: 12,
@@ -788,10 +788,10 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
                 // arrangement - nothing in this app keeps a card number, so nothing
                 // should invite the OS to hand one over or store one back.
                 textStyle: const TextStyle(fontFeatures: tabularFigures),
-                error: looksWrong
-                    ? 'Check that number - a digit looks wrong.'
-                    : null,
-                hint: 'Only the network and the last four digits are kept.',
+                error: problem,
+                hint:
+                    warning ??
+                    'Only the network and the last four digits are kept.',
                 onChanged: (_) => rebuild(() {}),
               ),
               AppInput(
