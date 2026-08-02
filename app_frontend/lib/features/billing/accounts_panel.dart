@@ -522,8 +522,9 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
             ) {
               // A debit card resolves to the bank account it draws on, so the raw list
               // holds that account twice.
-              if (!seen.any((MoneyAccount kept) => kept.id == a.id))
+              if (!seen.any((MoneyAccount kept) => kept.id == a.id)) {
                 seen.add(a);
+              }
               return seen;
             });
 

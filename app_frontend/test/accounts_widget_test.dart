@@ -31,6 +31,17 @@ void main() {
     holderName: 'Jhon Doe',
     accountNumberLast4: '4321',
   );
+  /// A closed account: still listed when asked for, never offered in a picker.
+  const MoneyAccount archivedBank = MoneyAccount(
+    id: 'acct-old',
+    name: 'Old current account',
+    isDefault: false,
+    kind: MoneyAccountKind.bank,
+    code: '1123',
+    isActive: false,
+    canArchive: true,
+  );
+
   // The same account under a second name - what a debit card is.
   const MoneyAccount debitCard = MoneyAccount(
     id: 'acct-bank',
@@ -99,6 +110,17 @@ void main() {
               includeArchived
                   ? <PaymentCard>[credit, archivedDebit]
                   : <PaymentCard>[credit],
+            ),
+          ),
+          // Overridden for the same reason as the cards: unstubbed, the provider reaches
+          // for an `ApiClient` that only `main` can build, fails, and `retrying` schedules
+          // a backoff timer that outlives the test - which surfaces as "a Timer is still
+          // pending", not as anything pointing at the missing stub.
+          moneyAccountsProvider.overrideWith(
+            (Ref ref, bool includeArchived) => Future<List<MoneyAccount>>.value(
+              includeArchived
+                  ? <MoneyAccount>[cash, bank, archivedBank]
+                  : <MoneyAccount>[cash, bank],
             ),
           ),
         ],
