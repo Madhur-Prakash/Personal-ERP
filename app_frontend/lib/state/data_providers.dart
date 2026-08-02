@@ -354,11 +354,8 @@ final AutoDisposeFutureProvider<BillingSummary> billingSummaryProvider =
 /// Separate from [billingOptionsProvider] because only this one can be asked for archived
 /// accounts. That payload feeds the recording form's pickers and must never carry one.
 final AutoDisposeFutureProviderFamily<List<MoneyAccount>, bool>
-moneyAccountsProvider =
-    FutureProvider.autoDispose.family<List<MoneyAccount>, bool>((
-      Ref ref,
-      bool includeArchived,
-    ) {
+moneyAccountsProvider = FutureProvider.autoDispose
+    .family<List<MoneyAccount>, bool>((Ref ref, bool includeArchived) {
       bindCache(ref);
       return retrying(
         () => ref

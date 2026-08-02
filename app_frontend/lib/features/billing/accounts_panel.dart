@@ -256,7 +256,8 @@ class _TransferFormState extends ConsumerState<TransferForm> {
 
   /// The first account that is not [exclude], for seeding or un-clashing the other side.
   String _otherThan(String exclude) =>
-      _accounts.where((MoneyAccount a) => a.id != exclude).firstOrNull?.id ?? '';
+      _accounts.where((MoneyAccount a) => a.id != exclude).firstOrNull?.id ??
+      '';
 
   @override
   void initState() {
@@ -521,7 +522,8 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
             ) {
               // A debit card resolves to the bank account it draws on, so the raw list
               // holds that account twice.
-              if (!seen.any((MoneyAccount kept) => kept.id == a.id)) seen.add(a);
+              if (!seen.any((MoneyAccount kept) => kept.id == a.id))
+                seen.add(a);
               return seen;
             });
 
