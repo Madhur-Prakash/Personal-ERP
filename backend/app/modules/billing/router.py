@@ -61,6 +61,8 @@ def _account_response(account: MoneyAccount) -> MoneyAccountRead:
         bank_name=account.bank_name,
         holder_name=account.holder_name,
         account_number_last4=account.account_number_last4,
+        is_active=account.is_active,
+        can_archive=account.can_archive,
     )
 
 
@@ -233,6 +235,81 @@ async def create_money_account(
         holder_name=data.holder_name,
         account_number=data.account_number,
         ctx=ctx,
+    )
+    return _account_response(account)
+
+
+@router.get(
+    "/money-accounts",
+    response_model=list[MoneyAccountRead],
+    summary="Cash, bank, and card accounts",
+)
+async def list_money_accounts(
+    organization_id: ActiveOrganizationId,
+    service: BillingDep,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_READ))],
+    include_archived: Annotated[bool, Query()] = False,
+) -> list[MoneyAccountRead]:
+    """Everywhere money can sit.
+
+    Separate from `/options` so the accounts screen can ask for archived ones without the
+    recording form ever seeing them - `/options` never includes archived accounts, because a
+    picker that offers a closed bank account is a picker that posts to it.
+    """
+    return [
+        _account_response(a)
+        for a in await service.money_accounts(
+            organization_id, include_archived=include_archived
+        )
+    ]
+
+
+@router.post(
+    "/money-accounts/{account_id}/archive",
+    response_model=MoneyAccountRead,
+    summary="Archive an account",
+)
+async def archive_money_account(
+    account_id: uuid.UUID,
+    organization_id: ActiveOrganizationId,
+    user: CurrentUser,
+    service: BillingDep,
+    ctx: RequestCtx,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> MoneyAccountRead:
+    """Stop offering an account without deleting it.
+
+    **Archived, never deleted** - entries already point at it, and its name is how somebody
+    recognises them a year later. A closed bank account has to leave the picker without
+    taking its history with it.
+
+    A **seeded** account cannot be archived: later modules post to "Cash on Hand" and
+    "Primary Bank Account" by role, so the accounting service refuses to deactivate them.
+    `MoneyAccountRead.can_archive` says so up front, which is what lets a client avoid
+    offering a button that would always fail.
+    """
+    account = await service.set_money_account_active(
+        organization_id, account_id, user, is_active=False, ctx=ctx
+    )
+    return _account_response(account)
+
+
+@router.post(
+    "/money-accounts/{account_id}/restore",
+    response_model=MoneyAccountRead,
+    summary="Restore an account",
+)
+async def restore_money_account(
+    account_id: uuid.UUID,
+    organization_id: ActiveOrganizationId,
+    user: CurrentUser,
+    service: BillingDep,
+    ctx: RequestCtx,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> MoneyAccountRead:
+    """Offer it again when recording a payment."""
+    account = await service.set_money_account_active(
+        organization_id, account_id, user, is_active=True, ctx=ctx
     )
     return _account_response(account)
 

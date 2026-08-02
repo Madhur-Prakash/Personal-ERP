@@ -566,6 +566,12 @@ class BillingService:
             bank_name=details.bank_name,
             holder_name=details.holder_name,
             account_number_last4=details.account_number_last4,
+            is_active=True,
+            # Always archivable: this route only ever creates a user-added account, and it
+            # is `is_system` that blocks deactivation. Stated explicitly because the field
+            # defaults to `False` - which fails safe, but would leave a just-created account
+            # with no way to archive it.
+            can_archive=True,
         )
 
     async def _save_bank_details(

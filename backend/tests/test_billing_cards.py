@@ -832,3 +832,142 @@ class TestCardHolderName:
     ) -> None:
         card = await add_card(authed_client, api, holder_name="   ")
         assert card["holder_name"] is None
+
+
+class TestArchivingAnAccount:
+    """Stop offering an account without losing the entries that point at it.
+
+    The rule worth pinning is the one a client cannot guess: a **seeded** account cannot be
+    archived, because later modules post to "Cash on Hand" and "Primary Bank Account" by
+    role. The API says so with `can_archive` rather than leaving the client to re-derive it.
+    """
+
+    async def test_a_user_added_account_can_be_archived(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        created = (
+            await authed_client.post(
+                f"{api}/billing/money-accounts",
+                json={"name": "UPI wallet", "kind": "bank"},
+            )
+        ).json()
+        assert created["can_archive"] is True
+
+        response = await authed_client.post(
+            f"{api}/billing/money-accounts/{created['id']}/archive"
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["is_active"] is False
+
+    async def test_an_archived_account_leaves_the_picker(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The whole point. A picker offering a closed account posts to a closed account."""
+        created = (
+            await authed_client.post(
+                f"{api}/billing/money-accounts",
+                json={"name": "Old current account", "kind": "bank"},
+            )
+        ).json()
+        await authed_client.post(
+            f"{api}/billing/money-accounts/{created['id']}/archive"
+        )
+
+        offered = await money_accounts(authed_client, api)
+        assert all(a["id"] != created["id"] for a in offered)
+
+        # But it is still there when the accounts screen asks for it.
+        listed = (
+            await authed_client.get(
+                f"{api}/billing/money-accounts", params={"include_archived": True}
+            )
+        ).json()
+        archived = next(a for a in listed if a["id"] == created["id"])
+        assert archived["is_active"] is False
+
+    async def test_it_can_be_restored(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        created = (
+            await authed_client.post(
+                f"{api}/billing/money-accounts",
+                json={"name": "Seasonal float", "kind": "cash"},
+            )
+        ).json()
+        await authed_client.post(
+            f"{api}/billing/money-accounts/{created['id']}/archive"
+        )
+
+        restored = (
+            await authed_client.post(
+                f"{api}/billing/money-accounts/{created['id']}/restore"
+            )
+        ).json()
+        assert restored["is_active"] is True
+
+        offered = await money_accounts(authed_client, api)
+        assert any(a["id"] == created["id"] for a in offered)
+
+    async def test_a_seeded_account_says_it_cannot_be_archived(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """`can_archive` is false, so a client never offers the button."""
+        offered = await money_accounts(authed_client, api)
+        seeded = [a for a in offered if not a["card_id"]]
+        assert seeded, "sanity: the chart template seeded some money accounts"
+        assert all(a["can_archive"] is False for a in seeded)
+
+    async def test_and_the_server_refuses_if_asked_anyway(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The flag is advice for the UI; this is the rule being enforced."""
+        offered = await money_accounts(authed_client, api)
+        seeded = next(a for a in offered if not a["card_id"])
+
+        response = await authed_client.post(
+            f"{api}/billing/money-accounts/{seeded['id']}/archive"
+        )
+        assert response.status_code == 422, response.text
+
+    async def test_archiving_keeps_the_entries_that_used_it(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """The reason it is archived rather than deleted."""
+        created = (
+            await authed_client.post(
+                f"{api}/billing/money-accounts",
+                json={"name": "Closing branch account", "kind": "bank"},
+            )
+        ).json()
+
+        posted = await authed_client.post(
+            f"{api}/billing",
+            json={
+                "direction": "out",
+                "amount": "250.00",
+                "description": "Branch rent",
+                "party": "Landlord",
+                "money_account_id": created["id"],
+            },
+        )
+        assert posted.status_code == 201, posted.text
+
+        await authed_client.post(
+            f"{api}/billing/money-accounts/{created['id']}/archive"
+        )
+
+        # The day book still shows it, named as before.
+        entries = (await authed_client.get(f"{api}/billing")).json()["items"]
+        assert any(e["money_account_name"] == "Closing branch account" for e in entries)
+
+    async def test_a_revenue_account_cannot_be_archived_from_here(
+        self, authed_client: AsyncClient, api: str, books: Organization
+    ) -> None:
+        """This route is for places money sits, not for the whole chart of accounts."""
+        options = (await authed_client.get(f"{api}/billing/options")).json()
+        category = options["categories"][0]
+
+        response = await authed_client.post(
+            f"{api}/billing/money-accounts/{category['id']}/archive"
+        )
+        assert response.status_code == 422, response.text

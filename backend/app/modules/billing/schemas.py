@@ -179,6 +179,14 @@ class MoneyAccountRead(ResponseSchema):
     #: client that just needs to tell two accounts apart has no use for the whole thing.
     account_number_last4: str | None = None
 
+    #: False once archived. Archived accounts are left out of the picker entirely and only
+    #: appear on the accounts screen when it asks for them.
+    is_active: bool = True
+    #: Whether archiving is allowed. A seeded account cannot be deactivated - later modules
+    #: post to it by role - so the server answers the question rather than leaving the
+    #: client to re-derive a rule it would get wrong.
+    can_archive: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Cards
