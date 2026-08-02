@@ -249,10 +249,14 @@ class _TransferFormState extends ConsumerState<TransferForm> {
 
   late String _entryDate;
   late String _fromId;
-  String _toId = '';
+  late String _toId;
   bool _saving = false;
 
   List<MoneyAccount> get _accounts => widget.options.transferableAccounts;
+
+  /// The first account that is not [exclude], for seeding or un-clashing the other side.
+  String _otherThan(String exclude) =>
+      _accounts.where((MoneyAccount a) => a.id != exclude).firstOrNull?.id ?? '';
 
   @override
   void initState() {
@@ -262,6 +266,10 @@ class _TransferFormState extends ConsumerState<TransferForm> {
     _fromId =
         accounts.where((MoneyAccount a) => a.isDefault).firstOrNull?.id ??
         (accounts.isEmpty ? '' : accounts.first.id);
+    // Defaulted too, rather than left blank. **The first account that is not the "from"** -
+    // the one thing a transfer cannot be is an account to itself, so seeding both sides with
+    // the default account would open the form already invalid.
+    _toId = _otherThan(_fromId);
   }
 
   @override
@@ -1153,25 +1161,14 @@ class _CardRowState extends ConsumerState<_CardRow> {
                   ? BadgeTone.warning
                   : BadgeTone.info,
             ),
-            // `ghost` with an icon, not `link`. As a bare text link this read as a caption
-            // rather than a control - it sat next to a "Show archived" toggle, so the
-            // screen appeared to offer archived cards with no way to archive one. A box on
-            // hover and a matching icon make it look like the button it is.
-            //
-            // An AppButton rather than an AppTextLink, whose `onTap` is non-nullable and so
-            // has no disabled state. Double-firing an archive is harmless, but a control
-            // that stays live while its request is in flight looks broken.
+            // An AppButton rather than an AppTextLink, whose `onTap` is non-nullable
+            // and so has no disabled state. Double-firing an archive is harmless, but
+            // a control that stays live while its request is in flight looks broken.
             AppButton(
               onPressed: _busy ? null : _toggle,
-              variant: AppButtonVariant.ghost,
+              variant: AppButtonVariant.link,
               size: AppButtonSize.sm,
-              leftIcon: card.isActive
-                  ? LucideIcons.archive
-                  : LucideIcons.rotateCcw,
               label: card.isActive ? 'Archive' : 'Restore',
-              tooltip: card.isActive
-                  ? 'Stop offering this card. Past entries still name it.'
-                  : 'Offer this card again when recording a payment.',
               semanticLabel: card.isActive
                   ? 'Archive ${card.label}'
                   : 'Restore ${card.label}',

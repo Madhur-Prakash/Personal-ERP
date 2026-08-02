@@ -45,9 +45,17 @@ export function AccountsPage() {
   const [adding, setAdding] = useState<'account' | 'card' | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
-  const { data: options, isLoading } = useQuery({
+  const { data: options } = useQuery({
     queryKey: ['billing-options'],
     queryFn: () => billingApi.options(),
+  });
+
+  // The dedicated list, not `options.money_accounts`, because only this one can be asked
+  // for archived accounts. `options` deliberately never carries them.
+  const { data: allAccounts, isLoading } = useQuery({
+    queryKey: ['money-accounts', showArchived],
+    queryFn: () =>
+      billingApi.moneyAccounts(showArchived ? { include_archived: true } : undefined),
   });
 
   const { data: cards } = useQuery({
@@ -59,12 +67,13 @@ export function AccountsPage() {
   // account twice. Deduplicated to the real accounts here; the cards get their own
   // section below, which is where someone looks for them anyway.
   const seen = new Set<string>();
-  const accounts = (options?.money_accounts ?? []).filter((account) => {
+  const accounts = (allAccounts ?? options?.money_accounts ?? []).filter((account) => {
     if (account.card_id || seen.has(account.id)) return false;
     seen.add(account.id);
     return true;
   });
-  const banks = accounts.filter((account) => account.kind === 'bank');
+  // Only an active account can back a new debit card.
+  const banks = accounts.filter((account) => account.kind === 'bank' && account.is_active);
   const listed = cards ?? options?.cards ?? [];
 
   return (
@@ -94,19 +103,35 @@ export function AccountsPage() {
       <Card className="mb-4">
         <CardHeader
           title="Cash & bank"
-          description="Money you have. Click an account to fill in or correct its details."
+          description="Money you have. Open an account to fill in or correct its details."
           action={
-            /* `right`, because this sits in the card header's action slot - hard against the
-               right edge - and a panel opening rightwards from there is clipped by the
-               window. Same reason the charts on the accounting screen do it. */
-            <InfoTip label="Account numbers" align="right">
-              <p>
-                An account number is stored <strong>encrypted</strong>, and stored in full - unlike
-                a card number, which is never kept at all. You need it to be paid and to match a
-                statement, so keeping only four digits would make it useless.
-              </p>
-              <p className="mt-2">Lists show the last four digits only.</p>
-            </InfoTip>
+            <div className="flex items-center gap-3">
+              {/* One toggle for both sections - archived accounts and archived cards are
+                  the same question asked once. */}
+              <button
+                type="button"
+                onClick={() => setShowArchived((shown) => !shown)}
+                className="text-content-muted hover:text-content text-[12px]"
+              >
+                {showArchived ? 'Hide archived' : 'Show archived'}
+              </button>
+              {/* `right`, because this sits in the card header's action slot - hard against
+                  the right edge - and a panel opening rightwards from there is clipped by
+                  the window. Same reason the charts on the accounting screen do it. */}
+              <InfoTip label="Account numbers" align="right">
+                <p>
+                  An account number is stored <strong>encrypted</strong>, and stored in full -
+                  unlike a card number, which is never kept at all. You need it to be paid and to
+                  match a statement, so keeping only four digits would make it useless.
+                </p>
+                <p className="mt-2">Lists show the last four digits only.</p>
+                <p className="mt-2">
+                  Archiving an account stops it being offered when recording a payment. Entries
+                  that already used it keep its name. The accounts created with your books cannot
+                  be archived - the software posts to them by role.
+                </p>
+              </InfoTip>
+            </div>
           }
         />
         <CardBody>
@@ -426,7 +451,7 @@ function NewAccountCard({ onDone }: { onDone: () => void }) {
               label="Account name"
               autoFocus
               required
-              placeholder="UPI wallet"
+              placeholder="Name of the account"
               value={name}
               onChange={(event) => setName(event.target.value)}
               hint="What you call it on this screen."

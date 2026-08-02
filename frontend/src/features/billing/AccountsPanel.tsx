@@ -68,10 +68,16 @@ export function TransferForm({
   const queryClient = useQueryClient();
   const accounts = transferableAccounts(options.money_accounts);
 
-  const [fromId, setFromId] = useState(
-    accounts.find((account) => account.is_default)?.id ?? accounts[0]?.id ?? '',
+  const defaultFrom =
+    accounts.find((account) => account.is_default)?.id ?? accounts[0]?.id ?? '';
+
+  const [fromId, setFromId] = useState(defaultFrom);
+  // Defaulted too, rather than left blank. **The first account that is not the "from"**,
+  // because the one thing a transfer cannot be is an account to itself - seeding both sides
+  // with the default account would open the form already invalid.
+  const [toId, setToId] = useState(
+    accounts.find((account) => account.id !== defaultFrom)?.id ?? '',
   );
-  const [toId, setToId] = useState('');
   const [amount, setAmount] = useState('');
   const [entryDate, setEntryDate] = useState(options.today);
   const [description, setDescription] = useState('');
@@ -133,7 +139,16 @@ export function TransferForm({
             <Select
               label="From"
               value={fromId}
-              onChange={(event) => setFromId(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                setFromId(next);
+                // Move "to" out of the way rather than letting the form sit on an error the
+                // user did not make: choosing the account that happened to be the
+                // destination is a normal thing to do, not a mistake to be told about.
+                if (next === toId) {
+                  setToId(accounts.find((account) => account.id !== next)?.id ?? '');
+                }
+              }}
               options={accountOptions}
               hint="The account the money leaves."
             />

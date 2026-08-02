@@ -58,6 +58,18 @@ export interface MoneyAccount {
   card_last4: string | null;
   card_network: string | null;
 
+  /** False once archived. Archived accounts never appear in the payment pickers. */
+  is_active: boolean;
+  /**
+   * Whether archiving is permitted at all.
+   *
+   * A capability flag from the server, not a rule to re-derive here: a seeded account
+   * ("Cash on Hand", "Primary Bank Account") cannot be deactivated, because later
+   * modules post to it by role. Offering the button anyway would produce a request that
+   * always fails.
+   */
+  can_archive: boolean;
+
   /** Which bank the account is at, and whose it is. Absent for cash in hand. */
   bank_name: string | null;
   holder_name: string | null;
@@ -251,6 +263,23 @@ export const billingApi = {
     api.put<BankDetails>(`/billing/money-accounts/${accountId}/details`, body),
 
   cards: (params?: { include_archived?: boolean }) => api.get<Card[]>('/billing/cards', { params }),
+
+  /**
+   * Every place money can sit, optionally including archived ones.
+   *
+   * Separate from `options()` because that payload feeds the recording form's pickers and
+   * must never carry an archived account - a picker that offers a closed bank account is
+   * a picker that posts to it.
+   */
+  moneyAccounts: (params?: { include_archived?: boolean }) =>
+    api.get<MoneyAccount[]>('/billing/money-accounts', { params }),
+
+  /** Stop offering an account without deleting it - entries still name it. */
+  archiveMoneyAccount: (id: string) =>
+    api.post<MoneyAccount>(`/billing/money-accounts/${id}/archive`, {}),
+
+  restoreMoneyAccount: (id: string) =>
+    api.post<MoneyAccount>(`/billing/money-accounts/${id}/restore`, {}),
 
   /**
    * Register a card from its number.
