@@ -27,7 +27,7 @@ void main() {
     'summary': 'Uploaded invoice.pdf',
     'actor': <String, dynamic>{
       'email': 'priya@example.com',
-      'name': 'Priya Sharma',
+      'name': 'Jhon Doe',
     },
     'ip_address': '172.20.0.1',
     'changes': <String, dynamic>{
@@ -46,7 +46,7 @@ void main() {
     'summary': 'Changed role',
     'actor': <String, dynamic>{
       'email': 'priya@example.com',
-      'name': 'Priya Sharma',
+      'name': 'Jhon Doe',
     },
     'ip_address': null,
     'changes': <String, dynamic>{

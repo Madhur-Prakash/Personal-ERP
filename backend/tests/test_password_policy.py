@@ -150,7 +150,7 @@ class TestPersonalInformation:
         assert any("email" in problem for problem in problems)
 
     def test_rejects_password_containing_name(self) -> None:
-        problems = problems_for("Sharma@Ledger", full_name="Priya Sharma")
+        problems = problems_for("Sharma@Ledger", full_name="Jhon Doe")
         assert any("name" in problem for problem in problems)
 
     def test_short_name_parts_do_not_false_positive(self) -> None:
@@ -162,7 +162,7 @@ class TestPersonalInformation:
             problems_for(
                 "Kite#Flyer",
                 email="priyasharma@acme.test",
-                full_name="Priya Sharma",
+                full_name="Jhon Doe",
             )
             == []
         )

@@ -548,7 +548,7 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
               AppInput(
                 label: 'Name on the card',
                 controller: holder,
-                placeholder: 'Priya Sharma',
+                placeholder: 'Jhon Doe',
                 // No `autofillHints` here either. This field *is* stored, but it sits
                 // beside the number, and letting the platform treat this as a
                 // saved-card form is exactly what would offer to fill - and keep -
@@ -849,7 +849,7 @@ class _BankDetailsFormState extends ConsumerState<_BankDetailsForm> {
                   label: 'Account holder',
                   controller: _holder,
                   enabled: !loading,
-                  placeholder: 'Priya Sharma',
+                  placeholder: 'Jhon Doe',
                 ),
               ),
             ],

@@ -179,7 +179,7 @@ class MoneyAccount {
   /// use this for the widget's value.
   String get key => cardId ?? id;
 
-  /// The line under the name: "HDFC Bank · Priya Sharma", or the account code when
+  /// The line under the name: "HDFC Bank · Jhon Doe", or the account code when
   /// nothing has been recorded.
   String get subtitle {
     final String detail = <String?>[
@@ -269,7 +269,7 @@ class PaymentCard {
 
   String get displayName => '$label ··$last4';
 
-  /// The line under the name: "Visa · Priya Sharma · HDFC Millennia".
+  /// The line under the name: "Visa · Jhon Doe · HDFC Millennia".
   String get subtitle => <String?>[
     network.label,
     holderName,

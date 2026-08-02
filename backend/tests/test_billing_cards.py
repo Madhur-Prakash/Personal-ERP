@@ -614,14 +614,14 @@ class TestBankDetails:
                 "name": "HDFC Current",
                 "kind": "bank",
                 "bank_name": "HDFC Bank",
-                "holder_name": "Priya Sharma",
+                "holder_name": "Jhon Doe",
                 "account_number": "50100123454321",
             },
         )
         assert response.status_code == 201, response.text
         created = response.json()
         assert created["bank_name"] == "HDFC Bank"
-        assert created["holder_name"] == "Priya Sharma"
+        assert created["holder_name"] == "Jhon Doe"
         # The tail comes back; the whole number does not, on this route.
         assert created["account_number_last4"] == "4321"
         assert "account_number" not in created
@@ -754,7 +754,7 @@ class TestBankDetails:
             f"{api}/billing/money-accounts/{bank['id']}/details",
             json={
                 "bank_name": "State Bank of India",
-                "holder_name": "Priya Sharma",
+                "holder_name": "Jhon Doe",
                 "account_number": "30987654321098",
             },
         )
@@ -814,11 +814,11 @@ class TestCardHolderName:
     async def test_the_name_on_the_card_is_kept(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        card = await add_card(authed_client, api, holder_name="Priya Sharma")
-        assert card["holder_name"] == "Priya Sharma"
+        card = await add_card(authed_client, api, holder_name="Jhon Doe")
+        assert card["holder_name"] == "Jhon Doe"
 
         listed = (await authed_client.get(f"{api}/billing/cards")).json()
-        assert listed[0]["holder_name"] == "Priya Sharma"
+        assert listed[0]["holder_name"] == "Jhon Doe"
 
     async def test_it_is_optional(
         self, authed_client: AsyncClient, api: str, books: Organization

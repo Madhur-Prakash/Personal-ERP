@@ -200,7 +200,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           AppInput(
             label: 'Full name',
             controller: _fullName,
-            placeholder: 'Priya Sharma',
+            placeholder: 'Jhon Doe',
             leftIcon: LucideIcons.user,
             error: _nameError,
             autofocus: true,

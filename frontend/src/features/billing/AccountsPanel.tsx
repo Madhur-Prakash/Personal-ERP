@@ -417,7 +417,7 @@ function BankDetailsForm({ account, onDone }: { account: MoneyAccount; onDone: (
         />
         <Input
           label="Account holder"
-          placeholder="Priya Sharma"
+          placeholder="Jhon Doe"
           value={holder}
           onChange={(event) => setHolderName(event.target.value)}
           disabled={isLoading}
@@ -632,7 +632,7 @@ function AddCardForm({
              letting the browser treat this form as a saved-card form is the thing to
              avoid - it is what would offer to fill, and keep, the number next to it. */
           autoComplete="off"
-          placeholder="Priya Sharma"
+          placeholder="Jhon Doe"
           value={holderName}
           onChange={(event) => setHolderName(event.target.value)}
           hint="Optional. Kept as typed - unlike the number."

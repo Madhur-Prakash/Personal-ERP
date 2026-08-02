@@ -43,7 +43,7 @@ void main() {
   const AuthenticatedUser someone = AuthenticatedUser(
     id: 'user-1',
     email: 'priya@example.com',
-    fullName: 'Priya Sharma',
+    fullName: 'Jhon Doe',
     initials: 'PS',
     isEmailVerified: true,
     isTwoFactorEnabled: false,

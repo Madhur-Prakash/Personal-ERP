@@ -166,7 +166,7 @@ export function RegisterPage() {
           label="Full name"
           autoComplete="name"
           autoFocus
-          placeholder="Priya Sharma"
+          placeholder="Jhon Doe"
           leftIcon={<User />}
           error={errors.full_name?.message}
           {...register('full_name')}

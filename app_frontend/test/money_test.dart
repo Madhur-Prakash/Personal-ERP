@@ -163,7 +163,7 @@ void main() {
 
   group('initialsOf', () {
     test('takes the first and last initials', () {
-      expect(initialsOf('Priya Sharma'), 'PS');
+      expect(initialsOf('Jhon Doe'), 'PS');
       expect(initialsOf('Priya Anand Sharma'), 'PS');
     });
 

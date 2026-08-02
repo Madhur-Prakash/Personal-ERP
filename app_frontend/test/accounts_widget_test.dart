@@ -28,7 +28,7 @@ void main() {
     kind: MoneyAccountKind.bank,
     code: '1120',
     bankName: 'HDFC Bank',
-    holderName: 'Priya Sharma',
+    holderName: 'Jhon Doe',
     accountNumberLast4: '4321',
   );
   // The same account under a second name - what a debit card is.
@@ -124,7 +124,7 @@ void main() {
       // digits can be dimmed beside it, and an exact match would miss the whole span.
       expect(find.textContaining('Primary Bank Account'), findsWidgets);
       // The bank and holder take the place of the account code on the second line.
-      expect(find.text('HDFC Bank · Priya Sharma'), findsOneWidget);
+      expect(find.text('HDFC Bank · Jhon Doe'), findsOneWidget);
 
       // The debit card must NOT appear among the cash and bank accounts, even though it
       // carries a bank account's id - it belongs in the card list.

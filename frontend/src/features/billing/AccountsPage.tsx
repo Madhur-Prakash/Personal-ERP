@@ -269,7 +269,7 @@ function BankDetailsForm({ account, onDone }: { account: MoneyAccount; onDone: (
         />
         <Input
           label="Account holder"
-          placeholder="Priya Sharma"
+          placeholder="Jhon Doe"
           value={holder}
           onChange={(event) => setHolderName(event.target.value)}
           disabled={isLoading}
@@ -447,7 +447,7 @@ function NewAccountCard({ onDone }: { onDone: () => void }) {
               />
               <Input
                 label="Account holder"
-                placeholder="Priya Sharma"
+                placeholder="Jhon Doe"
                 value={holderName}
                 onChange={(event) => setHolderName(event.target.value)}
                 hint="Optional - whose account it is."
@@ -593,7 +593,7 @@ function NewCardCard({ banks, onDone }: { banks: MoneyAccount[]; onDone: () => v
             <Input
               label="Name on the card"
               autoComplete="off"
-              placeholder="Priya Sharma"
+              placeholder="Jhon Doe"
               value={holderName}
               onChange={(event) => setHolderName(event.target.value)}
               hint="Optional. Kept as typed - unlike the number."

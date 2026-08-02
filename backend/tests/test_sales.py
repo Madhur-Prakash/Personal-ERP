@@ -158,7 +158,7 @@ class TestLeads:
         """The lead is kept, so the revenue source stays traceable."""
         lead = await LeadService(db).create(
             books.id,
-            LeadCreate(name="Priya Sharma", company="Sharma Textiles", source="referral"),
+            LeadCreate(name="Jhon Doe", company="Sharma Textiles", source="referral"),
             user,
         )
         customer = await LeadService(db).convert(books.id, lead.id, LeadConvert(), user)

@@ -84,7 +84,7 @@ void main() {
       final RegisterResponse registered = await auth.register(
         email: email,
         password: password,
-        fullName: 'Priya Sharma',
+        fullName: 'Jhon Doe',
         organizationName: 'Desktop Test Co',
       );
       expect(registered.email, email);

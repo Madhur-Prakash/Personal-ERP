@@ -682,7 +682,7 @@ function NewMoneyAccountRow({
           />
           <Input
             label="Account holder"
-            placeholder="Priya Sharma"
+            placeholder="Jhon Doe"
             value={holderName}
             onChange={(event) => setHolderName(event.target.value)}
             onKeyDown={keys}

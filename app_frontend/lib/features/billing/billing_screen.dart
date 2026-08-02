@@ -791,7 +791,7 @@ class _EntryFormState extends ConsumerState<_EntryForm> {
               AppInput(
                 label: 'Account holder',
                 controller: holder,
-                placeholder: 'Priya Sharma',
+                placeholder: 'Jhon Doe',
                 hint: 'Optional - whose account it is.',
               ),
               AppInput(

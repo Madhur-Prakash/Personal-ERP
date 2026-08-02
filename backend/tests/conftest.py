@@ -320,7 +320,7 @@ async def user(db: AsyncSession) -> User:
 
     record = User(
         email=f"user-{uuid.uuid4().hex[:8]}@example.com",
-        full_name="Priya Sharma",
+        full_name="Jhon Doe",
         password_hash=hash_password(TEST_PASSWORD),
         email_verified_at=__import__("datetime").datetime.now(__import__("datetime").UTC),
     )

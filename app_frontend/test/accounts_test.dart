@@ -192,9 +192,9 @@ void main() {
         kind: MoneyAccountKind.bank,
         code: '1121',
         bankName: 'HDFC Bank',
-        holderName: 'Priya Sharma',
+        holderName: 'Jhon Doe',
       );
-      expect(account.subtitle, 'HDFC Bank · Priya Sharma');
+      expect(account.subtitle, 'HDFC Bank · Jhon Doe');
     });
 
     test('the code is the fallback when nothing has been recorded', () {
@@ -230,7 +230,7 @@ void main() {
         'kind': 'bank',
         'code': '1121',
         'bank_name': 'HDFC Bank',
-        'holder_name': 'Priya Sharma',
+        'holder_name': 'Jhon Doe',
         'account_number_last4': '4321',
       });
       expect(account.accountNumberLast4, '4321');
@@ -245,7 +245,7 @@ void main() {
         final BankDetails details = BankDetails.fromJson(<String, dynamic>{
           'account_id': 'acct-bank',
           'bank_name': 'HDFC Bank',
-          'holder_name': 'Priya Sharma',
+          'holder_name': 'Jhon Doe',
           'account_number': '50100123454321',
           'account_number_last4': '4321',
         });
@@ -298,12 +298,12 @@ void main() {
         'account_id': 'acct-1',
         'account_name': 'HDFC Millennia',
         'is_active': true,
-        'holder_name': 'Priya Sharma',
+        'holder_name': 'Jhon Doe',
       });
       // PCI DSS permits retaining a cardholder name; it is the number and the
       // authentication data that may not be kept. A name alone cannot transact.
-      expect(card.holderName, 'Priya Sharma');
-      expect(card.subtitle, 'Visa · Priya Sharma · HDFC Millennia');
+      expect(card.holderName, 'Jhon Doe');
+      expect(card.subtitle, 'Visa · Jhon Doe · HDFC Millennia');
     });
 
     test('the subtitle omits a holder name that was never given', () {
