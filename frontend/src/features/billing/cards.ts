@@ -22,8 +22,8 @@ export const NETWORK_LABELS: Record<CardNetwork, string> = {
 };
 
 /** The range real card numbers fall in - ISO/IEC 7812, and the shortest Maestro. */
-const MIN_DIGITS = 12;
-const MAX_DIGITS = 19;
+export const MIN_DIGITS = 12;
+export const MAX_DIGITS = 19;
 
 /** Strip the separators a person types or pastes. */
 export function normaliseCardNumber(raw: string): string {
@@ -62,8 +62,25 @@ export function cardNumberProblem(digits: string): string | null {
   if (digits.length > MAX_DIGITS) {
     return `A card number is at most ${MAX_DIGITS} digits.`;
   }
-  if (!passesLuhn(digits)) return 'Check that number - a digit looks wrong.';
   return null;
+}
+
+/**
+ * A checksum warning, or `null`. **Does not block saving** - see below.
+ *
+ * Separate from {@link cardNumberProblem} because the two carry different force. Length and
+ * charset are structural: outside 12-19 digits there is nothing sensible to store, so those
+ * refuse the save. A failed Luhn digit is a suspicion - "this is probably a typo" - and the
+ * server treats it the same way.
+ *
+ * Blocking on it was the wrong trade for this product. Nothing here is ever charged, the
+ * number is discarded within the request, and the only lasting artefact is a four-digit
+ * label. Worth saying out loud, because a wrong label defeats the point of keeping one; not
+ * worth refusing an entry somebody is deliberately making about their own card.
+ */
+export function cardNumberWarning(digits: string): string | null {
+  if (!isPlausibleCardNumber(digits) || passesLuhn(digits)) return null;
+  return 'That does not look like a valid card number - check the digits. You can still save it.';
 }
 
 /**

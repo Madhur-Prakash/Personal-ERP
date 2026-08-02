@@ -26,10 +26,13 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
+  MAX_DIGITS,
+  MIN_DIGITS,
   NETWORK_LABELS,
+  cardNumberProblem,
+  cardNumberWarning,
   isPlausibleCardNumber,
   normaliseCardNumber,
-  passesLuhn,
 } from '@/features/billing/cards';
 import {
   type Card as PaymentCard,
@@ -639,9 +642,10 @@ function NewCardCard({ banks, onDone }: { banks: MoneyAccount[]; onDone: () => v
 
   const digits = normaliseCardNumber(number);
   const plausible = isPlausibleCardNumber(digits);
-  // Only complained about once it *could* be a card number - flagging a check-digit
-  // failure after four digits just means "you have not finished typing", shown as an error.
-  const numberLooksWrong = plausible && !passesLuhn(digits);
+  // The blocking problem (wrong length or charset) and the advisory warning (failed check
+  // digit) are deliberately different things - see `cards.ts`.
+  const problem = cardNumberProblem(digits);
+  const warning = cardNumberWarning(digits);
 
   const add = useMutation({
     mutationFn: () =>
@@ -677,8 +681,8 @@ function NewCardCard({ banks, onDone }: { banks: MoneyAccount[]; onDone: () => v
   });
 
   const needsBank = kind === 'debit';
-  const canSave =
-    label.trim() !== '' && plausible && !numberLooksWrong && (!needsBank || bankId !== '');
+  // The warning is not in here on purpose: a failed check digit does not block the save.
+  const canSave = label.trim() !== '' && plausible && (!needsBank || bankId !== '');
 
   return (
     <Card className="mb-4">
@@ -730,8 +734,11 @@ function NewCardCard({ banks, onDone }: { banks: MoneyAccount[]; onDone: () => v
               value={number}
               onChange={(event) => setNumber(event.target.value)}
               className="tabular-nums"
-              error={numberLooksWrong ? 'Check that number - a digit looks wrong.' : undefined}
-              hint="Used to work out the network and last four, then discarded."
+              error={problem ?? undefined}
+              hint={
+                warning ??
+                `${MIN_DIGITS} to ${MAX_DIGITS} digits. Used to work out the network and last four, then discarded.`
+              }
             />
             <Input
               label="Name on the card"

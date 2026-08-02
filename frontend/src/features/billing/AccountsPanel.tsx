@@ -30,9 +30,10 @@ import { Select } from '@/components/ui/Select';
 import { transferableAccounts } from '@/features/billing/accountPicker';
 import {
   NETWORK_LABELS,
+  cardNumberProblem,
+  cardNumberWarning,
   isPlausibleCardNumber,
   normaliseCardNumber,
-  passesLuhn,
 } from '@/features/billing/cards';
 import {
   type BillingOptions,
@@ -554,7 +555,8 @@ function AddCardForm({
 
   const digits = normaliseCardNumber(number);
   const longEnough = isPlausibleCardNumber(digits);
-  const numberLooksWrong = longEnough && !passesLuhn(digits);
+  const problem = cardNumberProblem(digits);
+  const warning = cardNumberWarning(digits);
 
   const add = useMutation({
     mutationFn: () =>
@@ -590,8 +592,8 @@ function AddCardForm({
   });
 
   const needsBank = kind === 'debit';
-  const canSave =
-    label.trim() !== '' && longEnough && !numberLooksWrong && (!needsBank || bankId !== '');
+  // The warning is deliberately absent here: a failed check digit does not block saving.
+  const canSave = label.trim() !== '' && longEnough && (!needsBank || bankId !== '');
 
   return (
     <form
@@ -639,8 +641,11 @@ function AddCardForm({
           value={number}
           onChange={(event) => setNumber(event.target.value)}
           className="tabular-nums"
-          error={numberLooksWrong ? 'Check that number - a digit looks wrong.' : undefined}
-          hint="Only the network and the last four digits are kept. The number itself is never stored."
+          error={problem ?? undefined}
+          hint={
+            warning ??
+            'Only the network and the last four digits are kept. The number itself is never stored.'
+          }
         />
         <Input
           label="Name on the card"
