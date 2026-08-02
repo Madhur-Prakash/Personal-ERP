@@ -268,12 +268,19 @@ capability would be security theatre.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/options` | Categories, cash/bank accounts, today in the org's timezone, currency - one call so the form renders complete |
+| GET | `/options` | Categories, money accounts, cards, today in the org's timezone, currency - one call so the form renders complete |
 | POST | `/` | Record one movement. Posted immediately, never a draft |
 | GET | `/` | The day book, newest first. Filter by `direction`, date range, or description |
 | GET | `/summary` | Money in, money out, net, and a count for a window |
 | GET | `/{id}` | One entry |
 | POST | `/{id}/reverse` | Cancel it by posting the mirror entry |
+| POST | `/money-accounts` | Add a cash box or bank account. `account:write` |
+| POST | `/categories` | Add an income or expense category from a name alone |
+| GET | `/cards` | Cards on file. `?include_archived=true` for the retired ones |
+| POST | `/cards` | Register a card from its number. `account:write` |
+| POST | `/cards/{id}/archive` | Stop offering it. Past entries still name it |
+| POST | `/cards/{id}/restore` | Offer it again |
+| POST | `/transfers` | Move money between two of your own accounts |
 
 Worth knowing:
 
@@ -291,6 +298,32 @@ Worth knowing:
   `is_reversed`, which is all the user needs; the ledger keeps both rows.
 - **These are real postings**, so they reach the trial balance, P&L, cash flow
   statement, dashboard, and analytics trend with nothing else wired up.
+
+#### Cards and transfers
+
+- **No card number is ever stored.** `POST /cards` takes one, checks its length and its
+  Luhn digit, derives the scheme and the last four digits, and discards the rest. There
+  is no column for it - `backend/tests/test_billing_cards.py` asserts that by querying
+  `information_schema.columns` - and `CardRead` has no field to return one in. Keeping a
+  PAN would put the whole database inside PCI DSS scope, and the last four digits are
+  what a receipt and a bank statement both print anyway.
+- **A rejected number is not echoed back.** The 422 handler forwards messages, never
+  inputs, and the request schema rejects letters by pattern rather than by quoting the
+  value.
+- **A credit card is a liability, not cash.** Registering one creates an account under
+  Current Liabilities, so spending on it increases what you owe rather than reducing
+  what you hold. It appears in the "paid from" picker - you genuinely can pay with it -
+  but it is not cash-equivalent, so it stays out of the dashboard's cash figure and the
+  cash flow statement.
+- **A debit card gets no account of its own.** It names a bank account that already
+  exists, because a second account would double-count the same money. That means it
+  arrives from `/options` with the *same* `id` as that bank account, distinguished only
+  by `card_id` - which is why both clients key their pickers on `card_id ?? id`.
+- **A transfer has no category**, because moving your own money is neither earning nor
+  spending it. It is tagged `transfer` rather than the day book's source type, so the
+  money-in and money-out totals ignore it - counting one would show income that never
+  arrived from anywhere. Paying off a credit card is a transfer into the card's
+  liability account.
 
 ### Health - `/health` (unversioned, public)
 

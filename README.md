@@ -36,6 +36,7 @@ sales, purchasing and inventory, document intelligence, and analytics; see
 | RBAC - 42 permissions, 5 seeded roles, custom roles, per-member overrides | Done |
 | Immutable audit trail with field-level diffs | Done |
 | **Billing** - record money in and out with just a date, an amount, and a note. No customer or supplier needed; posts real double-entry, so the dashboard and every report update immediately | Done |
+| Accounts & cards - add bank accounts, register credit and debit cards from the card number (**no PAN is stored**), choose the account on any payment, and transfer between your own accounts | Done |
 | Double-entry accounting - chart of accounts, journals, period locks, trial balance, P&L, balance sheet, cash flow | Done |
 | Sales - customers, leads, quotations, orders, invoices with GST, payment allocation, receivables ageing | Done |
 | Purchasing & inventory - suppliers, POs, goods receipt, weighted-average valuation, bills, input GST, payables ageing | Done |
@@ -87,11 +88,14 @@ Most small businesses do not need invoices, customers, or suppliers. They need t
 what came in and what went out. **Billing** is that screen, and it is first in the
 navigation:
 
-- Two buttons - *Money in* and *Money out*.
+- Three buttons - *Money in*, *Money out*, and *Transfer*.
 - Type an amount and a note. The date defaults to today, the category and the cash
   account default to sensible choices, and the form stays open so a week of receipts
   can be entered in a row.
 - Nothing else is required. No customer, no supplier, no invoice.
+- Choose where it landed or came from: a cash box, any bank account, or a card. Add a
+  bank account or register a card without leaving the screen, and move money between two
+  of your own accounts with *Transfer*.
 
 **A bill with nobody's name on it is an expense, not a payable** - and that is the
 correct treatment, not a shortcut. A payable exists because you owe a specific party;
@@ -107,6 +111,30 @@ view" would be a cache that can disagree with the ledger.
 To correct a mistake, **reverse** the entry. There is no delete and no edit: a posted
 entry is immutable here, so the honest undo is an opposite entry that nets it to zero,
 which is also what an auditor expects to find. The original stays on the record.
+
+#### Accounts and cards
+
+The same screen manages where money sits. Two decisions there are worth stating outright,
+because both are easy to get wrong and expensive to get wrong:
+
+**No card number is ever stored.** Adding a card asks for its number, checks the Luhn
+digit, works out the scheme and the last four digits, and throws the rest away. There is
+no column for a PAN and no field to return one in - a test queries
+`information_schema.columns` to keep it that way. Storing one would put this entire
+database inside PCI DSS scope, and the last four digits are what a card receipt and a
+bank statement both print anyway.
+
+**A credit card is a liability, not a place you have money.** Registering one creates an
+account under Current Liabilities, so spending on it increases what you owe rather than
+reducing what you hold. It is offered when recording a payment - you genuinely can pay
+with it - but it never joins a cash balance. A *debit* card is the opposite case: it gets
+no account of its own, because it is a way of using a bank account you already have, and
+a second account would double-count the same money.
+
+**A transfer is not income or an expense.** Moving your own money between accounts -
+including paying off a card - has no category, because there is nothing earned or spent
+to file it against, and it stays out of the money-in and money-out totals. Counting it
+would show income that never arrived from anywhere.
 
 Customers, GST invoices, suppliers, and scanned-document capture all still exist for
 when they are genuinely needed. Nothing forces you through them.

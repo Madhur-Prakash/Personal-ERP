@@ -99,7 +99,8 @@ lib/
 │   ├── oklch.dart     OKLCH -> sRGB, so the tokens stay the CSS's own numbers
 │   ├── tokens.dart    The design tokens, as a ThemeExtension
 │   └── app_theme.dart Material 3 built *from* those tokens
-├── core/              Env, HTTP client, error envelope, exact-decimal formatting
+├── core/              Env, HTTP client, error envelope, exact-decimal formatting,
+│                      card-number checks (which keep no number)
 ├── models/            Hand-written mirrors of the backend contracts
 ├── api/               One thin typed binding per module
 ├── state/             Riverpod providers; the auth and theme controllers
@@ -165,6 +166,20 @@ Three properties make it hold up rather than merely appear to work:
   in - and the same happens when a session expires or is revoked remotely, so a dead cookie
   is not re-presented on every start.
 
+**Sign-out tears down locally *first*, then tells the server.** That ordering looks
+backwards and is load-bearing, so it is worth stating before someone tidies it: the button
+discards the future `signOut` returns, and Dio waits 30 seconds before giving up. Awaiting
+the request first therefore meant that against a slow or unreachable API, pressing "Sign
+out" produced no redirect, no spinner and no error - a dead button, and an easy thing to
+read as "the app cannot reach the backend". Signing out is a local act; the request is a
+courtesy that revokes the refresh token early.
+
+The credentials outlive the UI teardown on purpose, though. A logout that arrived
+unauthenticated would revoke nothing and leave the refresh token valid for its full 30 days,
+so the access token and the jar are held until the request resolves or a three-second grace
+period lapses, whichever comes first. `test/sign_out_test.dart` pins both halves against an
+API whose logout never returns.
+
 **Re-authentication still comes round eventually, and that is deliberate.** The backend
 preserves a session's original expiry across rotation, so refreshing cannot extend a session
 indefinitely. Nothing on this side can change that, and nothing on this side should try.
@@ -193,11 +208,27 @@ tips, the reversal-not-delete flow, the exact wording of every explanation - is 
 flutter test
 ```
 
-41 unit tests plus one integration test.
+74 unit and widget tests plus one integration test.
 
 The unit tests cover what must not be approximately right: the money path (exact decimal
 formatting, `BigInt` summation, scale-insensitive comparison), the OKLCH conversion, the
-date rules, and the decimal input filter.
+date rules, the decimal input filter, and the card-number checks.
+
+`test/accounts_widget_test.dart` pumps the accounts panel and the transfer form in both
+themes and at a narrow window. That is a narrow question - *does it build* - and it has its
+own file because `flutter analyze` cannot answer it: the one UI bug here that reached a
+release binary was a `Builder` closure that captured the variable it was being assigned to,
+so it returned a widget containing itself. Clean analyze, clean unit suite, stack overflow
+on the first frame. A widget overflowing its constraints raises in a test too, so the
+narrow-window cases catch a layout that only breaks when the window is dragged small.
+
+`test/accounts_test.dart` is mostly about one trap. **A debit card arrives from the API with
+the same `id` as the bank account it draws on**, because it is not a separate place money
+lives - so the picker keys on `card_id ?? id`, and a transfer form deduplicates by `id`.
+Both would look correct in a screenshot and be wrong in use: two `<option>`-equivalents
+sharing a value means selecting the card silently snaps back to the bank account. The tests
+pin the key, the resolution back to an account id, and the ordering the deduplication relies
+on.
 
 The date cases run under the **default** configuration on purpose - rupees, so locale
 `en_IN`. `intl` bundles date symbols for `en_US` only, so a suite that formatted dates only

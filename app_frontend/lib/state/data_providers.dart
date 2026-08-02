@@ -349,6 +349,22 @@ final AutoDisposeFutureProvider<BillingSummary> billingSummaryProvider =
       return retrying(() => ref.read(billingApiProvider).summary());
     });
 
+/// Cards on file, keyed by whether archived ones are wanted.
+///
+/// Separate from [billingOptionsProvider] rather than folded into it, because that
+/// payload feeds the pickers and an archived card must never reach one. Keeping
+/// them apart means "show archived" cannot leak a dead card into the form.
+final AutoDisposeFutureProviderFamily<List<PaymentCard>, bool>
+billingCardsProvider = FutureProvider.autoDispose
+    .family<List<PaymentCard>, bool>((Ref ref, bool includeArchived) {
+      bindCache(ref);
+      return retrying(
+        () => ref
+            .read(billingApiProvider)
+            .cards(includeArchived: includeArchived),
+      );
+    });
+
 /// The day book's filters, as one value so the provider family has a single key.
 class BillingQuery {
   const BillingQuery({this.page = 1, this.direction, this.search = ''});
@@ -659,6 +675,19 @@ void invalidateLedger(WidgetRef ref) {
   ref.invalidate(journalEntriesProvider);
   ref.invalidate(topCustomersProvider);
   ref.invalidate(topProductsProvider);
+}
+
+/// Everything registering or archiving a card invalidates.
+///
+/// The card list and the pickers, always. The ledger too, but only for a *new*
+/// credit card - that creates a liability account, so the chart of accounts and the
+/// trial balance have genuinely changed. Archiving one changes neither, and calling
+/// [invalidateLedger] for it would refetch a dozen reports to show identical
+/// figures; the caller decides via [ledgerChanged].
+void invalidateCards(WidgetRef ref, {bool ledgerChanged = false}) {
+  ref.invalidate(billingCardsProvider);
+  ref.invalidate(billingOptionsProvider);
+  if (ledgerChanged) invalidateLedger(ref);
 }
 
 /// Everything a stock or product change invalidates.

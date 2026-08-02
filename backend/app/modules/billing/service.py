@@ -67,6 +67,8 @@ from app.modules.accounting.service import (
     FiscalCalendarService,
     PostingService,
 )
+from app.modules.billing.cards import inspect_card_number
+from app.modules.billing.models import CardKind, CardNetwork, PaymentCard
 from app.modules.organizations.models import Organization
 from app.modules.users.models import User
 
@@ -75,6 +77,13 @@ log = get_logger(__name__)
 #: Tags the ledger entries this module owns, so they can be read back and so an
 #: accountant can tell a hand-entered movement from an invoice posting.
 SOURCE_TYPE: Final = "billing"
+
+#: Transfers are tagged separately from money in and out, and that separation is load
+#: bearing rather than tidiness: the day book reconstructs direction, category, and
+#: amount from an entry's two-line shape, and a transfer has the same shape with neither
+#: line on an income or expense account. Reading one back as a payment would invent a
+#: category that does not exist. So they are excluded by tag, not guessed at by shape.
+TRANSFER_SOURCE_TYPE: Final = "transfer"
 
 
 class MoneyKind(StrEnum):
@@ -122,14 +131,78 @@ class Category:
     is_default: bool = False
 
 
+class MoneyAccountKind(StrEnum):
+    """What a place-money-can-sit actually is, for the picker.
+
+    Wider than :class:`MoneyKind`, which is only about *creating* a cash box or a bank
+    account. This is the read side, and it has a third member because a credit card
+    genuinely belongs in the same list while being a different accounting object.
+    """
+
+    CASH = "cash"
+    BANK = "bank"
+    #: A liability, not an asset. Kept out of "cash" everywhere it matters.
+    CREDIT_CARD = "credit_card"
+
+    @property
+    def is_cash_equivalent(self) -> bool:
+        return self is not MoneyAccountKind.CREDIT_CARD
+
+
 @dataclass(frozen=True, slots=True)
 class MoneyAccount:
-    """Where the money sat or landed - a cash box or a bank account."""
+    """Where the money sat or landed - a cash box, a bank account, or a card."""
 
     id: uuid.UUID
     code: str
     name: str
+    #: Required, and ordered ahead of the optional fields to keep it that way. It had a
+    #: ``CASH`` default once, which meant a newly created *bank* account came back tagged
+    #: as cash - the one construction site that forgot to pass it was silently wrong
+    #: rather than rejected. A liability quietly labelled as cash is the worst version of
+    #: this mistake, so mypy is left to insist on it at every call site.
+    kind: MoneyAccountKind
     is_default: bool = False
+
+    #: Set when a card is what identifies this entry. On a credit card these describe
+    #: the account itself; on a *debit* card they describe one of the ways of touching a
+    #: bank account, which is why the card id is carried separately from the account id.
+    card_id: uuid.UUID | None = None
+    card_last4: str | None = None
+    card_network: str | None = None
+
+    @property
+    def is_card(self) -> bool:
+        return self.card_id is not None
+
+
+@dataclass(frozen=True, slots=True)
+class Card:
+    """A card on file. Never carries a number - see ``billing/models.py``."""
+
+    id: uuid.UUID
+    label: str
+    kind: CardKind
+    network: CardNetwork
+    last4: str
+    account_id: uuid.UUID
+    account_name: str
+    is_active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Transfer:
+    """One movement between two of the organization's own accounts."""
+
+    entry_id: uuid.UUID
+    entry_number: str | None
+    date: dt.date
+    amount: Decimal
+    description: str
+    from_account_id: uuid.UUID
+    from_account_name: str
+    to_account_id: uuid.UUID
+    to_account_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,7 +448,18 @@ class BillingService:
             "money account created",
             extra={"name": cleaned, "code": account.code, "kind": kind.value},
         )
-        return MoneyAccount(id=account.id, code=account.code, name=account.name, is_default=False)
+        return MoneyAccount(
+            id=account.id,
+            code=account.code,
+            name=account.name,
+            # From the requested kind rather than defaulted: a bank account that came back
+            # labelled "cash" would show under the wrong heading in the picker the client
+            # builds from this field, immediately after being created.
+            kind=(
+                MoneyAccountKind.BANK if kind is MoneyKind.BANK else MoneyAccountKind.CASH
+            ),
+            is_default=False,
+        )
 
     @staticmethod
     def _next_code(existing: Sequence[Account], parent_code: str) -> str:
@@ -402,21 +486,285 @@ class BillingService:
         )
 
     async def money_accounts(self, organization_id: uuid.UUID) -> list[MoneyAccount]:
-        """Cash and bank accounts, for "where did it come from / go to"."""
+        """Everywhere money can sit or land, for "where did it come from / go to".
+
+        Three kinds in one list, because that is the question the form asks - but they
+        are not three flavours of the same thing:
+
+        * **Cash and bank** are assets. Money in one of these is money you have.
+        * **A credit card** is a liability. Money "in" it is money you owe, and it is
+          tagged :attr:`MoneyAccountKind.CREDIT_CARD` so nothing downstream mistakes it
+          for cash. The dashboard's cash figure and the cash flow statement both key off
+          ``subtype.is_cash_equivalent``, which a liability account is not - so a card
+          appearing in this picker does not put its balance inside "Cash and bank".
+        * **A debit card** is another way of naming a bank account already in the list.
+          It resolves to the same ``id``, so choosing either posts identically; the entry
+          exists so somebody who thinks "I paid by card" can say so.
+        """
         await self.ensure_books(organization_id)
         rows = await self.accounts.list_for_org(organization_id, postable_only=True)
-        cash = [a for a in rows if a.subtype.is_cash_equivalent]
+        cards = await self.cards(organization_id)
 
-        # Cash is the default: a business recording movements by hand is far more
-        # often dealing in cash than reconciling a bank feed.
+        cash = [a for a in rows if a.subtype.is_cash_equivalent]
+        by_id = {a.id: a for a in rows}
+
+        # Cash is the default: a business recording movements by hand is far more often
+        # dealing in cash than reconciling a bank feed. A card is never the default -
+        # spending on credit is a deliberate choice, not a fallback.
         default_id = next(
             (a.id for a in cash if a.system_key == SystemAccount.CASH),
             cash[0].id if cash else None,
         )
-        return [
-            MoneyAccount(id=a.id, code=a.code, name=a.name, is_default=a.id == default_id)
+
+        accounts = [
+            MoneyAccount(
+                id=a.id,
+                code=a.code,
+                name=a.name,
+                is_default=a.id == default_id,
+                kind=(
+                    MoneyAccountKind.CASH
+                    if a.subtype is AccountSubtype.CASH
+                    else MoneyAccountKind.BANK
+                ),
+            )
             for a in cash
         ]
+
+        for card in cards:
+            account = by_id.get(card.account_id)
+            if account is None:
+                # The account was archived from under the card. Skipped rather than
+                # raised: an unusable picker entry is worse than a missing one, and the
+                # card is still listed on the accounts panel where it can be archived.
+                continue
+            accounts.append(
+                MoneyAccount(
+                    id=card.account_id,
+                    code=account.code,
+                    name=f"{card.label} ··{card.last4}",
+                    is_default=False,
+                    kind=(
+                        MoneyAccountKind.CREDIT_CARD
+                        if card.kind is CardKind.CREDIT
+                        else MoneyAccountKind.BANK
+                    ),
+                    card_id=card.id,
+                    card_last4=card.last4,
+                    card_network=card.network.value,
+                )
+            )
+
+        return accounts
+
+    # -----------------------------------------------------------------------
+    # Cards
+    # -----------------------------------------------------------------------
+    async def cards(
+        self, organization_id: uuid.UUID, *, include_archived: bool = False
+    ) -> list[Card]:
+        """Every card on file, oldest first so the list reads in the order added."""
+        stmt = (
+            select(PaymentCard)
+            .where(PaymentCard.organization_id == organization_id)
+            .options(selectinload(PaymentCard.account))
+            .order_by(PaymentCard.created_at)
+        )
+        if not include_archived:
+            stmt = stmt.where(PaymentCard.is_active.is_(True))
+
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return [self._to_card(row) for row in rows]
+
+    @staticmethod
+    def _to_card(row: PaymentCard) -> Card:
+        """Requires ``account`` to be loaded - every caller here does so eagerly."""
+        return Card(
+            id=row.id,
+            label=row.label,
+            kind=row.kind,
+            network=row.network,
+            last4=row.last4,
+            account_id=row.account_id,
+            account_name=row.account.name,
+            is_active=row.is_active,
+        )
+
+    async def create_card(
+        self,
+        organization_id: uuid.UUID,
+        actor: User,
+        *,
+        label: str,
+        kind: CardKind,
+        card_number: str,
+        bank_account_id: uuid.UUID | None = None,
+        ctx: RequestContext | None = None,
+    ) -> Card:
+        """Put a card on file.
+
+        **The number is read and discarded in this method and nowhere else.** It arrives,
+        :func:`inspect_card_number` reduces it to a network and four digits, and the
+        local goes out of scope - there is no column that could hold it and no log
+        statement that receives it. See ``billing/models.py`` for why.
+
+        What gets created depends on the kind, because the two are different accounting
+        objects:
+
+        * A **credit card** gets its own liability account under Current Liabilities.
+          Spending on it is ``debit expense, credit card`` - a debt, not a payment - and
+          settling the balance later is an ordinary transfer from a bank account.
+        * A **debit card** creates no account. It names a bank account that already
+          exists, so ``bank_account_id`` is required and every posting still lands on
+          that one account. A second account for it would double-count the same money,
+          and the balance sheet would be wrong by the card's balance.
+        """
+        await self.ensure_books(organization_id)
+
+        cleaned_label = label.strip()
+        if not cleaned_label:
+            raise ValidationError("Give the card a name, so you can tell it apart later.")
+
+        identity = inspect_card_number(card_number)
+        if identity is None:
+            # Deliberately does not echo what was submitted. The 422 handler forwards
+            # only messages, but a message quoting the digits would defeat that.
+            raise ValidationError(
+                "That does not look like a card number. Check the digits and try again - "
+                "only the last four are kept.",
+                details={"fields": {"card_number": "Enter a valid card number"}},
+            )
+
+        existing = await self.cards(organization_id, include_archived=True)
+        if any(
+            c.network is identity.network and c.last4 == identity.last4 and c.kind is kind
+            for c in existing
+        ):
+            raise ConflictError(
+                f"A {kind.label.lower()} ending {identity.last4} is already on file.",
+                code="card_exists",
+            )
+
+        if kind is CardKind.CREDIT:
+            account = await self._create_card_liability_account(
+                organization_id, actor, label=cleaned_label, last4=identity.last4, ctx=ctx
+            )
+        else:
+            if bank_account_id is None:
+                raise ValidationError(
+                    "Choose the bank account this debit card draws on. A debit card is a "
+                    "way of using an account you already have, not an account of its own.",
+                    details={"fields": {"bank_account_id": "Choose a bank account"}},
+                )
+            rows = await self.accounts.list_for_org(organization_id, postable_only=True)
+            match = next(
+                (a for a in rows if a.id == bank_account_id and a.subtype.is_cash_equivalent),
+                None,
+            )
+            if match is None:
+                raise ValidationError(
+                    "That is not one of your cash or bank accounts.",
+                    details={"fields": {"bank_account_id": "Choose a bank account"}},
+                )
+            account = match
+
+        card = PaymentCard(
+            organization_id=organization_id,
+            label=cleaned_label,
+            kind=kind,
+            network=identity.network,
+            last4=identity.last4,
+            account_id=account.id,
+        )
+        self.session.add(card)
+        await self.session.flush()
+
+        log.info(
+            "payment card added",
+            # Label, kind, network, and last four only. The number is not in scope here
+            # and must never be added to this call.
+            extra={
+                "label": cleaned_label,
+                "kind": kind.value,
+                "network": identity.network.value,
+                "last4": identity.last4,
+            },
+        )
+        return Card(
+            id=card.id,
+            label=card.label,
+            kind=card.kind,
+            network=card.network,
+            last4=card.last4,
+            account_id=account.id,
+            account_name=account.name,
+            is_active=True,
+        )
+
+    async def _create_card_liability_account(
+        self,
+        organization_id: uuid.UUID,
+        actor: User,
+        *,
+        label: str,
+        last4: str,
+        ctx: RequestContext | None,
+    ) -> Account:
+        """The liability account behind a credit card.
+
+        Under Current Liabilities rather than beside the bank accounts, and that is the
+        whole accounting point of this feature: a card balance is money owed to an issuer.
+        Filed as an asset it would inflate cash and understate debt, and both errors look
+        entirely plausible on a balance sheet.
+        """
+        every = await self.accounts.list_for_org(organization_id, include_inactive=True)
+        by_code = {a.code: a for a in every}
+        parent = by_code.get("2100") or by_code.get("2000")
+        if parent is None:  # pragma: no cover - ensure_books guarantees the group
+            raise BusinessRuleError(
+                "The chart of accounts has no current-liabilities group.",
+                code="no_parent_group",
+            )
+
+        return await self.chart.create_account(
+            organization_id,
+            AccountCreate(
+                code=self._next_code(every, "2100"),
+                name=f"{label} ··{last4}",
+                account_type=AccountType.LIABILITY,
+                subtype=AccountSubtype.OTHER_CURRENT_LIABILITY,
+                parent_id=parent.id,
+                is_group=False,
+                is_reconcilable=True,
+            ),
+            actor,
+            ctx,
+        )
+
+    async def set_card_active(
+        self, organization_id: uuid.UUID, card_id: uuid.UUID, *, active: bool
+    ) -> Card:
+        """Archive or restore a card.
+
+        Archive, never delete - the same rule as a product. Entries already posted point
+        at the card's account, and the card is how somebody recognises them a year later.
+        """
+        card = (
+            await self.session.execute(
+                select(PaymentCard)
+                .where(
+                    PaymentCard.organization_id == organization_id,
+                    PaymentCard.id == card_id,
+                )
+                .options(selectinload(PaymentCard.account))
+            )
+        ).scalar_one_or_none()
+        if card is None:
+            raise NotFoundError("Card")
+
+        card.is_active = active
+        await self.session.flush()
+        return self._to_card(card)
 
     # -----------------------------------------------------------------------
     # Recording
@@ -466,9 +814,7 @@ class BillingService:
         else:
             debit_account, credit_account = money.id, category.id
 
-        journal_type = (
-            JournalType.CASH if money.subtype is AccountSubtype.CASH else JournalType.BANK
-        )
+        journal_type = self._journal_for(money)
 
         from app.modules.accounting.schemas import JournalEntryCreate, JournalEntryLineInput
 
@@ -539,6 +885,172 @@ class BillingService:
             )
         return next((a for a in candidates if a.code == default_code), candidates[0])
 
+    async def transfer(
+        self,
+        organization_id: uuid.UUID,
+        actor: User,
+        *,
+        from_account_id: uuid.UUID,
+        to_account_id: uuid.UUID,
+        amount: Decimal,
+        entry_date: dt.date,
+        description: str | None = None,
+        reference: str | None = None,
+        ctx: RequestContext | None = None,
+    ) -> Transfer:
+        """Move money between two of the organization's own accounts.
+
+        **Debit the destination, credit the source.** Two lines, neither of them on an
+        income or expense account - which is the whole point: moving your own money is not
+        earning or spending it, and a transfer that touched the P&L would inflate both
+        sides of it by the same amount and leave profit right while every other figure
+        was wrong.
+
+        One rule covers every case, which is why there is one method rather than several:
+
+        * **Cash to bank, or bank to bank.** Both lines are cash-equivalent, so the net
+          change in cash is nil - and the journal-entry reader already nets across cash
+          lines, so it reports "no cash movement" rather than double-counting.
+        * **Bank to credit card** - paying the card off. Debit the card liability, which
+          reduces what you owe; credit the bank, which reduces what you have. Cash goes
+          genuinely out, and the reader says so, because only one line is cash.
+        * **Credit card to bank** - a cash advance. The mirror image, and correct for the
+          same reason.
+
+        Deliberately *not* offered: a transfer to or from a category, a customer, or a
+        supplier. Those are payments, and they belong on the screens that know how to
+        allocate them.
+        """
+        if amount <= 0:
+            raise ValidationError(
+                "Enter an amount greater than zero. To undo a transfer, reverse it rather "
+                "than transferring a negative amount back."
+            )
+        if from_account_id == to_account_id:
+            raise ValidationError(
+                "Choose two different accounts. Moving money to the account it is already "
+                "in has no effect to record.",
+                details={"fields": {"to_account_id": "Pick a different account"}},
+            )
+
+        await self.ensure_books(organization_id, entry_date)
+
+        rows = await self.accounts.list_for_org(organization_id, postable_only=True)
+        allowed = await self._spendable_account_ids(organization_id)
+        by_id = {a.id: a for a in rows}
+
+        source = by_id.get(from_account_id)
+        destination = by_id.get(to_account_id)
+        for account, field in ((source, "from_account_id"), (destination, "to_account_id")):
+            if account is None or account.id not in allowed:
+                raise ValidationError(
+                    "That is not one of your cash, bank, or card accounts.",
+                    details={"fields": {field: "Choose one of your accounts"}},
+                )
+        assert source is not None and destination is not None  # noqa: S101 - narrowed above
+
+        # The bank book when a bank is involved, the cash book when only cash is, and the
+        # general journal for a card-to-card movement. Chosen from the pair rather than
+        # from one side, because a transfer belongs to both accounts equally.
+        journals = {self._journal_for(source), self._journal_for(destination)}
+        if JournalType.BANK in journals:
+            journal_type = JournalType.BANK
+        elif JournalType.CASH in journals:
+            journal_type = JournalType.CASH
+        else:
+            journal_type = JournalType.GENERAL
+
+        journal = await self.posting.journals.get_by_type(organization_id, journal_type)
+        if journal is None:
+            raise BusinessRuleError(
+                f"This organization has no {journal_type} journal configured. "
+                "Set up the chart of accounts first.",
+                code="no_transfer_journal",
+            )
+
+        from app.modules.accounting.schemas import JournalEntryCreate, JournalEntryLineInput
+
+        narration = (description or "").strip() or (
+            f"Transfer from {source.name} to {destination.name}"
+        )
+
+        entry = await self.posting.create_entry(
+            organization_id,
+            JournalEntryCreate(
+                journal_id=journal.id,
+                entry_date=entry_date,
+                narration=narration,
+                reference=reference,
+                # The counterparty of a transfer is the organization itself. Naming the
+                # destination rather than leaving it blank keeps the trial balance's
+                # "dealt with" column meaningful for these rows.
+                counterparty=destination.name,
+                lines=[
+                    JournalEntryLineInput(account_id=destination.id, debit=amount, credit=ZERO),
+                    JournalEntryLineInput(account_id=source.id, debit=ZERO, credit=amount),
+                ],
+                post=True,
+            ),
+            actor,
+            ctx,
+            source_type=TRANSFER_SOURCE_TYPE,
+        )
+
+        log.info(
+            "transfer recorded",
+            extra={
+                "amount": str(amount),
+                "from": source.code,
+                "to": destination.code,
+                "entry_number": entry.entry_number,
+            },
+        )
+
+        return Transfer(
+            entry_id=entry.id,
+            entry_number=entry.entry_number,
+            date=entry_date,
+            amount=amount,
+            description=narration,
+            from_account_id=source.id,
+            from_account_name=source.name,
+            to_account_id=destination.id,
+            to_account_name=destination.name,
+        )
+
+    @staticmethod
+    def _journal_for(money: Account) -> JournalType:
+        """Which book a movement through this account belongs in.
+
+        A card charge is neither a cash-book nor a bank-book entry - no cash moved and no
+        bank was involved - so it lands in the general journal. Filing it under the bank
+        book would make "show me every bank transaction" return things that never touched
+        one, which is the question that book exists to answer.
+        """
+        if money.subtype is AccountSubtype.CASH:
+            return JournalType.CASH
+        if money.subtype is AccountSubtype.BANK:
+            return JournalType.BANK
+        return JournalType.GENERAL
+
+    async def _spendable_account_ids(self, organization_id: uuid.UUID) -> set[uuid.UUID]:
+        """Accounts money is allowed to move through on this screen.
+
+        Cash equivalents, plus the liability account behind each credit card. The card
+        accounts have to be enumerated from the card table rather than recognised by
+        subtype: ``other_current_liability`` also covers salaries payable and customer
+        advances, and letting a payment be recorded against those would post nonsense
+        that balances.
+        """
+        rows = await self.accounts.list_for_org(organization_id, postable_only=True)
+        spendable = {a.id for a in rows if a.subtype.is_cash_equivalent}
+        spendable.update(
+            card.account_id
+            for card in await self.cards(organization_id)
+            if card.kind is CardKind.CREDIT
+        )
+        return spendable
+
     async def _resolve_money_account(
         self, organization_id: uuid.UUID, money_account_id: uuid.UUID | None
     ) -> Account:
@@ -546,10 +1058,12 @@ class BillingService:
         cash = [a for a in rows if a.subtype.is_cash_equivalent]
 
         if money_account_id is not None:
-            match = next((a for a in cash if a.id == money_account_id), None)
-            if match is None:
+            allowed = await self._spendable_account_ids(organization_id)
+            match = next((a for a in rows if a.id == money_account_id), None)
+            if match is None or match.id not in allowed:
                 raise ValidationError(
-                    "That is not a cash or bank account, so money cannot move through it."
+                    "That is not one of your cash, bank, or card accounts, so money "
+                    "cannot move through it."
                 )
             return match
 
@@ -687,10 +1201,18 @@ class BillingService:
     def _to_entry(self, row: JournalEntry) -> Entry:
         """Reconstruct the simple view from the two-line ledger entry.
 
-        Exact, not heuristic: this module writes exactly two lines, one on a
-        cash-equivalent account and one on an income or expense account. Anything else
-        under this ``source_type`` would be corrupt data, so it fails loudly rather
-        than guessing.
+        Exact, not heuristic: this module writes exactly two lines, one on an income or
+        expense account and one on a money account. Anything else under this
+        ``source_type`` would be corrupt data, so it fails loudly rather than guessing.
+
+        **The category line is identified, and the money line is whatever is left.** That
+        is the other way round from the obvious reading, and it is deliberate: "money
+        account" now covers cash, a bank, *and* the liability account behind a credit
+        card, so a positive test for it would have to enumerate subtypes and would be
+        wrong again the next time the set grew. Which it was - looking for a
+        cash-equivalent line meant a card charge posted successfully and then could not be
+        read back at all. Exactly one line is on the P&L, so naming that one is both
+        stable and stricter.
         """
         if len(row.lines) != 2:  # pragma: no cover - only reachable via manual SQL
             raise BusinessRuleError(
@@ -699,24 +1221,23 @@ class BillingService:
                 code="billing_entry_malformed",
             )
 
-        money_line = next(
-            (line for line in row.lines if line.account.subtype.is_cash_equivalent), None
-        )
-        category_line = next(
-            (
-                line
-                for line in row.lines
-                if line.account.account_type in (AccountType.INCOME, AccountType.EXPENSE)
-            ),
-            None,
-        )
-        if money_line is None or category_line is None:  # pragma: no cover
+        category_lines = [
+            line
+            for line in row.lines
+            if line.account.account_type in (AccountType.INCOME, AccountType.EXPENSE)
+        ]
+        if len(category_lines) != 1:  # pragma: no cover - corrupt data only
             raise BusinessRuleError(
-                f"Entry {row.entry_number} is not shaped like a billing entry.",
+                f"Entry {row.entry_number} is not shaped like a billing entry: it should "
+                "have exactly one income or expense line.",
                 code="billing_entry_malformed",
             )
 
-        # The cash leg being credited means money left; debited means it arrived.
+        category_line = category_lines[0]
+        money_line = next(line for line in row.lines if line is not category_line)
+
+        # The money leg being credited means it left; debited means it arrived. True for a
+        # card as well as for cash: a charge credits the card, growing what is owed.
         direction = Direction.OUT if money_line.credit > 0 else Direction.IN
 
         return Entry(
@@ -798,11 +1319,15 @@ class BillingService:
 
 
 __all__ = [
+    "TRANSFER_SOURCE_TYPE",
     "BillingService",
+    "Card",
     "Category",
     "Direction",
     "Entry",
     "MoneyAccount",
+    "MoneyAccountKind",
     "MoneyKind",
     "Summary",
+    "Transfer",
 ]

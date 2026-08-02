@@ -169,6 +169,39 @@ inverting that dependency is what keeps this layer replaceable.
 
 ---
 
+## Cards and transfers
+
+Two things the billing module posts deserve stating here, because both are places where
+the intuitive treatment is the wrong one.
+
+**A credit card is a liability.** Registering one creates an account under Current
+Liabilities (parent `2100`, subtype `other_current_liability`), not a cash-equivalent
+asset. Spending ₹5,000 on it is *debit expense, credit the card* - what you owe went up,
+not what you hold went down. Filing it as cash would inflate the cash balance and
+understate the debt at the same time, and both errors would flow into the dashboard, the
+cash flow statement, and the balance sheet.
+
+A **debit** card gets no account at all. It names a bank account that already exists,
+because a debit card is a way of using that account - a second account would double-count
+the same money. This is why a debit card arrives from the API sharing its bank account's
+id.
+
+**A transfer between your own accounts is neither income nor an expense.** It posts as
+*debit the destination, credit the source*, with **no income or expense line** - there is
+nothing earned or spent to file against. It is tagged `source_type="transfer"` rather than
+the day book's own tag, which is what keeps it out of the money-in and money-out totals;
+counting it would report income that never arrived from anywhere and an expense that
+bought nothing. Paying off a credit card is exactly this: money out of a bank account and
+into the card's liability account, reducing the debt.
+
+That tagging is also what makes the day book's reconstruction work. `BillingService`
+rebuilds its simple two-line view by finding the **income or expense line** and treating
+whatever is left as the money leg - not the other way round. Looking for a cash-equivalent
+line instead would mean a card charge posted successfully and then could not be read back,
+because its money leg is a liability.
+
+---
+
 ## Reports
 
 | Report | Window | Note |

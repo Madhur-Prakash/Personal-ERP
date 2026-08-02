@@ -32,6 +32,7 @@ from app.modules.accounting.models import (
 )
 from app.modules.audit.models import AuditAction, AuditLog, AuditSeverity
 from app.modules.auth.models import LoginMethod, SessionRevocationReason, UserSession
+from app.modules.billing.models import CardKind, CardNetwork, PaymentCard
 from app.modules.ocr.engines import DocumentFormat
 from app.modules.ocr.models import Document, DocumentKind, DocumentStatus
 from app.modules.organizations.models import (
@@ -95,6 +96,8 @@ __all__ = [
     "Bill",
     "BillLine",
     "BillStatus",
+    "CardKind",
+    "CardNetwork",
     "Customer",
     "Document",
     "DocumentFormat",
@@ -125,6 +128,7 @@ __all__ = [
     "OrganizationPlan",
     "Payment",
     "PaymentAllocation",
+    "PaymentCard",
     "PaymentMethod",
     "PeriodStatus",
     "Product",

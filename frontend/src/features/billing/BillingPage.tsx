@@ -15,7 +15,7 @@
  * wired up.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownLeft, ArrowUpRight, Plus, Undo2, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Plus, Undo2, Wallet } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
@@ -28,6 +28,12 @@ import { InfoTip } from '@/components/ui/InfoTip';
 import { Input } from '@/components/ui/Input';
 import { NumberInput } from '@/components/ui/NumberInput';
 import { Select, type SelectGroup } from '@/components/ui/Select';
+import { AccountsPanel, TransferForm } from '@/features/billing/AccountsPanel';
+import {
+  accountForKey,
+  moneyAccountGroups,
+  moneyAccountKey,
+} from '@/features/billing/accountPicker';
 import {
   type BillingEntry,
   type BillingOptions,
@@ -42,8 +48,12 @@ import { cn } from '@/lib/cn';
 import { formatDate, formatMoney } from '@/lib/format';
 import { localeSettings } from '@/lib/locale';
 
+/** Which form is open. `'transfer'` sits alongside the two directions because moving your
+ *  own money is a third thing, not a variety of either. */
+type Composing = Direction | 'transfer';
+
 export function BillingPage() {
-  const [composing, setComposing] = useState<Direction | null>(null);
+  const [composing, setComposing] = useState<Composing | null>(null);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<Direction | 'all'>('all');
   const [search, setSearch] = useState('');
@@ -78,22 +88,32 @@ export function BillingPage() {
         description="Record money coming in and going out. Each entry posts straight to your books, so the dashboard and reports update immediately."
       />
 
-      {/* The two actions, given the prominence they deserve - this is the reason the
-          screen exists, not a toolbar afterthought. */}
-      <div className="mb-4 grid gap-3 sm:grid-cols-2">
-        <DirectionButton
-          direction="in"
+      {/* The actions, given the prominence they deserve - this is the reason the
+          screen exists, not a toolbar afterthought. Transfer is third and visually
+          quieter: it is a real thing people do, but it is not why they opened this. */}
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <ActionButton
+          kind="in"
           active={composing === 'in'}
           onClick={() => setComposing(composing === 'in' ? null : 'in')}
         />
-        <DirectionButton
-          direction="out"
+        <ActionButton
+          kind="out"
           active={composing === 'out'}
           onClick={() => setComposing(composing === 'out' ? null : 'out')}
         />
+        <ActionButton
+          kind="transfer"
+          active={composing === 'transfer'}
+          onClick={() => setComposing(composing === 'transfer' ? null : 'transfer')}
+        />
       </div>
 
-      {composing && options && (
+      {composing === 'transfer' && options && (
+        <TransferForm options={options} onClose={() => setComposing(null)} />
+      )}
+
+      {composing !== null && composing !== 'transfer' && options && (
         <EntryForm
           /* Remounting on direction change is what keeps the category selection
              correct. Switching from money-out to money-in changes which categories are
@@ -152,24 +172,55 @@ export function BillingPage() {
         }}
         onPage={setPage}
       />
+
+      {options && <AccountsPanel options={options} />}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// The two buttons
+// The three buttons
 // ---------------------------------------------------------------------------
-function DirectionButton({
-  direction,
+const ACTIONS = {
+  in: {
+    title: 'Money in',
+    subtitle: 'A sale, a receipt, money received',
+    icon: ArrowDownLeft,
+    border: 'border-success/30 bg-success-bg hover:border-success/60',
+    activeBorder: 'border-success ring-success/20 ring-2',
+    chip: 'bg-success/15 text-success',
+  },
+  out: {
+    title: 'Money out',
+    subtitle: 'A bill, an expense, money paid',
+    icon: ArrowUpRight,
+    border: 'border-danger/30 bg-danger-bg hover:border-danger/60',
+    activeBorder: 'border-danger ring-danger/20 ring-2',
+    chip: 'bg-danger/15 text-danger',
+  },
+  // Neutral rather than green or red on purpose: a transfer neither gains nor loses
+  // anything, and colouring it like income or an expense would say it did.
+  transfer: {
+    title: 'Transfer',
+    subtitle: 'Between your own accounts',
+    icon: ArrowLeftRight,
+    border: 'border-border bg-surface-sunken/40 hover:border-content-muted/50',
+    activeBorder: 'border-primary ring-primary/20 ring-2',
+    chip: 'bg-primary/10 text-primary',
+  },
+} satisfies Record<Composing, unknown>;
+
+function ActionButton({
+  kind,
   active,
   onClick,
 }: {
-  direction: Direction;
+  kind: Composing;
   active: boolean;
   onClick: () => void;
 }) {
-  const isIn = direction === 'in';
-  const Icon = isIn ? ArrowDownLeft : ArrowUpRight;
+  const action = ACTIONS[kind];
+  const Icon = action.icon;
 
   return (
     <button
@@ -178,29 +229,19 @@ function DirectionButton({
       aria-expanded={active}
       className={cn(
         'flex items-center gap-3 rounded-xl border p-4 text-left transition-colors',
-        isIn
-          ? 'border-success/30 bg-success-bg hover:border-success/60'
-          : 'border-danger/30 bg-danger-bg hover:border-danger/60',
-        active &&
-          (isIn ? 'border-success ring-success/20 ring-2' : 'border-danger ring-danger/20 ring-2'),
+        action.border,
+        active && action.activeBorder,
       )}
     >
       <span
-        className={cn(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
-          isIn ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger',
-        )}
+        className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', action.chip)}
         aria-hidden
       >
         <Icon className="h-4.5 w-4.5" />
       </span>
       <span className="min-w-0">
-        <span className="text-content block text-[14px] font-semibold">
-          {isIn ? 'Money in' : 'Money out'}
-        </span>
-        <span className="text-content-muted block text-[12px]">
-          {isIn ? 'A sale, a receipt, money received' : 'A bill, an expense, money paid'}
-        </span>
+        <span className="text-content block text-[14px] font-semibold">{action.title}</span>
+        <span className="text-content-muted block text-[12px]">{action.subtitle}</span>
       </span>
       <Plus className="text-content-muted ml-auto h-4 w-4 shrink-0" aria-hidden />
     </button>
@@ -233,7 +274,11 @@ function EntryForm({
   const [party, setParty] = useState('');
   const [reference, setReference] = useState('');
   const [categoryId, setCategoryId] = useState(defaultCategory?.id ?? '');
-  const [accountId, setAccountId] = useState(defaultAccount?.id ?? '');
+  /* The *key*, not the account id - a debit card and the bank account it draws on share an
+     id, so the picker needs something that tells them apart. Resolved back on submit. */
+  const [accountKey, setAccountKey] = useState(
+    defaultAccount ? moneyAccountKey(defaultAccount) : '',
+  );
   const [addingCategory, setAddingCategory] = useState(false);
   const [addingAccount, setAddingAccount] = useState(false);
 
@@ -248,6 +293,8 @@ function EntryForm({
     else categoryGroups.push({ label: category.group, options: [option] });
   }
 
+  const selectedAccount = accountForKey(options.money_accounts, accountKey);
+
   const record = useMutation({
     mutationFn: () =>
       billingApi.record({
@@ -258,7 +305,10 @@ function EntryForm({
         party: party.trim(),
         ...(reference.trim() ? { reference: reference.trim() } : {}),
         ...(categoryId ? { category_id: categoryId } : {}),
-        ...(accountId ? { money_account_id: accountId } : {}),
+        // The account id, not the key. A debit card posts to the bank account it draws
+        // on, which is what makes it a way of *using* that account rather than a second
+        // place the same money lives.
+        ...(selectedAccount ? { money_account_id: selectedAccount.id } : {}),
       }),
     onSuccess: (entry) => {
       void queryClient.invalidateQueries({ queryKey: ['billing-entries'] });
@@ -390,12 +440,11 @@ function EntryForm({
 
             <Select
               label={direction === 'in' ? 'Received into' : 'Paid from'}
-              value={accountId}
-              onChange={(event) => setAccountId(event.target.value)}
-              options={options.money_accounts.map((account) => ({
-                value: account.id,
-                label: account.name,
-              }))}
+              value={accountKey}
+              onChange={(event) => setAccountKey(event.target.value)}
+              /* Grouped into "Cash & bank" and "Cards", because the two are not the same
+                 kind of thing - one is money you have, the other can be money you owe. */
+              groups={moneyAccountGroups(options.money_accounts)}
               action={
                 <button
                   type="button"
@@ -404,6 +453,13 @@ function EntryForm({
                 >
                   + Add account
                 </button>
+              }
+              hint={
+                selectedAccount?.kind === 'credit_card'
+                  ? direction === 'out'
+                    ? 'Charged to this card - recorded as money owed, not money spent from your balance.'
+                    : 'A refund or credit back onto this card, reducing what you owe.'
+                  : undefined
               }
             />
           </div>
@@ -423,7 +479,7 @@ function EntryForm({
             <NewMoneyAccountRow
               onCancel={() => setAddingAccount(false)}
               onCreated={(account) => {
-                setAccountId(account.id);
+                setAccountKey(moneyAccountKey(account));
                 setAddingAccount(false);
               }}
             />

@@ -298,6 +298,38 @@ Production configuration is validated at boot. The app **refuses to start** if
 missing, or the database password is still a default. Crashing at boot is strictly
 better than silently serving traffic with a placeholder signing key.
 
+### Card numbers - staying out of PCI DSS scope
+
+**No Primary Account Number is stored anywhere.** Cards are on file so a payment can say
+which one it went on, and what is kept is the scheme and the last four digits - the two
+things a card receipt and a bank statement already print.
+
+This is deliberate scope avoidance, not a shortcut. Persisting a PAN would pull this
+entire database, its backups, its replicas, and every host that touches them into PCI DSS
+scope, in exchange for a convenience the product does not need: nothing here charges a
+card, so the full number has no use after the moment it is typed.
+
+How that is held in place:
+
+- `billing/cards.py` is the only module that ever handles a full number. It imports
+  nothing from the rest of the app, every function takes a number and returns something
+  that is not one, and `inspect_card_number` returns exactly the two facts that get
+  persisted. The PAN exists as a local variable for the length of one call.
+- The `payment_card` table has **no column** it could go in. A test asserts that against
+  `information_schema.columns` rather than trusting the model, so adding one fails the
+  build. `CardRead` has no field to return one in either.
+- **A rejected number is never echoed back.** The request schema rejects letters by
+  pattern rather than by quoting the value, and the 422 handler forwards messages, never
+  inputs. A test posts a malformed number and asserts the digits do not appear in the
+  response.
+- Both clients clear the field as soon as the request succeeds, and neither sets an
+  autofill hint on it - the one "helpful" platform default that would undo the whole
+  arrangement by inviting the browser or OS to store the number instead.
+
+The Luhn check is duplicated client-side, which is safe because Luhn is a fixed algorithm
+that cannot drift. The issuer-range table that identifies the scheme is **not** duplicated
+- it lives only on the server.
+
 ---
 
 ## Transport and headers

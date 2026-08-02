@@ -109,20 +109,43 @@ class AuthController extends StateNotifier<AuthState> {
     _applyPrincipal(tokens.user);
   }
 
+  /// How long the server gets to acknowledge a sign-out before the client stops caring.
+  ///
+  /// Short on purpose. The refresh token expires on its own, so a server that will not
+  /// answer in this long is not worth making the user watch a dead button for - and the
+  /// alternative is Dio's 30-second receive timeout, which is indistinguishable from the
+  /// app being broken.
+  static const Duration _logoutGrace = Duration(seconds: 3);
+
+  /// Leave. **Locally first, then tell the server.**
+  ///
+  /// The ordering is the whole point, and it is the opposite of the obvious one. Awaiting
+  /// the network call before tearing down meant that whenever the API was slow or
+  /// unreachable, pressing "Sign out" did nothing at all for as long as Dio would wait -
+  /// no spinner, no error, because the button discards this future. Sign-out is a local
+  /// act; the request is a courtesy.
+  ///
+  /// **The credentials outlive the UI teardown deliberately.** The access token and the
+  /// cookie jar are left intact until the request resolves, because a logout that arrived
+  /// unauthenticated would revoke nothing and leave the refresh token valid for its full
+  /// lifetime - thirty days for a session that ticked "keep me signed in". So the screen
+  /// returns to sign-in immediately while the revocation is still in flight, and the jar
+  /// is emptied once it lands.
   Future<void> signOut({bool allDevices = false}) async {
+    // Releases the UI: the router's guard re-runs on this and lands on sign-in.
+    _forgetPrincipal();
+
     try {
-      await _api.logout(allDevices: allDevices);
+      await _api.logout(allDevices: allDevices).timeout(_logoutGrace);
     } catch (_) {
-      // Sign out locally even if the call fails - the user asked to leave, and the
-      // token expires on its own regardless.
-    } finally {
-      // Awaited rather than left to `_clearLocally`'s fire-and-forget: the user asked to
-      // leave, so the cookie must be off disk before this future completes. Clearing twice
-      // would be harmless but says the ownership is unclear, so this is the one caller that
-      // waits.
-      await _client.clearSession();
-      _clearLocally();
+      // Includes the timeout, and a 401 from a session the server had already dropped.
+      // Neither changes what happens next: the teardown below is what ends the session on
+      // this machine, and it runs either way.
     }
+
+    // Awaited rather than fire-and-forget: the user asked to leave, so the cookie must be
+    // off disk before this future completes.
+    await _client.clearSession();
   }
 
   /// Re-fetch the principal after a change to profile, organization, or permissions.
@@ -144,6 +167,20 @@ class AuthController extends StateNotifier<AuthState> {
     clearCache(_ref);
   }
 
+  /// Forget who was signed in, **without touching the stored credentials.**
+  ///
+  /// Synchronous and complete on return, which is what lets [signOut] put the user back on
+  /// the sign-in screen before the network has been heard from. Split out from
+  /// [_clearLocally] precisely because of that one caller: it still needs the cookie jar
+  /// for a moment longer in order to revoke the refresh token.
+  void _forgetPrincipal() {
+    _resetLocale();
+    state = const AuthState(isLoading: false);
+    // Drop every cached query: leaving another user's figures in memory after a
+    // sign-out on a shared machine would show them to the next person.
+    clearCache(_ref);
+  }
+
   /// Tear down after the session has ended without the user asking - an expired or revoked
   /// refresh token.
   ///
@@ -153,16 +190,11 @@ class AuthController extends StateNotifier<AuthState> {
   /// a credential that is guaranteed to be refused, and the sign-in screen arrives a beat
   /// later than it needs to for no reason.
   void _clearLocally() {
-    // Fire-and-forget: this is called from the HTTP layer's synchronous callback, and the
-    // rest of the teardown must not wait on a disk write. `signOut` has already awaited the
-    // same call; repeating it costs one no-op directory delete and keeps this method correct
-    // on its own, which matters because the expiry path has no other opportunity.
+    // Fire-and-forget: this is called from the HTTP layer's synchronous callback, which
+    // cannot wait on a disk write. Unlike `signOut`, this path has no reason to keep the
+    // credentials - the cookie it would present has already been refused.
     unawaited(_client.clearSession());
-    _resetLocale();
-    state = const AuthState(isLoading: false);
-    // Drop every cached query: leaving another user's figures in memory after a
-    // sign-out on a shared machine would show them to the next person.
-    clearCache(_ref);
+    _forgetPrincipal();
   }
 }
 

@@ -12,6 +12,22 @@ export type Direction = 'in' | 'out';
 /** How a money account reconciles: cash against a count, a bank against a statement. */
 export type MoneyKind = 'cash' | 'bank';
 
+/**
+ * What a place money sits in actually *is*.
+ *
+ * `credit_card` is the one that matters: it is a **liability**, not cash. Spending on a
+ * credit card increases what you owe rather than reducing what you hold, so the UI must
+ * never total it alongside a bank balance. Distinct from {@link MoneyKind}, which is only
+ * the two options offered when *adding* an account by hand - a card account is created by
+ * registering a card, never by picking it from that menu.
+ */
+export type MoneyAccountKind = 'cash' | 'bank' | 'credit_card';
+
+export type CardKind = 'credit' | 'debit';
+
+export type CardNetwork =
+  'visa' | 'mastercard' | 'rupay' | 'amex' | 'discover' | 'diners' | 'jcb' | 'maestro' | 'other';
+
 export interface Category {
   id: string;
   code: string;
@@ -29,14 +45,74 @@ export interface MoneyAccount {
   code: string;
   name: string;
   is_default: boolean;
+  /** Cash, a bank, or a credit card - see {@link MoneyAccountKind}. */
+  kind: MoneyAccountKind;
+  /**
+   * Set when a card is what identifies this option.
+   *
+   * A debit card shares its `id` with the bank account it draws on, because it *is* that
+   * account - so `id` alone cannot tell "HDFC Current" from "HDFC Debit ··4242". This is
+   * the field that distinguishes them, and the reason the picker keys on `card_id ?? id`.
+   */
+  card_id: string | null;
+  card_last4: string | null;
+  card_network: string | null;
+}
+
+export interface Card {
+  id: string;
+  label: string;
+  kind: CardKind;
+  network: CardNetwork;
+  /** Four digits as a string - a card ending 0042 is not the number 42. */
+  last4: string;
+  /** Its own liability account for a credit card; the bank account for a debit card. */
+  account_id: string;
+  account_name: string;
+  is_active: boolean;
 }
 
 export interface BillingOptions {
   categories: Category[];
   money_accounts: MoneyAccount[];
+  /** Cards on file. Separate from `money_accounts` because the two answer different
+   *  questions: that list is "where can this payment go", this one is "what have I
+   *  registered" - and an archived card belongs in neither. */
+  cards: Card[];
   /** Today in the organization's timezone, not the server's UTC date. */
   today: string;
   currency: string;
+}
+
+export interface AddCardBody {
+  label: string;
+  kind: CardKind;
+  /** As typed or pasted; spaces and dashes are fine. **Never stored** - the server keeps
+   *  the network and the last four digits and discards the rest. */
+  card_number: string;
+  /** Required for a debit card, ignored for a credit card. */
+  bank_account_id?: string;
+}
+
+export interface TransferBody {
+  from_account_id: string;
+  to_account_id: string;
+  amount: Money;
+  entry_date?: string;
+  description?: string;
+  reference?: string;
+}
+
+export interface Transfer {
+  entry_id: string;
+  entry_number: string | null;
+  date: string;
+  amount: Money;
+  description: string;
+  from_account_id: string;
+  from_account_name: string;
+  to_account_id: string;
+  to_account_name: string;
 }
 
 export interface BillingEntry {
@@ -113,6 +189,32 @@ export const billingApi = {
    */
   createMoneyAccount: (name: string, kind: MoneyKind) =>
     api.post<MoneyAccount>('/billing/money-accounts', { name, kind }),
+
+  cards: (params?: { include_archived?: boolean }) => api.get<Card[]>('/billing/cards', { params }),
+
+  /**
+   * Register a card from its number.
+   *
+   * **The number goes up once and is never stored.** The response has no field for it, so
+   * there is nothing to hold in client state either - which is why this takes the number
+   * as an argument rather than the form keeping it anywhere longer-lived.
+   */
+  addCard: (body: AddCardBody) => api.post<Card>('/billing/cards', body),
+
+  /** Stop offering a card without deleting it - past entries still name it. */
+  archiveCard: (id: string) => api.post<Card>(`/billing/cards/${id}/archive`, {}),
+
+  restoreCard: (id: string) => api.post<Card>(`/billing/cards/${id}/restore`, {}),
+
+  /**
+   * Move money between two of your own accounts.
+   *
+   * No category, and that is not an omission: moving your own money is neither earning nor
+   * spending it, so there is no income or expense line for it to go against. It is tagged
+   * so the money-in/money-out totals ignore it - counting a transfer would show income
+   * that never arrived from anywhere.
+   */
+  transfer: (body: TransferBody) => api.post<Transfer>('/billing/transfers', body),
 
   /**
    * Cancel an entry by posting its mirror image. There is no delete and no edit -

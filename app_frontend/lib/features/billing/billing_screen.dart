@@ -22,6 +22,7 @@ import '../../widgets/info_tip.dart';
 import '../../widgets/metric_tile.dart';
 import '../../widgets/primitives.dart';
 import '../../widgets/toast.dart';
+import 'accounts_panel.dart';
 
 /// Billing - the fast path for recording money.
 ///
@@ -43,8 +44,24 @@ class BillingScreen extends ConsumerStatefulWidget {
   ConsumerState<BillingScreen> createState() => _BillingScreenState();
 }
 
+/// Which form is open.
+///
+/// [transfer] sits alongside the two directions rather than under them, because moving
+/// your own money is a third thing and not a variety of either - it has no category and
+/// no counterparty, and it stays out of the money-in and money-out totals.
+enum _Action {
+  moneyIn(Direction.in_),
+  moneyOut(Direction.out),
+  transfer(null);
+
+  const _Action(this.direction);
+
+  /// The direction this records, or null for a transfer.
+  final Direction? direction;
+}
+
 class _BillingScreenState extends ConsumerState<BillingScreen> {
-  Direction? _composing;
+  _Action? _composing;
   BillingQuery _query = const BillingQuery();
   final TextEditingController _search = TextEditingController();
 
@@ -77,30 +94,21 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
               'books, so the dashboard and reports update immediately.',
         ),
 
-        // The two actions, given the prominence they deserve - this is the reason the
-        // screen exists, not a toolbar afterthought.
+        // The actions, given the prominence they deserve - this is the reason the
+        // screen exists, not a toolbar afterthought. Transfer is third and visually
+        // quieter: it is a real thing people do, but it is not why they opened this.
         LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             final bool side = constraints.maxWidth >= 760;
             final List<Widget> buttons = <Widget>[
-              _DirectionButton(
-                direction: Direction.in_,
-                active: _composing == Direction.in_,
-                onTap: () => setState(
-                  () => _composing = _composing == Direction.in_
-                      ? null
-                      : Direction.in_,
+              for (final _Action action in _Action.values)
+                _ActionButton(
+                  action: action,
+                  active: _composing == action,
+                  onTap: () => setState(
+                    () => _composing = _composing == action ? null : action,
+                  ),
                 ),
-              ),
-              _DirectionButton(
-                direction: Direction.out,
-                active: _composing == Direction.out,
-                onTap: () => setState(
-                  () => _composing = _composing == Direction.out
-                      ? null
-                      : Direction.out,
-                ),
-              ),
             ];
             return side
                 ? Row(
@@ -114,14 +122,22 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
         ),
         const SizedBox(height: 16),
 
-        if (_composing != null && options != null) ...<Widget>[
+        if (_composing == _Action.transfer && options != null) ...<Widget>[
+          TransferForm(
+            options: options,
+            onClose: () => setState(() => _composing = null),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        if (_composing?.direction != null && options != null) ...<Widget>[
           _EntryForm(
             // Rebuilding on direction change is what keeps the category selection
             // correct. Switching from money-out to money-in changes which categories are
             // valid, and syncing that after the fact is the "you might not need an
             // effect" anti-pattern - a fresh key just initialises it right.
-            key: ValueKey<Direction>(_composing!),
-            direction: _composing!,
+            key: ValueKey<Direction>(_composing!.direction!),
+            direction: _composing!.direction!,
             options: options,
             onClose: () => setState(() => _composing = null),
           ),
@@ -180,37 +196,75 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
           search: _search,
           onQueryChanged: (BillingQuery next) => setState(() => _query = next),
         ),
+
+        if (options != null) ...<Widget>[
+          const SizedBox(height: 16),
+          AccountsPanel(options: options),
+        ],
       ],
     );
   }
 }
 
 // =============================================================================
-// The two buttons
+// The three buttons
 // =============================================================================
-class _DirectionButton extends StatefulWidget {
-  const _DirectionButton({
-    required this.direction,
+class _ActionButton extends StatefulWidget {
+  const _ActionButton({
+    required this.action,
     required this.active,
     required this.onTap,
   });
 
-  final Direction direction;
+  final _Action action;
   final bool active;
   final VoidCallback onTap;
 
   @override
-  State<_DirectionButton> createState() => _DirectionButtonState();
+  State<_ActionButton> createState() => _ActionButtonState();
 }
 
-class _DirectionButtonState extends State<_DirectionButton> {
+class _ActionButtonState extends State<_ActionButton> {
   bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
     final AppTokens t = context.tokens;
-    final bool isIn = widget.direction.isIn;
-    final Color tone = isIn ? t.success : t.danger;
+
+    // The transfer tile is deliberately neutral rather than green or red: a transfer
+    // neither gains nor loses anything, and colouring it like income or an expense
+    // would say that it did.
+    final (
+      Color tone,
+      Color background,
+      IconData icon,
+      String title,
+      String subtitle,
+    ) = switch (widget.action) {
+      _Action.moneyIn => (
+        t.success,
+        t.successBg,
+        LucideIcons.arrowDownLeft,
+        'Money in',
+        'A sale, a receipt, money received',
+      ),
+      _Action.moneyOut => (
+        t.danger,
+        t.dangerBg,
+        LucideIcons.arrowUpRight,
+        'Money out',
+        'A bill, an expense, money paid',
+      ),
+      _Action.transfer => (
+        t.primary,
+        t.surfaceSunken,
+        LucideIcons.arrowLeftRight,
+        'Transfer',
+        'Between your own accounts',
+      ),
+    };
+
+    final bool neutral = widget.action == _Action.transfer;
 
     return Semantics(
       button: true,
@@ -225,11 +279,13 @@ class _DirectionButtonState extends State<_DirectionButton> {
             duration: Motion.fast,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: isIn ? t.successBg : t.dangerBg,
+              color: background,
               borderRadius: BorderRadius.circular(Radii.xl),
               border: Border.all(
                 color: widget.active
                     ? tone
+                    : neutral
+                    ? (_hovered ? t.contentMuted.at(0.5) : t.border)
                     : _hovered
                     ? tone.at(0.6)
                     : tone.at(0.3),
@@ -243,22 +299,18 @@ class _DirectionButtonState extends State<_DirectionButton> {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: tone.at(0.15),
+                    color: tone.at(neutral ? 0.1 : 0.15),
                     borderRadius: BorderRadius.circular(Radii.lg),
                   ),
                   alignment: Alignment.center,
-                  child: Icon(
-                    isIn ? LucideIcons.arrowDownLeft : LucideIcons.arrowUpRight,
-                    size: 18,
-                    color: tone,
-                  ),
+                  child: Icon(icon, size: 18, color: tone),
                 ),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        isIn ? 'Money in' : 'Money out',
+                        title,
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -266,9 +318,7 @@ class _DirectionButtonState extends State<_DirectionButton> {
                         ),
                       ),
                       Text(
-                        isIn
-                            ? 'A sale, a receipt, money received'
-                            : 'A bill, an expense, money paid',
+                        subtitle,
                         style: TextStyle(fontSize: 12, color: t.contentMuted),
                       ),
                     ],
@@ -312,7 +362,11 @@ class _EntryFormState extends ConsumerState<_EntryForm> {
 
   late String _entryDate;
   late String _categoryId;
-  late String _accountId;
+
+  /// The picker *key*, not the account id - a debit card and the bank account it draws
+  /// on share an id, so the widget needs something that tells them apart. Resolved back
+  /// to an account id on save.
+  late String _accountKey;
   bool _saving = false;
 
   List<Category> get _relevant => widget.options.categories
@@ -330,10 +384,14 @@ class _EntryFormState extends ConsumerState<_EntryForm> {
         (relevant.isEmpty ? '' : relevant.first.id);
 
     final List<MoneyAccount> accounts = widget.options.moneyAccounts;
-    _accountId =
-        accounts.where((MoneyAccount a) => a.isDefault).firstOrNull?.id ??
-        (accounts.isEmpty ? '' : accounts.first.id);
+    _accountKey =
+        accounts.where((MoneyAccount a) => a.isDefault).firstOrNull?.key ??
+        (accounts.isEmpty ? '' : accounts.first.key);
   }
+
+  /// The account the picker currently names, or null if the list is empty.
+  MoneyAccount? get _account =>
+      accountForKey(widget.options.moneyAccounts, _accountKey);
 
   @override
   void dispose() {
@@ -388,7 +446,10 @@ class _EntryFormState extends ConsumerState<_EntryForm> {
             party: _party.text.trim(),
             entryDate: _entryDate,
             categoryId: _categoryId,
-            moneyAccountId: _accountId,
+            // The account id, not the picker key. A debit card posts to the bank
+            // account it draws on, which is what makes it a way of *using* that
+            // account rather than a second place the same money lives.
+            moneyAccountId: _account?.id,
             reference: _reference.text.trim(),
           );
 
@@ -543,22 +604,27 @@ class _EntryFormState extends ConsumerState<_EntryForm> {
                     Expanded(
                       child: AppSelect(
                         label: isIn ? 'Received into' : 'Paid from',
-                        value: _accountId,
-                        options: <SelectOption>[
-                          for (final MoneyAccount account
-                              in widget.options.moneyAccounts)
-                            SelectOption(
-                              value: account.id,
-                              label: account.name,
-                            ),
-                        ],
+                        value: _accountKey,
+                        // Grouped into "Cash & bank" and "Cards", because the two are
+                        // not the same kind of thing - one is money you have, the other
+                        // can be money you owe.
+                        groups: moneyAccountGroups(
+                          widget.options.moneyAccounts,
+                        ),
                         onChanged: (String next) =>
-                            setState(() => _accountId = next),
+                            setState(() => _accountKey = next),
                         action: AppTextLink(
                           label: '+ Add account',
                           fontSize: 12,
                           onTap: _addMoneyAccount,
                         ),
+                        hint: _account?.kind.isCard ?? false
+                            ? isIn
+                                  ? 'A refund or credit back onto this card, reducing '
+                                        'what you owe.'
+                                  : 'Charged to this card - recorded as money owed, '
+                                        'not money spent from your balance.'
+                            : null,
                       ),
                     ),
                   ],
@@ -732,7 +798,7 @@ class _EntryFormState extends ConsumerState<_EntryForm> {
       ref.invalidate(billingOptionsProvider);
       ref.invalidate(accountsProvider);
       if (!mounted) return;
-      setState(() => _accountId = created.id);
+      setState(() => _accountKey = created.key);
       context.toastSuccess('Added "${created.name}"');
     } catch (error) {
       if (mounted) context.toastApiError(error, 'Could not add the account');

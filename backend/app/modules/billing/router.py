@@ -20,8 +20,10 @@ from app.modules.auth.dependencies import (
     require_permission,
 )
 from app.modules.billing.schemas import (
+    AddCardRequest,
     BillingOptions,
     BillingSummary,
+    CardRead,
     CategoryRead,
     CreateCategoryRequest,
     CreateMoneyAccountRequest,
@@ -29,8 +31,10 @@ from app.modules.billing.schemas import (
     MoneyAccountRead,
     RecordEntryRequest,
     ReverseEntryRequest,
+    TransferRead,
+    TransferRequest,
 )
-from app.modules.billing.service import BillingService, Direction, Entry
+from app.modules.billing.service import BillingService, Card, Direction, Entry, MoneyAccount
 from app.modules.organizations.models import Organization
 from app.modules.rbac.permissions import Permission
 
@@ -39,6 +43,33 @@ router = APIRouter(prefix="/billing", tags=["Billing"])
 
 def get_billing(session: DbSession) -> BillingService:
     return BillingService(session)
+
+
+def _account_response(account: MoneyAccount) -> MoneyAccountRead:
+    """One mapper, so the shape cannot drift between the routes that return one."""
+    return MoneyAccountRead(
+        id=account.id,
+        code=account.code,
+        name=account.name,
+        is_default=account.is_default,
+        kind=account.kind,
+        card_id=account.card_id,
+        card_last4=account.card_last4,
+        card_network=account.card_network,
+    )
+
+
+def _card_response(card: Card) -> CardRead:
+    return CardRead(
+        id=card.id,
+        label=card.label,
+        kind=card.kind,
+        network=card.network,
+        last4=card.last4,
+        account_id=card.account_id,
+        account_name=card.account_name,
+        is_active=card.is_active,
+    )
 
 
 BillingDep = Annotated[BillingService, Depends(get_billing)]
@@ -107,6 +138,7 @@ async def options(
 
     categories = await service.categories(organization_id)
     accounts = await service.money_accounts(organization_id)
+    cards = await service.cards(organization_id)
 
     return BillingOptions(
         categories=[
@@ -120,10 +152,8 @@ async def options(
             )
             for c in categories
         ],
-        money_accounts=[
-            MoneyAccountRead(id=a.id, code=a.code, name=a.name, is_default=a.is_default)
-            for a in accounts
-        ],
+        money_accounts=[_account_response(a) for a in accounts],
+        cards=[_card_response(c) for c in cards],
         today=today,
         currency=currency,
     )
@@ -191,8 +221,139 @@ async def create_money_account(
     account = await service.create_money_account(
         organization_id, user, name=data.name, kind=data.kind, ctx=ctx
     )
-    return MoneyAccountRead(
-        id=account.id, code=account.code, name=account.name, is_default=account.is_default
+    return _account_response(account)
+
+
+# ---------------------------------------------------------------------------
+# Cards
+# ---------------------------------------------------------------------------
+@router.get("/cards", response_model=list[CardRead], summary="Cards on file")
+async def list_cards(
+    organization_id: ActiveOrganizationId,
+    service: BillingDep,
+    _: Annotated[None, Depends(require_permission(Permission.JOURNAL_READ))],
+    include_archived: Annotated[bool, Query()] = False,
+) -> list[CardRead]:
+    """Every card registered, without a number among them."""
+    return [
+        _card_response(c)
+        for c in await service.cards(organization_id, include_archived=include_archived)
+    ]
+
+
+@router.post(
+    "/cards",
+    response_model=CardRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a card",
+)
+async def add_card(
+    data: AddCardRequest,
+    organization_id: ActiveOrganizationId,
+    user: CurrentUser,
+    service: BillingDep,
+    ctx: RequestCtx,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> CardRead:
+    """Register a card so a payment can say which one it went on.
+
+    **The number is validated, reduced to a network and four digits, and discarded.**
+    Nothing here or downstream stores it - there is no column that could, which is a
+    stronger guarantee than a rule saying not to. A full card number would put this
+    database inside PCI DSS scope, and the last four are what a receipt and a bank
+    statement both show anyway.
+
+    A credit card gets its own liability account, because spending on one creates a debt
+    rather than moving money. A debit card gets none: it names a bank account that already
+    exists, and a second account for it would double-count the same money.
+    """
+    card = await service.create_card(
+        organization_id,
+        user,
+        label=data.label,
+        kind=data.kind,
+        card_number=data.card_number,
+        bank_account_id=data.bank_account_id,
+        ctx=ctx,
+    )
+    return _card_response(card)
+
+
+@router.post("/cards/{card_id}/archive", response_model=CardRead, summary="Archive a card")
+async def archive_card(
+    card_id: uuid.UUID,
+    organization_id: ActiveOrganizationId,
+    service: BillingDep,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> CardRead:
+    """Hide a card from the pickers, keeping its history.
+
+    Archive rather than delete, the same rule as a product: entries already posted point
+    at the card's account, and the card is how somebody recognises them a year later.
+    """
+    return _card_response(await service.set_card_active(organization_id, card_id, active=False))
+
+
+@router.post("/cards/{card_id}/restore", response_model=CardRead, summary="Restore a card")
+async def restore_card(
+    card_id: uuid.UUID,
+    organization_id: ActiveOrganizationId,
+    service: BillingDep,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> CardRead:
+    return _card_response(await service.set_card_active(organization_id, card_id, active=True))
+
+
+# ---------------------------------------------------------------------------
+# Transfers
+# ---------------------------------------------------------------------------
+@router.post(
+    "/transfers",
+    response_model=TransferRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Move money between your own accounts",
+)
+async def create_transfer(
+    data: TransferRequest,
+    organization_id: ActiveOrganizationId,
+    user: CurrentUser,
+    service: BillingDep,
+    ctx: RequestCtx,
+    today: TodayDep,
+    _: Annotated[None, Depends(require_permission(Permission.JOURNAL_WRITE))],
+) -> TransferRead:
+    """Cash to bank, bank to bank, or a payment towards a credit card.
+
+    Posts two lines - debit the destination, credit the source - and neither touches
+    income or expense, because moving your own money is neither earning nor spending it.
+    A transfer that hit the P&L would inflate both sides by the same amount and leave
+    profit right while every other figure was wrong.
+
+    Guarded on `journal:write` rather than a permission of its own: this writes journal
+    entries, and inventing a parallel permission for the same underlying capability would
+    be security theatre.
+    """
+    transfer = await service.transfer(
+        organization_id,
+        user,
+        from_account_id=data.from_account_id,
+        to_account_id=data.to_account_id,
+        amount=data.amount,
+        entry_date=data.entry_date or today,
+        description=data.description,
+        reference=data.reference,
+        ctx=ctx,
+    )
+    return TransferRead(
+        entry_id=transfer.entry_id,
+        entry_number=transfer.entry_number,
+        date=transfer.date,
+        amount=transfer.amount,
+        description=transfer.description,
+        from_account_id=transfer.from_account_id,
+        from_account_name=transfer.from_account_name,
+        to_account_id=transfer.to_account_id,
+        to_account_name=transfer.to_account_name,
     )
 
 
