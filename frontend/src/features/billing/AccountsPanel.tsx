@@ -145,7 +145,6 @@ export function TransferForm({
               value={toId}
               onChange={(event) => setToId(event.target.value)}
               options={accountOptions}
-              placeholder="Choose an account"
               error={sameAccount ? 'Pick a different account.' : undefined}
               hint="The account it arrives in. Paying off a credit card goes here."
             />

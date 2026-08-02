@@ -372,7 +372,6 @@ class _TransferFormState extends ConsumerState<TransferForm> {
                         label: 'To',
                         value: _toId,
                         options: options,
-                        placeholder: 'Choose an account',
                         onChanged: (String next) =>
                             setState(() => _toId = next),
                         error: _sameAccount

@@ -63,7 +63,7 @@ from app.modules.accounting.models import (
     JournalType,
 )
 from app.modules.accounting.repository import POSTED_STATUSES, AccountRepository
-from app.modules.accounting.schemas import AccountCreate
+from app.modules.accounting.schemas import AccountCreate, AccountUpdate
 from app.modules.accounting.service import (
     ChartOfAccountsService,
     FiscalCalendarService,
@@ -188,6 +188,19 @@ class MoneyAccount:
     #: number to a client that only needs to tell two accounts apart is a payload nobody
     #: asked for. The full value is on the account's own detail response.
     account_number_last4: str | None = None
+
+    #: False once archived. Archived accounts are excluded from the picker and only
+    #: appear on the accounts screen when it is asked to show them.
+    is_active: bool = True
+
+    #: Whether archiving this one is permitted at all.
+    #:
+    #: **A capability flag rather than the client re-deriving the rule.** A seeded account -
+    #: "Cash on Hand", "Primary Bank Account" - is a system account, and the accounting
+    #: service refuses to deactivate one because later modules post to it by role. A client
+    #: that offered the button anyway would produce a request that always fails, so the
+    #: server states the answer and the client only renders it.
+    can_archive: bool = False
 
     @property
     def is_card(self) -> bool:
@@ -635,7 +648,9 @@ class BillingService:
             "No account code is free near this group.", code="no_free_code"
         )
 
-    async def money_accounts(self, organization_id: uuid.UUID) -> list[MoneyAccount]:
+    async def money_accounts(
+        self, organization_id: uuid.UUID, *, include_archived: bool = False
+    ) -> list[MoneyAccount]:
         """Everywhere money can sit or land, for "where did it come from / go to".
 
         Three kinds in one list, because that is the question the form asks - but they
@@ -652,8 +667,15 @@ class BillingService:
           exists so somebody who thinks "I paid by card" can say so.
         """
         await self.ensure_books(organization_id)
-        rows = await self.accounts.list_for_org(organization_id, postable_only=True)
-        cards = await self.cards(organization_id)
+        # `include_inactive` only when asked. The picker on the recording screen must never
+        # offer an archived account, so the default stays as it was and the accounts screen
+        # opts in.
+        rows = await self.accounts.list_for_org(
+            organization_id,
+            postable_only=True,
+            include_inactive=include_archived,
+        )
+        cards = await self.cards(organization_id, include_archived=include_archived)
 
         cash = [a for a in rows if a.subtype.is_cash_equivalent]
         by_id = {a.id: a for a in rows}
@@ -688,6 +710,10 @@ class BillingService:
                 account_number_last4=details.get(
                     a.id, _NO_BANK_DETAILS
                 ).account_number_last4,
+                is_active=a.is_active,
+                # A seeded account is a system account and cannot be deactivated - the
+                # accounting service refuses, because later modules post to it by role.
+                can_archive=not a.is_system,
             )
             for a in cash
         ]
@@ -756,6 +782,70 @@ class BillingService:
             )
             for row in rows
         }
+
+    async def set_money_account_active(
+        self,
+        organization_id: uuid.UUID,
+        account_id: uuid.UUID,
+        actor: User,
+        *,
+        is_active: bool,
+        ctx: RequestContext | None = None,
+    ) -> MoneyAccount:
+        """Stop offering an account, or offer it again.
+
+        **Archived, never deleted**, for the same reason a card is: entries already point at
+        it, and the account name is how somebody recognises them a year later. A closed bank
+        account has to leave the picker without taking its history with it.
+
+        Delegates to the accounting service rather than flipping the column here, so the
+        rules stay in one place - a system account cannot be deactivated, and the change is
+        audited as an account update. Which of those two guards fires is not this module's
+        business.
+        """
+        rows = await self.accounts.list_for_org(
+            organization_id, postable_only=True, include_inactive=True
+        )
+        account = next((a for a in rows if a.id == account_id), None)
+        if account is None:
+            raise NotFoundError("That account does not exist.", code="account_not_found")
+        if not account.subtype.is_cash_equivalent:
+            raise BusinessRuleError(
+                "Only a cash or bank account can be archived from here.",
+                code="not_a_money_account",
+            )
+
+        await self.chart.update_account(
+            organization_id,
+            account_id,
+            AccountUpdate(is_active=is_active),
+            actor,
+            ctx,
+        )
+
+        log.info(
+            "money account archived" if not is_active else "money account restored",
+            extra={"code": account.code, "name": account.name},
+        )
+
+        # Re-read rather than patching the row by hand, so what comes back is what the
+        # picker will see - including whether it is still in it at all.
+        listed = await self.money_accounts(organization_id, include_archived=True)
+        return next(
+            (a for a in listed if a.id == account_id and not a.is_card),
+            MoneyAccount(
+                id=account.id,
+                code=account.code,
+                name=account.name,
+                kind=(
+                    MoneyAccountKind.CASH
+                    if account.subtype is AccountSubtype.CASH
+                    else MoneyAccountKind.BANK
+                ),
+                is_active=is_active,
+                can_archive=not account.is_system,
+            ),
+        )
 
     async def bank_details(
         self, organization_id: uuid.UUID, account_id: uuid.UUID
