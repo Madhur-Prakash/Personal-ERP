@@ -31,6 +31,7 @@ void main() {
     holderName: 'Jhon Doe',
     accountNumberLast4: '4321',
   );
+
   /// A closed account: still listed when asked for, never offered in a picker.
   const MoneyAccount archivedBank = MoneyAccount(
     id: 'acct-old',
@@ -217,13 +218,15 @@ void main() {
       await pump(tester, const AccountsPanel(options: options));
       expect(find.text('Archive'), findsOneWidget);
 
-      await tester.tap(find.text('Show archived'));
+      // `.first`: both sections carry the toggle, so the finder matches twice.
+      await tester.tap(find.text('Show archived').first);
       await tester.pumpAndSettle();
 
-      // With the archived debit card now listed, one row offers Archive and the other
-      // Restore.
+      // One Archive, for the live card - the two seeded accounts cannot be archived, so
+      // they offer nothing. Two Restores: the archived card and the closed account, which
+      // is the same control on both kinds of row.
       expect(find.text('Archive'), findsOneWidget);
-      expect(find.text('Restore'), findsOneWidget);
+      expect(find.text('Restore'), findsNWidgets(2));
     });
 
     testWidgets('both add actions are offered', (WidgetTester tester) async {
@@ -276,10 +279,12 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Move money between accounts'), findsOneWidget);
 
-      // From defaults to the default account; To starts unchosen, so the placeholder
-      // shows rather than an account the user did not pick.
+      // Both sides are seeded. "From" takes the default account; "To" takes the first
+      // account that is *not* it, because the one thing a transfer cannot be is an account
+      // to itself - so the form opens ready to use rather than already invalid.
       expect(find.text('Cash on Hand'), findsOneWidget);
-      expect(find.text('Choose an account'), findsOneWidget);
+      expect(find.text('Primary Bank Account'), findsOneWidget);
+      expect(find.text('Choose an account'), findsNothing);
     });
 
     testWidgets('has no category field', (WidgetTester tester) async {
