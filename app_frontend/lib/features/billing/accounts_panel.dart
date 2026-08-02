@@ -362,8 +362,13 @@ class _TransferFormState extends ConsumerState<TransferForm> {
                         label: 'From',
                         value: _fromId,
                         options: options,
-                        onChanged: (String next) =>
-                            setState(() => _fromId = next),
+                        onChanged: (String next) => setState(() {
+                          _fromId = next;
+                          // Move "to" out of the way rather than leaving the form on an
+                          // error the user did not make: choosing the account that happened
+                          // to be the destination is a normal thing to do.
+                          if (_toId == next) _toId = _otherThan(next);
+                        }),
                         hint: 'The account the money leaves.',
                       ),
                     ),
