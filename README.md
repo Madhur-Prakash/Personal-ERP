@@ -57,7 +57,7 @@ Requires Docker, and - for running outside containers -
 [uv](https://docs.astral.sh/uv/) and Node 24.
 
 ```bash
-git clone <repo> && cd personalerp
+git clone https://github.com/Madhur-Prakash/Personal-ERP && cd Personal-ERP
 make setup          # creates .env, installs deps, starts services, migrates
 make up             # starts the whole stack
 ```
