@@ -96,9 +96,9 @@ export function AccountsPage() {
           title="Cash & bank"
           description="Money you have. Click an account to fill in or correct its details."
           action={
-            {/* `right`, because this sits in the card header's action slot - hard against
-                the right edge - and a panel opening rightwards from there is clipped by the
-                window. Same reason the charts on the accounting screen do it. */}
+            /* `right`, because this sits in the card header's action slot - hard against the
+               right edge - and a panel opening rightwards from there is clipped by the
+               window. Same reason the charts on the accounting screen do it. */
             <InfoTip label="Account numbers" align="right">
               <p>
                 An account number is stored <strong>encrypted</strong>, and stored in full - unlike
