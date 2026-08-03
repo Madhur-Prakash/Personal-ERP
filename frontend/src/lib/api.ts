@@ -261,6 +261,20 @@ http.interceptors.response.use(
 // ---------------------------------------------------------------------------
 // Typed helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * File types the save dialog can filter by, keyed by extension.
+ *
+ * Only what this app actually hands to `api.download`. An extension that is missing here
+ * costs nothing but the filter - the file still saves - so this needs extending only to make
+ * a new export type show up as its own entry in the dialog's type list.
+ */
+const MIME_BY_EXTENSION: Record<string, string | undefined> = {
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pdf': 'application/pdf',
+  '.csv': 'text/csv',
+};
+
 export const api = {
   async get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
     const { data } = await http.get<T>(url, config);
@@ -279,20 +293,103 @@ export const api = {
     return data;
   },
   /**
-   * Fetch a file and hand it to the browser as a download.
+   * Fetch a file and save it, letting the user pick where when the browser allows it.
    *
-   * **Not a plain `<a href>`**, which is the obvious approach and does not work here: the
-   * export routes are guarded like every other endpoint, and a bare link carries no
-   * `Authorization` header, so the browser would navigate to a 401. So the bytes come through
-   * the same axios instance as everything else - interceptors, refresh-on-401 and all - and
-   * are then handed over as an object URL.
+   * **Not a plain `<a href>`.** The export routes are guarded like every other endpoint, and
+   * a bare link carries no `Authorization` header, so the browser would navigate to a 401.
+   * The bytes come through the same axios instance as everything else - interceptors,
+   * refresh-on-401 and all - and are handed over afterwards.
    *
-   * The URL is revoked immediately afterwards. A blob URL pins its data in memory for the
-   * life of the document otherwise, and a few exports of a large report add up.
+   * Two ways to hand them over:
+   *
+   * 1. **`showSaveFilePicker`**, the operating system's own save dialog, so the file lands
+   *    where the user wants it. Chromium-only today (Chrome, Edge, Opera), and secure
+   *    contexts only, so it is absent over plain http.
+   * 2. **An object URL and a synthetic click**, when the above is unavailable. This obeys the
+   *    browser's own "ask where to save each file" setting, so a user who wants to be asked
+   *    still is - it just cannot be forced from here. Firefox and Safari implement no
+   *    save-picker API at all, so there is nothing better to fall back to.
+   *
+   * **The dialog opens before the request, and exactly one of the two paths ever runs.** Both
+   * of those are deliberate, and each fixes a bug:
+   *
+   * - Opening it first keeps the *user activation* the picker requires. That activation is
+   *   spent by an `await`, so asking after fetching the report threw `SecurityError` on any
+   *   export slow enough to outlast it - and then fell back, downloading to the default
+   *   folder after the user had been shown a dialog. It also means cancelling costs no
+   *   request at all.
+   * - Once a handle exists the user has committed to a destination, so a later failure is
+   *   reported rather than retried through path 2. Falling back at that point wrote the
+   *   chosen file *and* a second copy to the default folder: two files per click.
+   *
+   * A cancelled dialog is not an error. It throws `AbortError`, which is swallowed rather
+   * than surfaced: the user changed their mind, and a toast saying so would be noise.
    */
   async download(url: string, filename: string, config?: AxiosRequestConfig): Promise<void> {
+    const picker = (
+      window as unknown as {
+        showSaveFilePicker?: (options: {
+          suggestedName?: string;
+          types?: { description: string; accept: Record<string, string[]> }[];
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Blob) => Promise<void>;
+            close: () => Promise<void>;
+          }>;
+        }>;
+      }
+    ).showSaveFilePicker;
+
+    // Taken from the name rather than the response's content type, because the dialog has to
+    // be built before the response exists. `accept` is keyed *by* MIME type, so an unknown
+    // extension means no filter at all - an empty key is an invalid argument, not a missing
+    // one, and the picker rejects the whole call over it.
+    const extension = filename.slice(filename.lastIndexOf('.')).toLowerCase();
+    const mime = MIME_BY_EXTENSION[extension];
+
+    let handle: {
+      createWritable: () => Promise<{
+        write: (data: Blob) => Promise<void>;
+        close: () => Promise<void>;
+      }>;
+    } | null = null;
+    if (typeof picker === 'function') {
+      try {
+        handle = await picker.call(window, {
+          suggestedName: filename,
+          types: mime
+            ? [
+                {
+                  description: `${extension.slice(1).toUpperCase()} file`,
+                  accept: { [mime]: [extension] },
+                },
+              ]
+            : undefined,
+        });
+      } catch (error) {
+        // Cancelling is the expected way out of a save dialog, not a failure.
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        // Anything else - no user activation left, a blocked or non-secure context - means
+        // no destination was chosen, so path 2 is still the right way to deliver the file.
+        handle = null;
+      }
+    }
+
     const response = await http.get<Blob>(url, { ...config, responseType: 'blob' });
-    const href = URL.createObjectURL(response.data);
+    const blob = response.data;
+
+    if (handle) {
+      // `write` then `close`, both on the stream itself - not via `getWriter()`, which locks
+      // the stream and makes the close throw. Closing is what commits the bytes: a writable
+      // left open leaves a zero-length file on disk. A throw here reaches the caller, which
+      // reports it; it does not silently download a second copy somewhere else.
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    }
+
+    const href = URL.createObjectURL(blob);
     try {
       const link = document.createElement('a');
       link.href = href;
@@ -301,6 +398,8 @@ export const api = {
       link.click();
       link.remove();
     } finally {
+      // A blob URL pins its data for the life of the document otherwise, and a few exports
+      // of a large report add up.
       URL.revokeObjectURL(href);
     }
   },

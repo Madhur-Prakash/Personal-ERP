@@ -69,24 +69,40 @@ class ToastScopeState extends State<ToastScope> {
 
   @override
   Widget build(BuildContext context) {
+    // Toasts are mounted in `MaterialApp.builder`, which is *outside* the router - that is
+    // what lets one survive navigation. The cost is that nothing here sits under a
+    // `Scaffold`, so the nearest `DefaultTextStyle` is the deliberately hideous fallback
+    // `MaterialApp` installs to nag you into using a `Material`: 48px red monospace with a
+    // double yellow underline. A `Text` merges its own style *onto* the ambient one, so the
+    // toast's explicit size and colour won and the leftover underline and font family came
+    // through - hence yellow-underlined toast text. Restoring the theme's own body style
+    // here fixes every toast at once, rather than each `Text` having to opt out.
+    final TextStyle base =
+        (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(
+          decoration: TextDecoration.none,
+        );
+
     return Stack(
       children: <Widget>[
         widget.child,
         Positioned(
           right: 16,
           bottom: 16,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisAlignment: MainAxisAlignment.end,
-            spacing: 8,
-            children: <Widget>[
-              for (final ToastData toast in _toasts)
-                _Toast(
-                  key: ObjectKey(toast),
-                  toast: toast,
-                  onDismiss: () => _dismiss(toast),
-                ),
-            ],
+          child: DefaultTextStyle(
+            style: base,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.end,
+              spacing: 8,
+              children: <Widget>[
+                for (final ToastData toast in _toasts)
+                  _Toast(
+                    key: ObjectKey(toast),
+                    toast: toast,
+                    onDismiss: () => _dismiss(toast),
+                  ),
+              ],
+            ),
           ),
         ),
       ],
@@ -165,6 +181,8 @@ class _ToastState extends State<_Toast> with SingleTickerProviderStateMixin {
                     children: <Widget>[
                       Text(
                         widget.toast.message,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
@@ -176,6 +194,12 @@ class _ToastState extends State<_Toast> with SingleTickerProviderStateMixin {
                         const SizedBox(height: 2),
                         Text(
                           widget.toast.description!,
+                          // Wraps, then gives up. A description is a save path or a server
+                          // message, and neither has a bounded length: without a cap a deeply
+                          // nested folder turns a toast into a wall covering the screen it is
+                          // reporting on. Three lines fits any real path at this width.
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 12,
                             color: t.contentMuted,

@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../../core/format.dart';
 import '../../core/locale_settings.dart';
@@ -846,13 +846,35 @@ class _BalanceSheetTabState extends ConsumerState<_BalanceSheetTab> {
   /// Which export is in flight, so both buttons disable together and the right one says so.
   String? _saving;
 
-  /// Write an export to the user's Downloads folder and say where it went.
+  /// Save an export wherever the user asks for it.
   ///
-  /// No save dialog: `file_selector` would be another dependency and another platform
-  /// channel for a file whose name the server already chose. Naming the full path in the
-  /// toast is what makes that acceptable - a file saved somewhere the user was not told
-  /// about is worse than one extra click.
+  /// A real save dialog, not a chosen directory. Writing to Downloads and naming the path in
+  /// a toast was the earlier behaviour, and it decided for the user: an accountant filing
+  /// this alongside a client's other statements has somewhere specific in mind, and moving
+  /// the file afterwards is work the dialog does for free. `FilePicker` is already a
+  /// dependency here, so this costs nothing.
+  ///
+  /// **The report is fetched only after a location is chosen.** Asking first means cancelling
+  /// the dialog does not leave a request in flight whose bytes are then thrown away.
   Future<void> _export(String format) async {
+    final BalanceSheetView? view = ref
+        .read(balanceSheetViewProvider(_query))
+        .valueOrNull;
+    final String suggested =
+        'balance-sheet-${view?.sheet.asOf ?? 'export'}.$format';
+
+    final String? path = await FilePicker.saveFile(
+      dialogTitle: 'Save balance sheet',
+      fileName: suggested,
+      type: FileType.custom,
+      allowedExtensions: <String>[format],
+      // Keeps the dialog tied to the app window, so it cannot end up behind it.
+      lockParentWindow: true,
+    );
+    // Null is a cancelled dialog, which is not an error and gets no toast: the user changed
+    // their mind, and telling them so would be noise.
+    if (path == null) return;
+
     setState(() => _saving = format);
     try {
       final List<int> data = await ref
@@ -866,23 +888,15 @@ class _BalanceSheetTabState extends ConsumerState<_BalanceSheetTab> {
                 : null,
           );
 
-      final Directory? downloads = await getDownloadsDirectory();
-      final Directory target =
-          downloads ?? await getApplicationDocumentsDirectory();
-      final BalanceSheetView? view = ref
-          .read(balanceSheetViewProvider(_query))
-          .valueOrNull;
-      final String stamp = view?.sheet.asOf ?? 'export';
-      final File file = File(
-        p.join(target.path, 'balance-sheet-$stamp.$format'),
-      );
-      await file.writeAsBytes(data);
+      // Some platforms return a path without the extension when the user edits the name;
+      // appending it keeps the file openable by whatever opens .xlsx and .pdf.
+      final String target = path.toLowerCase().endsWith('.$format')
+          ? path
+          : '$path.$format';
+      await File(target).writeAsBytes(data);
 
       if (!mounted) return;
-      context.toastSuccess(
-        'Saved balance-sheet-$stamp.$format',
-        description: file.path,
-      );
+      context.toastSuccess('Saved ${p.basename(target)}', description: target);
     } catch (error) {
       if (mounted) {
         context.toastApiError(error, 'Could not export the $format file');

@@ -592,7 +592,9 @@ function BalanceSheetReport() {
   const download = async (format: 'xlsx' | 'pdf') => {
     setDownloading(format);
     try {
-      await accountingApi.exportBalanceSheet(format, query);
+      // Where it goes is the user's choice: `api.download` opens a save dialog where the
+      // browser has one. All that is passed from here is the name to suggest.
+      await accountingApi.exportBalanceSheet(format, query, data?.sheet.as_of);
     } catch (error) {
       toast.error(
         error instanceof ApiError ? error.message : `Could not export the ${format} file`,

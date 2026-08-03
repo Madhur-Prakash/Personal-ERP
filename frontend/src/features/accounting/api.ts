@@ -280,6 +280,14 @@ export const accountingApi = {
   }) => api.get<BalanceSheetView>('/reports/balance-sheet/view', { params }),
 
   /** Download the same statement as a spreadsheet or a PDF. */
+  /**
+   * Save the balance sheet as a file, at whatever location the user picks.
+   *
+   * `stamp` is the date the sheet is drawn at, and it belongs in the suggested name: these
+   * get filed, and four exports of four quarters all called `balance-sheet.xlsx` overwrite
+   * each other. The caller passes it because only it knows the *resolved* date - for a named
+   * period like "this quarter" the server chooses that, not the query.
+   */
   exportBalanceSheet: (
     format: 'xlsx' | 'pdf',
     params?: {
@@ -288,10 +296,13 @@ export const accountingApi = {
       compare_to?: string;
       comparative?: boolean;
     },
+    stamp?: string,
   ) =>
-    api.download('/reports/balance-sheet/export', `balance-sheet.${format}`, {
-      params: { ...params, format },
-    }),
+    api.download(
+      '/reports/balance-sheet/export',
+      stamp ? `balance-sheet-${stamp}.${format}` : `balance-sheet.${format}`,
+      { params: { ...params, format } },
+    ),
 
   balanceSheet: (params?: { as_of?: string }) =>
     api.get<BalanceSheet>('/reports/balance-sheet', { params }),
