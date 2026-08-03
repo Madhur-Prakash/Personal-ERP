@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=(ROOT_DIR / ".env", BACKEND_DIR / ".env"),
         env_file_encoding="utf-8",
-        case_sensitive=True,
+        case_sensitive=False,
         extra="ignore",  # the shared .env also holds VITE_*/LOG_* keys
     )
 
@@ -147,18 +147,22 @@ class Settings(BaseSettings):
     rate_limit_auth: str = "10/minute"
 
     # ---- Email (Gmail API) --------------------------------------------------
-    #: Base64 of an OAuth token file for the Gmail account that sends mail.
+    #: Base64 of a pickled ``Credentials`` for the Gmail account that sends mail.
     #:
     #: The only mail credential there is. There is no SMTP transport: Google
     #: refuses plain passwords, and app passwords depend on a setting any
     #: Workspace admin can turn off, so a refresh token scoped to ``gmail.send``
-    #: is the supported path. Base64 because the JSON has no safe representation
-    #: in a `.env` value.
+    #: is the supported path. Base64 because a pickle is raw bytes and has no
+    #: representation in a `.env` value at all.
+    #:
+    #: Produce it with ``uv run python scripts/mint_gmail_token.py``; nothing else
+    #: generates a value this accepts.
     #:
     #: Unset - the default - means mail is written to the log instead of sent,
     #: which is what lets the test suite and a fresh checkout run with no
-    #: credentials. See :mod:`app.modules.notifications.email` for the accepted
-    #: JSON shapes and the scope the token must carry.
+    #: credentials. See :mod:`app.modules.notifications.email` for the format, the
+    #: scope the token must carry, and why unpickling this value is only safe while
+    #: it comes from configuration the operator controls.
     #: **The value belongs in `.env`, never here.** This file is tracked; `.env` is
     #: not. A refresh token and client secret committed to source are readable by
     #: anyone who can read the repository, and rewriting history does not un-leak
@@ -172,7 +176,7 @@ class Settings(BaseSettings):
     #: API rewrites the header or refuses outright. Left unset, the ``From`` header
     #: is omitted and Gmail fills in the authorised mailbox - correct, but without
     #: a display name.
-    gmail_sender: str | None = None
+    gmail_sender: str | None = "synfin.no.reply@gmail.com"
 
     #: The display name on outgoing mail, used when :attr:`gmail_sender` is set.
     email_from_name: str = "Personal ERP"

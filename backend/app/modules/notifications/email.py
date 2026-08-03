@@ -1,6 +1,6 @@
 """Transactional email through the Gmail API.
 
-**One transport, in one file.** Everything here - parsing the credential, minting
+**One transport, in one file.** Everything here - loading the credential, minting
 access tokens, posting the message, and the six message templates - is the single
 path an email takes out of this application. There is no SMTP fallback and no
 local mail catcher: a second transport means two code paths that can render the
@@ -26,18 +26,20 @@ and neither drifts when Google changes it. The catch is that both are synchronou
 httplib2 underneath - so a send must leave the event loop or it stalls every other
 request while it waits; see :func:`_send_sync`.
 
-Configuration is a single base64 blob. The JSON inside needs three fields -
-``client_id``, ``client_secret`` and ``refresh_token`` - and both file layouts
-Google's tooling emits are accepted:
+Configuration is a single base64 line holding a **pickled**
+:class:`google.oauth2.credentials.Credentials` - the ``token.pickle`` the Gmail
+quickstart writes. Base64 because a ``.env`` value cannot hold arbitrary bytes or
+newlines, and quoting a credential through docker compose, a shell and pydantic is
+a reliable source of corrupted secrets. One opaque line has no such edges. Mint the
+value with ``uv run python scripts/mint_gmail_token.py``.
 
-* ``token.json`` from the OAuth quickstart - the three fields at the top level,
-  alongside others that are ignored.
-* ``credentials.json`` with an ``installed`` or ``web`` wrapper, provided the
-  refresh token is in there too.
-
-Base64 rather than raw JSON because a ``.env`` value cannot hold newlines, and
-quoting a JSON document through docker compose, a shell and pydantic is a reliable
-source of corrupted secrets. One opaque line has no such edges.
+**The pickle is trusted input, and that is a real constraint.** ``pickle.loads``
+executes whatever the payload tells it to, so this blob is not data - it carries the
+same authority as the code in this repository. It is safe here because it comes from
+the operator's own ``.env`` or secret store, written by the operator. It would not be
+safe sourced from a database, an upload, an API request, or a shared/untrusted
+config service, and :func:`_load_credentials` deliberately refuses anything that is
+not a pickled ``Credentials`` so a swapped-in value fails loudly rather than running.
 
 Sending never raises into a request. A signup that succeeded must not report
 failure because Google was briefly unreachable - the user can always request
@@ -55,16 +57,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-import json
 import logging
+import pickle
 import threading
-from dataclasses import dataclass
 from email.message import EmailMessage
 from email.policy import SMTP as SMTP_POLICY
 from typing import Any, Final
+from urllib.parse import urlencode
 
 import anyio.to_thread
 from google.auth.exceptions import RefreshError, TransportError
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -76,12 +79,20 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
-_TOKEN_URI: Final = "https://oauth2.googleapis.com/token"
-
 #: The scope the refresh token must carry. Not requested here - it is fixed when the
-#: token is minted - but declared so google-auth knows what it holds, and so the
-#: error path can say what is missing.
+#: token is minted - but named so the error path can say what is missing.
 SEND_SCOPE: Final = "https://www.googleapis.com/auth/gmail.send"
+
+#: How ``scripts/mint_gmail_token.py`` is invoked. In every "your credential is
+#: broken" message, because the fix is always to run it.
+_MINT_HINT: Final = "uv run python scripts/mint_gmail_token.py"
+
+#: Opening bytes of a pickle stream, protocols 2 through 5.
+#:
+#: Checked before unpickling so the common deployment mistakes - a base64'd
+#: ``token.json``, a bare token string, a truncated paste - are named as
+#: configuration errors instead of being handed to ``pickle.loads``.
+_PICKLE_PREFIXES: Final = (b"\x80\x02", b"\x80\x03", b"\x80\x04", b"\x80\x05")
 
 #: Attempts per message, and the waits between them.
 #:
@@ -95,27 +106,22 @@ _RETRY_WAITS: Final = (1.0, 2.0)
 
 
 class GmailConfigurationError(RuntimeError):
-    """The configured credentials are absent or malformed."""
+    """The configured credential is absent, malformed, or not a usable credential.
+
+    Separate from a delivery failure because it is never worth retrying and never
+    fixes itself: every instance is a deployment problem with a specific fix.
+    """
 
 
 # =============================================================================
 # Credentials
 # =============================================================================
-@dataclass(frozen=True, slots=True)
-class GmailCredentials:
-    """The three fields needed to mint access tokens for one mailbox."""
+def _load_credentials(blob: str) -> Credentials:
+    """Decode and unpickle the configured credential.
 
-    client_id: str
-    client_secret: str
-    refresh_token: str
-
-
-def _decode_credentials(blob: str) -> GmailCredentials:
-    """Parse the base64 JSON blob, with errors that name the actual problem.
-
-    Every failure here is a deployment typo, and the difference between "not valid
-    base64" and "no refresh_token" is the difference between a five-second fix and
-    an hour of guessing - so they are reported separately.
+    Every failure here is a deployment mistake, and the difference between "not
+    valid base64" and "no refresh token in it" is the difference between a
+    five-second fix and an hour of guessing - so each is reported separately.
     """
     # Whitespace is stripped rather than rejected: `base64` without `-w0` wraps at
     # 76 columns, and pasting that in is a mistake worth absorbing rather than
@@ -128,81 +134,74 @@ def _decode_credentials(blob: str) -> GmailCredentials:
         raw = base64.b64decode(packed, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise GmailConfigurationError(
-            "GMAIL_CREDENTIALS_B64 is not valid base64. Produce it with: base64 -w0 token.json"
+            f"GMAIL_CREDENTIALS_B64 is not valid base64. Mint a fresh value: {_MINT_HINT}"
         ) from exc
 
-    # A pickled `Credentials`, which is what the *old* Gmail quickstart wrote as
-    # `token.pickle`. Named specifically because the generic "not JSON" message sends
-    # you looking for a typo in a blob that is, in fact, exactly what some tutorial
-    # told you to produce. `pickle.loads` is deliberately not offered as a fallback:
-    # unpickling a value that arrives from configuration is arbitrary code execution,
-    # and no convenience is worth putting that in a mail path.
-    if raw[:2] in (b"\x80\x02", b"\x80\x03", b"\x80\x04", b"\x80\x05"):
+    if not raw.startswith(_PICKLE_PREFIXES):
+        # Named specifically, because this is the shape of the *previous* credential
+        # format for this project. A generic "not a pickle" sends you looking for a
+        # typo in a blob that is, in fact, a perfectly good token.json.
+        if raw.lstrip()[:1] in (b"{", b"["):
+            raise GmailConfigurationError(
+                "GMAIL_CREDENTIALS_B64 holds base64 of JSON (a token.json). This "
+                f"transport expects a pickled Credentials object - re-mint it: {_MINT_HINT}"
+            )
         raise GmailConfigurationError(
-            "GMAIL_CREDENTIALS_B64 is a pickled Credentials object (the old "
-            "token.pickle format), which this deliberately will not load. Convert it "
-            "to JSON once: "
-            'python -c "import pickle,base64,pathlib; '
-            "print(pickle.loads(base64.b64decode(pathlib.Path('blob.txt').read_text()))"
-            '.to_json())" > token.json - then base64 that file.'
+            "GMAIL_CREDENTIALS_B64 did not decode to a pickled Credentials object. It "
+            "should be the base64 of the whole pickle, not of a bare token string: "
+            f"{_MINT_HINT}"
         )
 
     try:
-        document: Any = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        # Trusted by construction - see the module docstring. S301 is the right rule
+        # in general and cannot see where this blob came from, so it is silenced here
+        # and only here, with the `isinstance` check below as the backstop.
+        credentials = pickle.loads(raw)  # noqa: S301
+    except Exception as exc:  # unpickling fails in unbounded ways, all of them fatal here
         raise GmailConfigurationError(
-            "GMAIL_CREDENTIALS_B64 decoded to something that is not JSON. It should "
-            "be the base64 of an OAuth token file, not of a bare token string."
+            f"GMAIL_CREDENTIALS_B64 could not be unpickled ({type(exc).__name__}: {exc}). "
+            "A pickle is only readable by a compatible google-auth; if that library was "
+            f"upgraded since the value was produced, re-mint it: {_MINT_HINT}"
         ) from exc
 
-    if not isinstance(document, dict):
-        raise GmailConfigurationError("GMAIL_CREDENTIALS_B64 must decode to a JSON object")
-
-    # `credentials.json` nests the client under `installed` (desktop apps) or `web`.
-    # Flattening both means either file works without the operator having to know
-    # which one they downloaded.
-    fields: dict[str, Any] = {}
-    for wrapper in ("installed", "web"):
-        nested = document.get(wrapper)
-        if isinstance(nested, dict):
-            fields.update(nested)
-    fields.update({key: value for key, value in document.items() if not isinstance(value, dict)})
-
-    missing = [
-        name
-        for name in ("client_id", "client_secret", "refresh_token")
-        if not isinstance(fields.get(name), str) or not fields[name]
-    ]
-    if missing:
-        hint = ""
-        if document.get("type") == "service_account":
-            # Worth naming, because the fix is not "add a field" - it is a different
-            # credential entirely, and a service account additionally needs
-            # domain-wide delegation before it can send as a user.
-            hint = (
-                " This looks like a service-account key; this transport expects an "
-                "OAuth user credential with a refresh token."
-            )
+    if not isinstance(credentials, Credentials):
         raise GmailConfigurationError(
-            f"GMAIL_CREDENTIALS_B64 is missing {', '.join(missing)}.{hint}"
+            f"GMAIL_CREDENTIALS_B64 unpickled to {type(credentials).__name__}, not a "
+            f"google.oauth2.credentials.Credentials: {_MINT_HINT}"
         )
 
-    return GmailCredentials(
-        client_id=fields["client_id"],
-        client_secret=fields["client_secret"],
-        refresh_token=fields["refresh_token"],
-    )
+    if not credentials.refresh_token:
+        # An access token alone expires within the hour and cannot be renewed, so this
+        # would appear to work once and then fail permanently.
+        raise GmailConfigurationError(
+            "GMAIL_CREDENTIALS_B64 carries no refresh token, so it cannot be renewed. "
+            f"Google only issues one on a consent prompt - re-mint it: {_MINT_HINT}"
+        )
+
+    scopes = credentials.scopes
+    if scopes and SEND_SCOPE not in scopes:
+        # Checked rather than trusted: a token minted for the wrong scope fails at
+        # the send with a bare 403 that says nothing about which scope was missing.
+        raise GmailConfigurationError(
+            f"GMAIL_CREDENTIALS_B64 was granted {', '.join(scopes)} but sending needs "
+            f"{SEND_SCOPE}: {_MINT_HINT}"
+        )
+
+    return credentials
 
 
 # =============================================================================
 # Transport
 # =============================================================================
-#: The live credential, and the blob it was built from.
+#: The live credential and the Gmail client built from it, with the blob they came
+#: from.
 #:
-#: Rebuilt only when the setting changes. Holding it is what makes an access token
-#: last: google-auth refreshes it in place when it expires, so a run of emails costs
-#: one token request rather than one per message.
+#: Cached because ``Credentials`` refreshes in place: holding it means a run of
+#: emails costs one token request rather than one per message, where reloading the
+#: pickle each time re-authenticates on every send. Rebuilt only if the configured
+#: blob changes.
 _credentials: Credentials | None = None
+_service: Any = None
 _credentials_blob: str | None = None
 
 #: Sends are serialised.
@@ -211,53 +210,50 @@ _credentials_blob: str | None = None
 #: ``Credentials`` is thread-safe, and two worker threads refreshing the same
 #: credential at once is a race on the token. Transactional mail is a handful of
 #: messages per signup, so serialising costs nothing measurable and removes the
-#: whole class of problem - where the alternative, a fresh credential per send,
-#: would re-authenticate on every email.
+#: whole class of problem.
 _send_lock = threading.Lock()
 
 
 def reset_credentials_cache() -> None:
-    """Forget the built credential. Used by tests and after a config change."""
-    global _credentials, _credentials_blob
+    """Forget the loaded credential and client. For tests and after a config change."""
+    global _credentials, _service, _credentials_blob
     with _send_lock:
         _credentials = None
+        _service = None
         _credentials_blob = None
 
 
 def _authenticate_gmail() -> Any:
-    """Build an authorised Gmail client.
+    """Return an authorised Gmail client.
 
     Blocking: called only from a worker thread, and only under :data:`_send_lock`.
     """
-    global _credentials, _credentials_blob
+    global _credentials, _service, _credentials_blob
 
     blob = settings.gmail_credentials_b64
     if not blob:
         raise GmailConfigurationError("GMAIL_CREDENTIALS_B64 is not set")
 
-    if _credentials is None or _credentials_blob != blob:
-        parsed = _decode_credentials(blob)
-        # `token=None` starts with nothing but the refresh token, which is all the
-        # configuration carries; google-auth mints an access token before the first
-        # call and renews it as needed.
-        #
-        # The ignore is google-auth's own doing: it ships `py.typed` but leaves this
-        # constructor unannotated, so strict mode sees an untyped call into a library
-        # it otherwise types. Narrower than exempting the whole module.
-        _credentials = Credentials(  # type: ignore[no-untyped-call]
-            token=None,
-            refresh_token=parsed.refresh_token,
-            token_uri=_TOKEN_URI,
-            client_id=parsed.client_id,
-            client_secret=parsed.client_secret,
-            scopes=[SEND_SCOPE],
-        )
+    if _service is None or _credentials_blob != blob:
+        _credentials = _load_credentials(blob)
+        # `cache_discovery=False` silences a warning about an oauth2client file cache
+        # this project does not use. The discovery document is the one bundled with
+        # the library, so building a service makes no network call of its own.
+        _service = build("gmail", "v1", credentials=_credentials, cache_discovery=False)
         _credentials_blob = blob
 
-    # `cache_discovery=False` silences a warning about an oauth2client file cache
-    # this project does not use. The discovery document is the one bundled with the
-    # library, so building a service makes no network call of its own.
-    return build("gmail", "v1", credentials=_credentials, cache_discovery=False)
+    # `Credentials.valid` is false both when the access token has expired and when
+    # the pickle never carried one, which is the usual case. Refreshing here rather
+    # than leaving it to the request means a rejected refresh token surfaces as a
+    # `RefreshError` from a known place, where `_describe` can explain it - instead
+    # of as an opaque failure inside the send.
+    if _credentials is not None and not _credentials.valid:
+        # The ignore is google-auth's own doing: it ships `py.typed` but leaves
+        # `refresh` unannotated, so strict mode sees an untyped call into a library it
+        # otherwise types. Narrower than exempting the whole module.
+        _credentials.refresh(Request())  # type: ignore[no-untyped-call]
+
+    return _service
 
 
 def _send_sync(message: EmailMessage) -> None:
@@ -292,6 +288,25 @@ def _is_transient(exc: BaseException) -> bool:
 
 def _describe(exc: BaseException) -> str:
     """A one-line reason, carrying Google's own wording where there is one."""
+    if isinstance(exc, RefreshError):
+        detail = f"RefreshError: {exc}"
+        if "invalid_grant" in str(exc):
+            # The one Gmail failure whose message says nothing useful. `invalid_grant`
+            # on a refresh means Google has rejected the refresh token itself, so no
+            # amount of retrying or reconfiguring helps - it has to be replaced. The
+            # causes are listed because the first is overwhelmingly the common one and
+            # is invisible from the error: an OAuth consent screen left in "Testing"
+            # expires every refresh token it issued after seven days.
+            return (
+                f"{detail} - Google has rejected the refresh token itself; it is dead "
+                "rather than misconfigured. Causes, in order of likelihood: the OAuth "
+                "consent screen is still in Testing (Google expires those refresh "
+                "tokens after 7 days - publish the app to stop it), the token was "
+                "revoked from the Google account's third-party access, the account "
+                "password changed, the OAuth client was deleted or recreated, or this "
+                f"machine's clock is badly skewed. Mint a new token: {_MINT_HINT}"
+            )
+        return detail
     if isinstance(exc, HttpError):
         return f"HTTP {exc.status_code}: {exc}"
     return f"{type(exc).__name__}: {exc}"
@@ -437,8 +452,6 @@ async def send_email(
 
 
 def _frontend_url(path: str, **params: str) -> str:
-    from urllib.parse import urlencode
-
     base = settings.frontend_url.rstrip("/")
     query = f"?{urlencode(params)}" if params else ""
     return f"{base}{path}{query}"

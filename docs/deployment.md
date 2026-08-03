@@ -64,9 +64,9 @@ FRONTEND_URL=https://app.yourdomain.com
 PUBLIC_API_URL=https://app.yourdomain.com
 LOG_JSON=true
 
-# Email. Base64 of an OAuth token file with the gmail.send scope; see
-# .env.sample for how to produce it, and keep it in a secret store.
-GMAIL_CREDENTIALS_B64=<base64 of token.json>
+# Email. Base64 of a pickled Credentials with the gmail.send scope. Produce it with
+# `uv run python scripts/mint_gmail_token.py`, and keep it in a secret store.
+GMAIL_CREDENTIALS_B64=<output of scripts/mint_gmail_token.py>
 GMAIL_SENDER=no-reply@yourdomain.com
 EMAIL_FROM_NAME=Personal ERP
 ```
@@ -265,6 +265,16 @@ an insufficient-scope message for a token without `gmail.send`:
 ```bash
 docker compose -f docker-compose.prod.yml logs backend | grep -i "email"
 ```
+
+**`invalid_grant`** - Google has rejected the refresh token itself, so the value is
+dead rather than misconfigured and no restart or retry recovers it. Mint a new one
+with `uv run python scripts/mint_gmail_token.py` and redeploy the secret. Then fix
+the cause, because a replacement token dies the same way: most often the OAuth
+consent screen is still in **Testing**, where Google expires every refresh token
+after 7 days - publish the app to stop it. Otherwise the token was revoked from the
+account's third-party access, the account password changed, the OAuth client was
+deleted or recreated, or the host clock has drifted far enough for Google to reject
+the assertion (`timedatectl status`).
 
 **"Session is no longer valid" immediately after signing in** - the token epoch
 was bumped, or the client and server clocks disagree. Check `timedatectl`.

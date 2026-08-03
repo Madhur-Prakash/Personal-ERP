@@ -80,6 +80,11 @@ dev = [
     "mypy>=1.18.0",
     "types-passlib>=1.7.7",
     "types-openpyxl>=3.1.5.20260724",
+    # Runs the OAuth consent flow in `scripts/mint_gmail_token.py`, which is the only
+    # thing in this repository that needs it - the server is handed an already-minted
+    # refresh token and never prompts. Dev-only so a production image does not ship a
+    # browser-based auth flow it cannot use.
+    "google-auth-oauthlib>=1.2.0",
 ]
 
 # =============================================================================
