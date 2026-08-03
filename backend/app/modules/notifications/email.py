@@ -1,18 +1,49 @@
-"""Transactional email over SMTP.
+"""Transactional email through the Gmail API.
 
-Two behaviours, chosen by whether ``SMTP_HOST`` is configured:
+**One transport, in one file.** Everything here - parsing the credential, minting
+access tokens, posting the message, and the six message templates - is the single
+path an email takes out of this application. There is no SMTP fallback and no
+local mail catcher: a second transport means two code paths that can render the
+same email differently, and the one that is not exercised is the one that breaks.
 
-* **Configured** - sends via :mod:`aiosmtplib`.
-* **Not configured** (the local default) - renders the message and writes it to
-  the logifyx log, including the verification/reset link. Development works with
-  no mail server at all, and nobody has to dig a token out of the database to
-  test a flow. ``docker compose up`` also runs Mailpit on
-  http://localhost:8025 for those who want a real inbox.
+Two behaviours, chosen by whether ``GMAIL_CREDENTIALS_B64`` is configured:
+
+* **Configured** - sends through the Gmail API.
+* **Not configured** - renders the message and writes it to the logifyx log,
+  including the verification/reset link. This is not a transport; it is what makes
+  the test suite and a fresh checkout work with no credentials at all, and it is
+  the only way to click a verification link without them.
+
+**Why the Gmail API rather than SMTP.** Google refuses plain passwords, and app
+passwords require 2FA plus a per-account secret that any Workspace admin can
+switch off org-wide. A refresh token scoped to ``gmail.send`` grants exactly one
+capability - sending - so a leaked credential cannot read the mailbox it sends
+from.
+
+**The official client, not hand-rolled HTTP.** ``google-api-python-client`` owns the
+send and ``google-auth`` owns the token lifecycle, so neither is reimplemented here
+and neither drifts when Google changes it. The catch is that both are synchronous -
+httplib2 underneath - so a send must leave the event loop or it stalls every other
+request while it waits; see :func:`_send_sync`.
+
+Configuration is a single base64 blob. The JSON inside needs three fields -
+``client_id``, ``client_secret`` and ``refresh_token`` - and both file layouts
+Google's tooling emits are accepted:
+
+* ``token.json`` from the OAuth quickstart - the three fields at the top level,
+  alongside others that are ignored.
+* ``credentials.json`` with an ``installed`` or ``web`` wrapper, provided the
+  refresh token is in there too.
+
+Base64 rather than raw JSON because a ``.env`` value cannot hold newlines, and
+quoting a JSON document through docker compose, a shell and pydantic is a reliable
+source of corrupted secrets. One opaque line has no such edges.
 
 Sending never raises into a request. A signup that succeeded must not report
-failure because the mail relay was briefly unreachable - the user can always
-request another verification email, but a rolled-back registration is
-unrecoverable. Failures are logged at error level for alerting.
+failure because Google was briefly unreachable - the user can always request
+another verification email, but a rolled-back registration is unrecoverable. A
+transient failure is retried a few times and logged as a warning; a permanent one,
+or the last attempt, is logged at error level for alerting.
 
 Templates are inline Jinja2 rather than files: Stage 1 has six emails, and a
 template directory plus loader configuration is machinery for a problem that does
@@ -21,20 +52,240 @@ not exist yet. Extracting them is mechanical when the count grows.
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import binascii
+import json
+import logging
+import threading
+from dataclasses import dataclass
 from email.message import EmailMessage
+from email.policy import SMTP as SMTP_POLICY
 from typing import Any, Final
 
-import aiosmtplib
+import anyio.to_thread
+from google.auth.exceptions import RefreshError, TransportError
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from jinja2 import Environment, select_autoescape
+from markupsafe import Markup
 
 from app.core.config import settings
 from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
-#: ``autoescape`` is non-negotiable: user-supplied names go into these bodies,
-#: and an unescaped one is HTML injection into whatever the recipient's client
-#: renders.
+_TOKEN_URI: Final = "https://oauth2.googleapis.com/token"
+
+#: The scope the refresh token must carry. Not requested here - it is fixed when the
+#: token is minted - but declared so google-auth knows what it holds, and so the
+#: error path can say what is missing.
+SEND_SCOPE: Final = "https://www.googleapis.com/auth/gmail.send"
+
+#: Attempts per message, and the waits between them.
+#:
+#: Deliberately short. Sends are awaited inside the request that triggered them -
+#: registration waits for its own verification email - so every second here is a
+#: second the user waits. Three quick attempts ride out a blip; a longer ladder
+#: would just make a failing signup feel broken. Only transient failures are
+#: retried at all, so a bad credential still fails on the first attempt.
+_MAX_ATTEMPTS: Final = 3
+_RETRY_WAITS: Final = (1.0, 2.0)
+
+
+class GmailConfigurationError(RuntimeError):
+    """The configured credentials are absent or malformed."""
+
+
+# =============================================================================
+# Credentials
+# =============================================================================
+@dataclass(frozen=True, slots=True)
+class GmailCredentials:
+    """The three fields needed to mint access tokens for one mailbox."""
+
+    client_id: str
+    client_secret: str
+    refresh_token: str
+
+
+def _decode_credentials(blob: str) -> GmailCredentials:
+    """Parse the base64 JSON blob, with errors that name the actual problem.
+
+    Every failure here is a deployment typo, and the difference between "not valid
+    base64" and "no refresh_token" is the difference between a five-second fix and
+    an hour of guessing - so they are reported separately.
+    """
+    # Whitespace is stripped rather than rejected: `base64` without `-w0` wraps at
+    # 76 columns, and pasting that in is a mistake worth absorbing rather than
+    # bouncing.
+    packed = "".join(blob.split())
+    if not packed:
+        raise GmailConfigurationError("GMAIL_CREDENTIALS_B64 is empty")
+
+    try:
+        raw = base64.b64decode(packed, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise GmailConfigurationError(
+            "GMAIL_CREDENTIALS_B64 is not valid base64. Produce it with: base64 -w0 token.json"
+        ) from exc
+
+    try:
+        document: Any = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise GmailConfigurationError(
+            "GMAIL_CREDENTIALS_B64 decoded to something that is not JSON. It should "
+            "be the base64 of an OAuth token file, not of a bare token string."
+        ) from exc
+
+    if not isinstance(document, dict):
+        raise GmailConfigurationError("GMAIL_CREDENTIALS_B64 must decode to a JSON object")
+
+    # `credentials.json` nests the client under `installed` (desktop apps) or `web`.
+    # Flattening both means either file works without the operator having to know
+    # which one they downloaded.
+    fields: dict[str, Any] = {}
+    for wrapper in ("installed", "web"):
+        nested = document.get(wrapper)
+        if isinstance(nested, dict):
+            fields.update(nested)
+    fields.update({key: value for key, value in document.items() if not isinstance(value, dict)})
+
+    missing = [
+        name
+        for name in ("client_id", "client_secret", "refresh_token")
+        if not isinstance(fields.get(name), str) or not fields[name]
+    ]
+    if missing:
+        hint = ""
+        if document.get("type") == "service_account":
+            # Worth naming, because the fix is not "add a field" - it is a different
+            # credential entirely, and a service account additionally needs
+            # domain-wide delegation before it can send as a user.
+            hint = (
+                " This looks like a service-account key; this transport expects an "
+                "OAuth user credential with a refresh token."
+            )
+        raise GmailConfigurationError(
+            f"GMAIL_CREDENTIALS_B64 is missing {', '.join(missing)}.{hint}"
+        )
+
+    return GmailCredentials(
+        client_id=fields["client_id"],
+        client_secret=fields["client_secret"],
+        refresh_token=fields["refresh_token"],
+    )
+
+
+# =============================================================================
+# Transport
+# =============================================================================
+#: The live credential, and the blob it was built from.
+#:
+#: Rebuilt only when the setting changes. Holding it is what makes an access token
+#: last: google-auth refreshes it in place when it expires, so a run of emails costs
+#: one token request rather than one per message.
+_credentials: Credentials | None = None
+_credentials_blob: str | None = None
+
+#: Sends are serialised.
+#:
+#: Neither the httplib2 connection inside a service object nor a shared
+#: ``Credentials`` is thread-safe, and two worker threads refreshing the same
+#: credential at once is a race on the token. Transactional mail is a handful of
+#: messages per signup, so serialising costs nothing measurable and removes the
+#: whole class of problem - where the alternative, a fresh credential per send,
+#: would re-authenticate on every email.
+_send_lock = threading.Lock()
+
+
+def reset_credentials_cache() -> None:
+    """Forget the built credential. Used by tests and after a config change."""
+    global _credentials, _credentials_blob
+    with _send_lock:
+        _credentials = None
+        _credentials_blob = None
+
+
+def _authenticate_gmail() -> Any:
+    """Build an authorised Gmail client.
+
+    Blocking: called only from a worker thread, and only under :data:`_send_lock`.
+    """
+    global _credentials, _credentials_blob
+
+    blob = settings.gmail_credentials_b64
+    if not blob:
+        raise GmailConfigurationError("GMAIL_CREDENTIALS_B64 is not set")
+
+    if _credentials is None or _credentials_blob != blob:
+        parsed = _decode_credentials(blob)
+        # `token=None` starts with nothing but the refresh token, which is all the
+        # configuration carries; google-auth mints an access token before the first
+        # call and renews it as needed.
+        #
+        # The ignore is google-auth's own doing: it ships `py.typed` but leaves this
+        # constructor unannotated, so strict mode sees an untyped call into a library
+        # it otherwise types. Narrower than exempting the whole module.
+        _credentials = Credentials(  # type: ignore[no-untyped-call]
+            token=None,
+            refresh_token=parsed.refresh_token,
+            token_uri=_TOKEN_URI,
+            client_id=parsed.client_id,
+            client_secret=parsed.client_secret,
+            scopes=[SEND_SCOPE],
+        )
+        _credentials_blob = blob
+
+    # `cache_discovery=False` silences a warning about an oauth2client file cache
+    # this project does not use. The discovery document is the one bundled with the
+    # library, so building a service makes no network call of its own.
+    return build("gmail", "v1", credentials=_credentials, cache_discovery=False)
+
+
+def _send_sync(message: EmailMessage) -> None:
+    """Post one message. Blocking - the whole reason this runs in a thread."""
+    # `raw` is a complete RFC 5322 message, so it is serialised with the SMTP
+    # policy: CRLF line endings and folded headers, the same bytes any mail
+    # transport would put on the wire.
+    raw = base64.urlsafe_b64encode(message.as_bytes(policy=SMTP_POLICY)).decode("ascii")
+    with _send_lock:
+        service = _authenticate_gmail()
+        service.users().messages().send(userId="me", body={"raw": raw}).execute()
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Whether retrying this failure could plausibly succeed.
+
+    The distinction matters because the caller is a user waiting on a response.
+    Retrying a revoked token or a missing scope cannot work - it only adds delay to a
+    failure that is already certain - so those give up immediately.
+    """
+    if isinstance(exc, (GmailConfigurationError, RefreshError)):
+        # A malformed blob, or a refresh token Google has rejected. Neither is fixed
+        # by asking again.
+        return False
+    if isinstance(exc, HttpError):
+        status = exc.status_code
+        # 429 and 5xx are Google saying "not now". Every other 4xx is "not ever".
+        return status is not None and (status == 429 or status >= 500)
+    # A DNS failure, a dropped connection, a timeout.
+    return isinstance(exc, (TransportError, OSError, TimeoutError))
+
+
+def _describe(exc: BaseException) -> str:
+    """A one-line reason, carrying Google's own wording where there is one."""
+    if isinstance(exc, HttpError):
+        return f"HTTP {exc.status_code}: {exc}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+# =============================================================================
+# Rendering
+# =============================================================================
+#: ``autoescape`` is non-negotiable: user-supplied names go into these bodies, and
+#: an unescaped one is HTML injection into whatever the recipient's client renders.
 _jinja = Environment(autoescape=select_autoescape(["html", "xml"]), enable_async=False)
 
 _BASE_STYLES: Final = """
@@ -69,12 +320,38 @@ _LAYOUT: Final = """<!doctype html>
 
 
 def _render(body_template: str, *, subject: str, footer: str | None = None, **context: Any) -> str:
+    """Render a body template, then wrap it in the shared layout.
+
+    **`Markup` is what makes the two stages work.** `render()` returns a plain
+    `str`, and dropping a plain `str` into the layout's `{{ body }}` escapes it a
+    second time - which turned every email into a wall of visible source, `&lt;h1&gt;`
+    and all, with the verification button rendered as text rather than a link. The
+    styles went the same way: `'Segoe UI'` arrived as `&#39;Segoe UI&#39;` and the
+    font declaration died with it.
+
+    This is safe rather than a hole punched in the autoescaping, and the ordering is
+    the reason: the inner render escapes every value in `context` as it interpolates
+    it, so by the time the result is marked safe, the only markup left in it is the
+    template's own. `footer` is deliberately *not* marked - it is prose, and leaving
+    it escaped means a caller cannot smuggle markup in through it.
+    """
     body = _jinja.from_string(body_template).render(**context)
     return _jinja.from_string(_LAYOUT).render(
-        subject=subject, styles=_BASE_STYLES, body=body, footer=footer
+        subject=subject,
+        # S704 is the right rule in general - `Markup` on a computed string is how
+        # XSS arrives - and it cannot see either argument's provenance. `_BASE_STYLES`
+        # is a module constant, and `body` was escaped by the render above; see the
+        # docstring. Silenced per line, so the next `Markup` still has to argue for
+        # itself.
+        styles=Markup(_BASE_STYLES),  # noqa: S704
+        body=Markup(body),  # noqa: S704
+        footer=footer,
     )
 
 
+# =============================================================================
+# Send
+# =============================================================================
 async def send_email(
     *,
     to: str,
@@ -91,38 +368,56 @@ async def send_email(
     if not settings.emails_enabled:
         # Development: the link in `text` is the whole point of this branch.
         log.info(
-            "email suppressed (SMTP not configured) - body follows",
+            "email suppressed (GMAIL_CREDENTIALS_B64 not set) - body follows",
             extra={"to": to, "subject": subject, "category": category, "body": text},
         )
         return True
 
     message = EmailMessage()
-    message["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
+    # Omitted rather than guessed when unset: Gmail fills in the authorised
+    # mailbox itself, and inventing an address here would either be rewritten or
+    # rejected. Setting GMAIL_SENDER is what buys the display name.
+    if settings.gmail_sender:
+        message["From"] = f"{settings.email_from_name} <{settings.gmail_sender}>"
     message["To"] = to
     message["Subject"] = subject
     message.set_content(text)
     message.add_alternative(html, subtype="html")
 
-    try:
-        await aiosmtplib.send(
-            message,
-            hostname=settings.smtp_host,
-            port=settings.smtp_port,
-            username=settings.smtp_user or None,
-            password=settings.smtp_password or None,
-            start_tls=settings.smtp_tls,
-            timeout=15,
-        )
-        log.info("email sent", extra={"to": to, "subject": subject, "category": category})
-        return True
-    except Exception as exc:
-        # Swallowed on purpose - see the module docstring.
-        log.error(
-            "email delivery failed",
-            extra={"to": to, "subject": subject, "category": category, "error": str(exc)},
-            exc_info=True,
-        )
-        return False
+    context = {"to": to, "subject": subject, "category": category}
+
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            # `googleapiclient` is synchronous - httplib2 under the hood - so it has
+            # to leave the event loop or it stalls every other request for the
+            # duration of an SMTP-speed round trip. `anyio` rather than
+            # `asyncio.to_thread` because that is the pool FastAPI already sizes and
+            # instruments.
+            await anyio.to_thread.run_sync(_send_sync, message)
+            log.info("email sent", extra=context)
+            return True
+        except Exception as exc:
+            retryable = _is_transient(exc) and attempt < _MAX_ATTEMPTS
+            # Swallowed either way - see the module docstring. A retryable failure is
+            # a warning because it may yet succeed; the last one is the error that
+            # should page someone.
+            log.log(
+                logging.WARNING if retryable else logging.ERROR,
+                "email delivery failed",
+                extra={
+                    **context,
+                    "attempt": attempt,
+                    "attempts": _MAX_ATTEMPTS,
+                    "error": _describe(exc),
+                    "will_retry": retryable,
+                },
+                exc_info=not retryable,
+            )
+            if not retryable:
+                return False
+            await asyncio.sleep(_RETRY_WAITS[attempt - 1])
+
+    return False
 
 
 def _frontend_url(path: str, **params: str) -> str:

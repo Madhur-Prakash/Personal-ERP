@@ -13,7 +13,7 @@ Or run the app on the host with only the data services in containers, which give
 faster reloads and a working debugger:
 
 ```bash
-make services       # PostgreSQL, Redis, Mailpit
+make services       # PostgreSQL, Redis
 make dev-api        # terminal 1
 make dev-web        # terminal 2
 ```
@@ -23,9 +23,6 @@ When running on the host, point `.env` at `localhost`:
 ```env
 POSTGRES_HOST=localhost
 REDIS_HOST=localhost
-SMTP_HOST=localhost
-SMTP_PORT=1025
-SMTP_TLS=false
 ```
 
 `make help` lists every task.
@@ -34,21 +31,25 @@ SMTP_TLS=false
 
 ## Email in development
 
-**Use Mailpit - http://localhost:8025.** `make up` points the backend's SMTP at
-it, so every email is captured with working links and no real provider is needed.
+**There is one transport: the Gmail API.** No SMTP, and no local mail catcher -
+a second path is a second way for the same email to render, and the one nobody
+exercises is the one that breaks. See
+`backend/app/modules/notifications/email.py`.
 
-There is also a no-SMTP mode: with `SMTP_HOST` empty the mailer logs the message
-body instead of sending it. **But logifyx's masking redacts `token=...` from the
-logged URL**, so the link cannot be used from the log:
+**With `GMAIL_CREDENTIALS_B64` unset (the default)** the mailer writes the message
+body to the log instead of sending it, so a fresh checkout and the test suite work
+with no credentials. **But logifyx's masking redacts `token=...` from the logged
+URL**, so the link is not usable as logged:
 
 ```
 http://localhost:5173/verify-email?****
 ```
 
 That redaction is correct - a one-time credential should not sit in a log file -
-so treat the log path as a way to confirm *that* an email was generated, and
-Mailpit as the way to actually click it. Set `LOG_MASK=false` if you genuinely
-need the raw value locally.
+so to click a link locally, set `LOG_MASK=false` and read it out of the log.
+
+**With a real token configured**, mail goes to the actual recipient's inbox. Point
+the flows at an address you own; there is no local inbox to intercept them.
 
 ---
 

@@ -59,7 +59,7 @@ graph TB
     end
 
     subgraph External
-        S[SMTP]
+        S[Gmail API]
     end
 
     B -->|HTTPS| N

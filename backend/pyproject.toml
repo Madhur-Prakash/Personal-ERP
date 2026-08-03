@@ -29,8 +29,12 @@ dependencies = [
     "cryptography>=45.0.0",
     "pyotp>=2.9.0",
     "qrcode[pil]>=8.2",
-    # --- Email ---
-    "aiosmtplib>=4.0.0",
+    # --- Email (Gmail API) ---
+    # The official client, so the send is the one call Google documents and the
+    # token refresh is handled by google-auth rather than by hand. No SMTP client:
+    # Google refuses plain passwords, so there is nothing for one to talk to.
+    "google-api-python-client>=2.0.0",
+    "google-auth>=2.0.0",
     "jinja2>=3.1.6",
     # --- HTTP client ---
     "httpx>=0.28.0",
@@ -138,7 +142,7 @@ exclude = ["migrations/", "tests/"]
 
 [[tool.mypy.overrides]]
 # pytesseract is a thin subprocess wrapper that ships no stubs and never will.
-module = ["logifyx.*", "qrcode.*", "pytesseract.*"]
+module = ["logifyx.*", "qrcode.*", "pytesseract.*", "googleapiclient.*"]
 ignore_missing_imports = true
 
 # =============================================================================

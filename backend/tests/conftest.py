@@ -36,8 +36,8 @@ os.environ.update(
         "ARGON2_TIME_COST": "1",
         "ARGON2_MEMORY_COST": "8192",
         "ARGON2_PARALLELISM": "1",
-        # No SMTP: the mailer logs instead of sending.
-        "SMTP_HOST": "",
+        # No Gmail credentials: the mailer logs the body instead of sending.
+        "GMAIL_CREDENTIALS_B64": "",
         # Off, or the suite's rapid-fire auth calls trip the limiter.
         "RATE_LIMIT_ENABLED": "false",
     }

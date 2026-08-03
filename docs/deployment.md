@@ -64,12 +64,11 @@ FRONTEND_URL=https://app.yourdomain.com
 PUBLIC_API_URL=https://app.yourdomain.com
 LOG_JSON=true
 
-SMTP_HOST=smtp.yourprovider.com
-SMTP_PORT=587
-SMTP_USER=<user>
-SMTP_PASSWORD=<password>
-SMTP_FROM_EMAIL=no-reply@yourdomain.com
-SMTP_TLS=true
+# Email. Base64 of an OAuth token file with the gmail.send scope; see
+# .env.sample for how to produce it, and keep it in a secret store.
+GMAIL_CREDENTIALS_B64=<base64 of token.json>
+GMAIL_SENDER=no-reply@yourdomain.com
+EMAIL_FROM_NAME=Personal ERP
 ```
 
 ```bash
@@ -258,8 +257,10 @@ docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs migrate
 ```
 
-**No emails** - check `SMTP_HOST` is set (unset means log-only, which is the
-development default and a common production oversight):
+**No emails** - check `GMAIL_CREDENTIALS_B64` is set (unset means log-only, which
+is the development default and a common production oversight). A failure logs
+Google's own wording, including `invalid_grant` for a revoked refresh token and
+an insufficient-scope message for a token without `gmail.send`:
 
 ```bash
 docker compose -f docker-compose.prod.yml logs backend | grep -i "email"
@@ -289,7 +290,7 @@ static assets to a CDN.
 - [ ] `CORS_ORIGINS` and `ALLOWED_HOSTS` name the real domain, no wildcards
 - [ ] `ENCRYPTION_KEY` set (2FA secrets are encrypted at rest)
 - [ ] TLS certificate issued; HTTP redirects to HTTPS
-- [ ] SMTP configured and a test email received
+- [ ] `GMAIL_CREDENTIALS_B64` and `GMAIL_SENDER` set, and a test email received
 - [ ] Nightly backups scheduled **and a restore rehearsed**
 - [ ] Backups replicated off the machine
 - [ ] `ufw` allows only 22, 80, 443

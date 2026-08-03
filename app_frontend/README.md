@@ -14,7 +14,7 @@ build: it is a Flutter application that talks to the same FastAPI backend over t
 The backend has to be up first - this client has no server of its own.
 
 ```bash
-make up          # from the repository root: PostgreSQL, Redis, Mailpit, the API
+make up          # from the repository root: PostgreSQL, Redis, the API
 make desktop     # then the desktop client
 ```
 
@@ -249,7 +249,7 @@ is what happened, and it surfaced only once a session existed, because the sign-
 renders no dates.
 
 `test/session_integration_test.dart` drives the real thing - register, verify using the
-token out of the actual email in Mailpit, sign in, then **discard the access token and
+token out of the actual email, sign in, then **discard the access token and
 restore the session from the cookie alone**, and then do it again through a freshly
 constructed client that has to read the cookie back off disk, which is what a relaunched
 process does. That last step is what a user experiences as

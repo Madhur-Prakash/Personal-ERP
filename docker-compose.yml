@@ -53,20 +53,6 @@ services:
       retries: 10
     networks: [personalerp]
 
-  # Catches every outbound email in dev. UI at http://localhost:8025
-  mailpit:
-    image: axllent/mailpit:latest
-    container_name: personalerp-mailpit
-    restart: unless-stopped
-    ports:
-      - "8025:8025"
-      - "1025:1025"
-    environment:
-      MP_MAX_MESSAGES: 500
-      MP_SMTP_AUTH_ACCEPT_ANY: 1
-      MP_SMTP_AUTH_ALLOW_INSECURE: 1
-    networks: [personalerp]
-
   # Object storage for uploaded documents. S3-compatible, so the same code works
   # against MinIO here and against real S3 or any compatible provider in production.
   #
@@ -104,9 +90,6 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
-      SMTP_HOST: mailpit
-      SMTP_PORT: 1025
-      SMTP_TLS: "false"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:

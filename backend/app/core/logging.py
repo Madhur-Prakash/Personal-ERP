@@ -70,7 +70,6 @@ _BRIDGED_LOGGERS = (
     "sqlalchemy.engine",
     "sqlalchemy.pool",
     "alembic",
-    "aiosmtplib",
 )
 
 # ---------------------------------------------------------------------------

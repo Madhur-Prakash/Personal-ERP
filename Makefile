@@ -109,9 +109,9 @@ help: ## Show this help
 # -----------------------------------------------------------------------------
 .PHONY: setup
 setup: ## First-time setup: env file, dependencies, database
-	@test -f .env || { cp .env.example .env; echo "Created .env - review it before continuing."; }
+	@test -f .env || { cp .env.sample .env; echo "Created .env - review it before continuing."; }
 	$(MAKE) install
-	$(COMPOSE) up -d postgres redis mailpit
+	$(COMPOSE) up -d postgres redis
 	@echo "Waiting for PostgreSQL..."
 	@until $(COMPOSE) exec -T postgres pg_isready -q; do sleep 1; done
 	$(MAKE) migrate
@@ -133,7 +133,6 @@ up: ## Start the full development stack in Docker
 	@echo "  Frontend   http://localhost:5173"
 	@echo "  API        http://localhost:8000"
 	@echo "  API docs   http://localhost:8000/docs"
-	@echo "  Mailpit    http://localhost:8025"
 
 .PHONY: down
 down: ## Stop the development stack
@@ -144,8 +143,8 @@ clean: ## Stop and DELETE all volumes (destroys local data)
 	$(COMPOSE) down -v
 
 .PHONY: services
-services: ## Start only PostgreSQL, Redis, and Mailpit
-	$(COMPOSE) up -d postgres redis mailpit
+services: ## Start only PostgreSQL and Redis
+	$(COMPOSE) up -d postgres redis
 
 .PHONY: dev-api
 dev-api: ## Run the API on the host with reload

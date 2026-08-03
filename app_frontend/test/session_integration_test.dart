@@ -18,14 +18,17 @@ import 'package:personalerp_desktop/models/auth.dart';
 /// whether the backend accepts what it sends back, is a question only the real server can
 /// answer.
 ///
-/// So this drives the whole flow through the production [ApiClient]: register, verify via
-/// Mailpit, sign in, then **discard the access token and restore the session from the cookie
-/// alone**. That last step is what a user experiences as "it remembered me", and it is the
-/// step that has no unit-testable surface.
+/// So this drives the whole flow through the production [ApiClient]: register, verify with
+/// the token out of the email, sign in, then **discard the access token and restore the
+/// session from the cookie alone**. That last step is what a user experiences as "it
+/// remembered me", and it is the step that has no unit-testable surface.
 ///
-/// **Skipped when the stack is not up.** `flutter test` must stay runnable on a machine with
-/// no Docker, so the test probes reachability and marks itself skipped rather than failing.
-/// The probe is inside the body rather than in `skip:` because `skip:` is evaluated when the
+/// **Skipped when the stack is not up, and when there is no inbox to read.** `flutter test`
+/// must stay runnable on a machine with no Docker, so the test probes both and marks itself
+/// skipped rather than failing. Email is Gmail-only, so the default stack has no local
+/// inbox and this test skips - see the note at the probe below.
+///
+/// The probes are inside the body rather than in `skip:` because `skip:` is evaluated when the
 /// test is *declared*, before any `setUpAll` has run - so a reachability check there always
 /// reads false and the test never runs even with the stack up. Bring the stack up with
 /// `make up` to include it.
@@ -56,6 +59,32 @@ void main() {
       if (!stackUp) {
         markTestSkipped(
           'Backend not reachable at ${Env.apiBaseUrl} - run `make up`',
+        );
+        return;
+      }
+
+      // ---- An inbox to read the token out of -------------------------------
+      // The backend sends through the Gmail API and nothing else, so the default stack
+      // has no local inbox and this test cannot complete: sign-in requires a verified
+      // email, and the only way to verify one is a link that now goes to a real mailbox.
+      //
+      // Skipped rather than failed. A red suite on every machine would be reporting a
+      // dependency that was removed on purpose, not a defect. Point `mailpit` at any
+      // inbox exposing Mailpit's search API to run it again.
+      bool inboxUp = false;
+      try {
+        final Response<dynamic> ping = await probe.get<dynamic>(
+          '$mailpit/api/v1/info',
+        );
+        inboxUp = ping.statusCode == 200;
+      } catch (_) {
+        inboxUp = false;
+      }
+
+      if (!inboxUp) {
+        markTestSkipped(
+          'No local inbox at $mailpit - email is Gmail-only, so the verification token '
+          'cannot be read back. See docs/development.md.',
         );
         return;
       }

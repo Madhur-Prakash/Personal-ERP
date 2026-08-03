@@ -70,15 +70,15 @@ make up             # starts the whole stack
 | Desktop client | `make desktop` - a native window, not a URL |
 | API | http://localhost:8000 |
 | API docs | http://localhost:8000/docs |
-| Mailpit (all outbound email) | http://localhost:8025 |
 
-Register at http://localhost:5173/register, then open **Mailpit at
-http://localhost:8025** to click the verification link. `make up` wires the
-backend's SMTP at Mailpit, so no real mail provider is needed.
+Register at http://localhost:5173/register. Email is sent through the Gmail API
+and nothing else, so how you get the verification link depends on whether
+`GMAIL_CREDENTIALS_B64` is set - see
+[Email in development](docs/development.md#email-in-development).
 
-> If you run the backend without SMTP configured at all, emails are written to
-> the log instead of sent - but logifyx's masking redacts the token from the URL,
-> so the link is not usable from there. Mailpit is the path that works.
+> With no credentials configured, emails are written to the log instead of sent.
+> logifyx masks `token=...` out of the logged URL, so set `LOG_MASK=false` to make
+> the link usable locally.
 
 `make help` lists every task.
 
@@ -370,7 +370,7 @@ context injection, and JSON output in production.
 ## The stack
 
 **Backend** - FastAPI, Python 3.13, uv, SQLAlchemy 2 (async), Alembic,
-PostgreSQL 17, Redis 7, Pydantic v2, Argon2id, PyJWT, pyotp, aiosmtplib, logifyx.
+PostgreSQL 17, Redis 7, Pydantic v2, Argon2id, PyJWT, pyotp, httpx, logifyx.
 
 **Frontend** - React 19, TypeScript, Vite 7, Tailwind CSS v4, TanStack
 Router + Query + Table, React Hook Form, Zod, Recharts, cmdk, Sonner, Lucide,

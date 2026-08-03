@@ -95,7 +95,6 @@ jobs:
           REDIS_PORT=6379
           SECRET_KEY=ci-only-secret-key-0123456789abcdefghijklmnopqrstuv
           CORS_ORIGINS=http://localhost:5173
-          SMTP_HOST=
           LOG_LEVEL=WARNING
           LOG_COLOR=false
           EOF
