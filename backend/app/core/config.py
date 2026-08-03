@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=(ROOT_DIR / ".env", BACKEND_DIR / ".env"),
         env_file_encoding="utf-8",
-        case_sensitive=False,
+        case_sensitive=True,
         extra="ignore",  # the shared .env also holds VITE_*/LOG_* keys
     )
 
@@ -159,7 +159,11 @@ class Settings(BaseSettings):
     #: which is what lets the test suite and a fresh checkout run with no
     #: credentials. See :mod:`app.modules.notifications.email` for the accepted
     #: JSON shapes and the scope the token must carry.
-    gmail_credentials_b64: str | None = "gASV/AMAAAAAAACMGWdvb2dsZS5vYXV0aDIuY3JlZGVudGlhbHOUjAtDcmVkZW50aWFsc5STlCmBlH2UKIwFdG9rZW6UjP15YTI5LmEwQWE3cENBX3FoZVQ2c28yWEVjN0VuS3kwVF9JWDI2VFRER1cxcEh4SVBpVFFsZWVoc3N1U0dxNUdUcE8welhIbl85ZFoxTHVpSUxkWl9wczFibExGT2ZrTjgzTGZsYWtQZmhFTjlnSXd6VWE1LVdYNXpCZEVpQ2FPOEUxYzc1bjEzdFBMbjQ1MHhPRUxFbHNLcnY0TkJvaTZGTkI4TlBtLURMWkM0bHZwd0FsbDVFWTI3bWp1bU4xRFFHRlB0OVZTYms2eHNERWFDZ1lLQVNJU0FSWVNGUUhHWDJNaTRSS083YVVtdjZRclhhYTZ4LTZrd3cwMjA2lIwGZXhwaXJ5lIwIZGF0ZXRpbWWUjAhkYXRldGltZZSTlEMKB+kMCQ0rEQAAAJSFlFKUjBFfcXVvdGFfcHJvamVjdF9pZJROjA9fdHJ1c3RfYm91bmRhcnmUTowQX3VuaXZlcnNlX2RvbWFpbpSMDmdvb2dsZWFwaXMuY29tlIwZX3VzZV9ub25fYmxvY2tpbmdfcmVmcmVzaJSJjAdfc2NvcGVzlF2UjCpodHRwczovL3d3dy5nb29nbGVhcGlzLmNvbS9hdXRoL2dtYWlsLnNlbmSUYYwPX2RlZmF1bHRfc2NvcGVzlE6MDl9yZWZyZXNoX3Rva2VulIxnMS8vMGdVT20ydXdaQzhQckNnWUlBUkFBR0JBU053Ri1MOUlyanF6UWltNzBNSUNoRjJoa2VzNWhkMy15YTdSb3pQTnItczNaYWdTdUdtZkJaQ2twcGwtd19yN0xkVk45VmNqcG1kSZSMCV9pZF90b2tlbpROjA9fZ3JhbnRlZF9zY29wZXOUXZSMKmh0dHBzOi8vd3d3Lmdvb2dsZWFwaXMuY29tL2F1dGgvZ21haWwuc2VuZJRhjApfdG9rZW5fdXJplIwjaHR0cHM6Ly9vYXV0aDIuZ29vZ2xlYXBpcy5jb20vdG9rZW6UjApfY2xpZW50X2lklIxJMTA0ODIwMDMxNjI0OC0xY3I2MGJta3R0cmtrcnA2cTRlazJhdGY4azRnN3RyYS5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbZSMDl9jbGllbnRfc2VjcmV0lIwjR09DU1BYLUs2TmtlczNvcS1fOGJoNmYtbGdXNVZoa1hHSTSUjAtfcmFwdF90b2tlbpROjBZfZW5hYmxlX3JlYXV0aF9yZWZyZXNolImMCF9hY2NvdW50lIwAlIwPX2NyZWRfZmlsZV9wYXRolE51Yi4="
+    #: **The value belongs in `.env`, never here.** This file is tracked; `.env` is
+    #: not. A refresh token and client secret committed to source are readable by
+    #: anyone who can read the repository, and rewriting history does not un-leak
+    #: them - only rotating the credential does.
+    gmail_credentials_b64: str | None = None
 
     #: The mailbox to send from.
     #:
@@ -277,27 +281,7 @@ class Settings(BaseSettings):
     @property
     def emails_enabled(self) -> bool:
         """When false, mail is logged instead of sent (the dev default)."""
-        return bool(self.smtp_host) or bool(self.gmail_credentials_b64)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def email_transport(self) -> str:
-        """``"gmail"``, ``"smtp"`` or ``"log"`` - whichever is configured.
-
-        Gmail wins when both are set. Anyone who has gone to the trouble of
-        provisioning a refresh token means to use it, and the alternative -
-        refusing to boot on an ambiguous pair - would break every deployment that
-        still has stale ``SMTP_*`` values in its environment.
-        """
-        if self.gmail_credentials_b64:
-            return "gmail"
-        return "smtp" if self.smtp_host else "log"
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def email_from_address(self) -> str:
-        """The address mail is sent from, under whichever transport is active."""
-        return self.gmail_sender or self.smtp_from_email
+        return bool(self.gmail_credentials_b64)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -131,6 +131,22 @@ def _decode_credentials(blob: str) -> GmailCredentials:
             "GMAIL_CREDENTIALS_B64 is not valid base64. Produce it with: base64 -w0 token.json"
         ) from exc
 
+    # A pickled `Credentials`, which is what the *old* Gmail quickstart wrote as
+    # `token.pickle`. Named specifically because the generic "not JSON" message sends
+    # you looking for a typo in a blob that is, in fact, exactly what some tutorial
+    # told you to produce. `pickle.loads` is deliberately not offered as a fallback:
+    # unpickling a value that arrives from configuration is arbitrary code execution,
+    # and no convenience is worth putting that in a mail path.
+    if raw[:2] in (b"\x80\x02", b"\x80\x03", b"\x80\x04", b"\x80\x05"):
+        raise GmailConfigurationError(
+            "GMAIL_CREDENTIALS_B64 is a pickled Credentials object (the old "
+            "token.pickle format), which this deliberately will not load. Convert it "
+            "to JSON once: "
+            'python -c "import pickle,base64,pathlib; '
+            "print(pickle.loads(base64.b64decode(pathlib.Path('blob.txt').read_text()))"
+            '.to_json())" > token.json - then base64 that file.'
+        )
+
     try:
         document: Any = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -367,7 +383,7 @@ async def send_email(
     """
     if not settings.emails_enabled:
         # Development: the link in `text` is the whole point of this branch.
-        log.info(
+        log.warning(
             "email suppressed (GMAIL_CREDENTIALS_B64 not set) - body follows",
             extra={"to": to, "subject": subject, "category": category, "body": text},
         )
