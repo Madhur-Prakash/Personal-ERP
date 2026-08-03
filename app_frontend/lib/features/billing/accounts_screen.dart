@@ -31,7 +31,7 @@ class AccountsScreen extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         const PageHeader(
-          title: 'Accounts & cards',
+          title: 'Banks & cards',
           description:
               'Where your money sits and the cards you spend on. These are the choices '
               'offered when recording a payment, and every detail here is editable.',

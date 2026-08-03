@@ -193,6 +193,21 @@ class MoneyAccount:
     #: appear on the accounts screen when it is asked to show them.
     is_active: bool = True
 
+    #: Whether deleting this one is permitted.
+    #:
+    #: False once anything has been posted to it, because an entry names the account it
+    #: moved through and removing it would leave that entry pointing at nothing. Archiving
+    #: is the answer then - hence two separate flags rather than one "editable".
+    can_delete: bool = False
+
+    #: Why deleting is refused, or None when it is allowed.
+    #:
+    #: **The server knows the reason; the client should not have to guess it.** A flag alone
+    #: produces a control that is either missing or greyed out with no explanation, which is
+    #: the same silent-disable problem as a form that will not submit. Phrased for a person,
+    #: because it goes straight into a tooltip.
+    delete_blocked_reason: str | None = None
+
     #: Whether archiving this one is permitted at all.
     #:
     #: **A capability flag rather than the client re-deriving the rule.** A seeded account -
@@ -233,6 +248,11 @@ class Card:
     account_name: str
     is_active: bool
     holder_name: str | None = None
+    #: False once anything has been recorded on the card's account. See
+    #: `MoneyAccount.can_delete`.
+    can_delete: bool = False
+    #: Why deleting is refused, or None. See `MoneyAccount.delete_blocked_reason`.
+    delete_blocked_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +269,9 @@ class BankDetails:
     holder_name: str | None = None
     account_number: str | None = None
     account_number_last4: str | None = None
+    #: The account's own name. Carried here so a rename comes back on the same response the
+    #: form already reads, rather than needing a second request to see the result.
+    name: str = ""
 
     @property
     def is_empty(self) -> bool:
@@ -261,6 +284,53 @@ class BankDetails:
 #: Stands in for "this account has no details", so the lookups below can read
 #: ``details.get(id, _NO_BANK_DETAILS).bank_name`` instead of guarding each field.
 _NO_BANK_DETAILS: Final = BankDetails()
+
+
+def _why_card_not_deletable(*, kind: CardKind, has_postings: bool) -> str | None:
+    """Why a card cannot be deleted, or None.
+
+    **The wording differs by kind, because the situation does.** A credit card owns its
+    account, so entries against it really are entries on the card. A *debit* card shares a
+    bank account that existed first, and those entries may have nothing to do with the card
+    at all - telling someone "entries have been recorded on this card" would then be simply
+    untrue, and would send them looking for card transactions that do not exist.
+    """
+    if not has_postings:
+        return None
+    if kind is CardKind.CREDIT:
+        return (
+            "Entries have been recorded on this card. Archive it instead - they name it, "
+            "and deleting it would leave them pointing at nothing."
+        )
+    return (
+        "Entries have been recorded against the bank account this card draws on. Archive "
+        "the card instead - the account keeps its history either way."
+    )
+
+
+def _why_not_deletable(
+    *, is_system: bool, has_postings: bool, card_labels: list[str]
+) -> str | None:
+    """The first reason an account cannot be deleted, phrased for a person.
+
+    Ordered by what the user can do about it, not by how the checks happen to run: a seeded
+    account will never be deletable and there is nothing to act on, whereas a card can be
+    removed and postings can at least be understood. Returning one reason rather than all of
+    them keeps a tooltip readable - fixing the first reveals the next.
+    """
+    if is_system:
+        return (
+            "This account came with your books and cannot be deleted - the software posts "
+            "to it by role. Archive it if you no longer use it."
+        )
+    if card_labels:
+        return f"Remove the card drawing on this account first: {', '.join(card_labels)}."
+    if has_postings:
+        return (
+            "Entries have been recorded against this account. Archive it instead - they "
+            "name it, and deleting it would leave them pointing at nothing."
+        )
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -567,11 +637,12 @@ class BillingService:
             holder_name=details.holder_name,
             account_number_last4=details.account_number_last4,
             is_active=True,
-            # Always archivable: this route only ever creates a user-added account, and it
-            # is `is_system` that blocks deactivation. Stated explicitly because the field
-            # defaults to `False` - which fails safe, but would leave a just-created account
-            # with no way to archive it.
+            # Always archivable, and always deletable: this route only ever creates a
+            # user-added account, so it is not seeded, has no postings yet, and has no card
+            # drawing on it. Stated explicitly because both fields default to `False` -
+            # which fails safe, but would leave a just-created account with neither option.
             can_archive=True,
+            can_delete=True,
         )
 
     async def _save_bank_details(
@@ -681,7 +752,15 @@ class BillingService:
             postable_only=True,
             include_inactive=include_archived,
         )
-        cards = await self.cards(organization_id, include_archived=include_archived)
+        # Fetched once including archived, then narrowed: the listing wants what was asked
+        # for, but `carded` has to know about every card - an archived one still holds the
+        # `RESTRICT` reference that blocks deleting its account.
+        all_cards = await self.cards(organization_id, include_archived=True)
+        cards = (
+            all_cards
+            if include_archived
+            else [c for c in all_cards if c.is_active]
+        )
 
         cash = [a for a in rows if a.subtype.is_cash_equivalent]
         by_id = {a.id: a for a in rows}
@@ -691,6 +770,9 @@ class BillingService:
         # picker, and decrypting a column nobody is going to read would be work done purely
         # to widen the blast radius of a log line.
         details = await self._bank_details_by_account(organization_id)
+        # One query for the whole list - see `_accounts_with_postings`.
+        posted_to = await self._accounts_with_postings(organization_id)
+        carded = {c.account_id for c in all_cards}
 
         # Cash is the default: a business recording movements by hand is far more often
         # dealing in cash than reconciling a bank feed. A card is never the default -
@@ -720,6 +802,24 @@ class BillingService:
                 # A seeded account is a system account and cannot be deactivated - the
                 # accounting service refuses, because later modules post to it by role.
                 can_archive=not a.is_system,
+                # Deletable only while nothing depends on it: no postings, not seeded, and
+                # no card drawing on it. Each of those would otherwise be an error the user
+                # could only discover by pressing the button - so the reason travels with the
+                # flag.
+                can_delete=(
+                    not a.is_system
+                    and a.id not in posted_to
+                    and a.id not in carded
+                ),
+                delete_blocked_reason=_why_not_deletable(
+                    is_system=a.is_system,
+                    has_postings=a.id in posted_to,
+                    card_labels=[
+                        f"{c.label} ··{c.last4}"
+                        for c in all_cards
+                        if c.account_id == a.id
+                    ],
+                ),
             )
             for a in cash
         ]
@@ -759,6 +859,30 @@ class BillingService:
             )
 
         return accounts
+
+    async def _accounts_with_postings(
+        self, organization_id: uuid.UUID
+    ) -> set[uuid.UUID]:
+        """Which of this organization's accounts have a journal line against them.
+
+        **One aggregate query, not one per account.** The repository's ``has_postings`` asks
+        about a single account, and calling it while building a list would be a query per
+        row - on the screen that renders every account and card at once.
+
+        Needed because "can this be deleted" is not a property of the account itself: an
+        account with history cannot be removed without orphaning entries, so the answer
+        depends on the ledger. The clients get it as a flag so they can offer delete only
+        where it will work, and archiving everywhere else.
+        """
+        rows = (
+            await self.session.execute(
+                select(JournalEntryLine.account_id)
+                .join(JournalEntry, JournalEntryLine.entry_id == JournalEntry.id)
+                .where(JournalEntry.organization_id == organization_id)
+                .distinct()
+            )
+        ).all()
+        return {row[0] for row in rows}
 
     async def _bank_details_by_account(
         self, organization_id: uuid.UUID
@@ -862,6 +986,13 @@ class BillingService:
         act with its own route and its own permission check, rather than something that
         rides along on every page load of the recording screen.
         """
+        rows = await self.accounts.list_for_org(
+            organization_id, postable_only=True, include_inactive=True
+        )
+        account = next((a for a in rows if a.id == account_id), None)
+        if account is None:
+            raise NotFoundError("That account does not exist.", code="account_not_found")
+
         row = (
             await self.session.execute(
                 select(BankAccountDetail).where(
@@ -872,7 +1003,9 @@ class BillingService:
         ).scalar_one_or_none()
 
         if row is None:
-            return BankDetails()
+            # No details recorded, but the account still has a name - which the edit form
+            # needs in order to open with it rather than blank.
+            return BankDetails(name=account.name)
 
         return BankDetails(
             bank_name=row.bank_name,
@@ -883,16 +1016,20 @@ class BillingService:
                 else None
             ),
             account_number_last4=row.account_number_last4,
+            name=account.name,
         )
 
     async def update_bank_details(
         self,
         organization_id: uuid.UUID,
         account_id: uuid.UUID,
+        actor: User,
         *,
+        name: str | None = None,
         bank_name: str | None,
         holder_name: str | None,
         account_number: str | None,
+        ctx: RequestContext | None = None,
     ) -> BankDetails:
         """Fill in or correct an account's details after the fact.
 
@@ -914,12 +1051,46 @@ class BillingService:
                 code="not_a_money_account",
             )
 
-        return await self._save_bank_details(
+        # Renaming comes first, so a clash is refused before anything is written.
+        if name is not None and name.strip() and name.strip() != account.name:
+            cleaned = name.strip()
+            every = await self.accounts.list_for_org(
+                organization_id, include_inactive=True
+            )
+            if any(
+                a.id != account_id and a.name.casefold() == cleaned.casefold()
+                for a in every
+            ):
+                raise ConflictError(
+                    f'An account called "{cleaned}" already exists.',
+                    code="account_exists",
+                )
+            # Through the chart service, so the rename is audited like any other account
+            # change. A *seeded* account can be renamed - the software finds it by
+            # `system_key`, not by name - which is the whole point: "Primary Bank Account"
+            # is a placeholder nobody chose.
+            await self.chart.update_account(
+                organization_id,
+                account_id,
+                AccountUpdate(name=cleaned),
+                actor,
+                ctx,
+            )
+
+        details = await self._save_bank_details(
             organization_id,
             account_id,
             bank_name=bank_name,
             holder_name=holder_name,
             account_number=account_number,
+        )
+        # Re-read so the response carries the name as stored, renamed or not.
+        return BankDetails(
+            bank_name=details.bank_name,
+            holder_name=details.holder_name,
+            account_number=details.account_number,
+            account_number_last4=details.account_number_last4,
+            name=account.name,
         )
 
     # -----------------------------------------------------------------------
@@ -939,10 +1110,29 @@ class BillingService:
             stmt = stmt.where(PaymentCard.is_active.is_(True))
 
         rows = (await self.session.execute(stmt)).scalars().all()
-        return [self._to_card(row) for row in rows]
+        if not rows:
+            return []
+
+        # One aggregate for the whole list rather than `has_postings` per card.
+        posted_to = await self._accounts_with_postings(organization_id)
+        return [
+            self._to_card(
+                row,
+                can_delete=row.account_id not in posted_to,
+                delete_blocked_reason=_why_card_not_deletable(
+                    kind=row.kind, has_postings=row.account_id in posted_to
+                ),
+            )
+            for row in rows
+        ]
 
     @staticmethod
-    def _to_card(row: PaymentCard) -> Card:
+    def _to_card(
+        row: PaymentCard,
+        *,
+        can_delete: bool = False,
+        delete_blocked_reason: str | None = None,
+    ) -> Card:
         """Requires ``account`` to be loaded - every caller here does so eagerly."""
         return Card(
             id=row.id,
@@ -954,6 +1144,8 @@ class BillingService:
             account_name=row.account.name,
             is_active=row.is_active,
             holder_name=row.holder_name,
+            can_delete=can_delete,
+            delete_blocked_reason=delete_blocked_reason,
         )
 
     async def create_card(
@@ -992,17 +1184,27 @@ class BillingService:
         if not cleaned_label:
             raise ValidationError("Give the card a name, so you can tell it apart later.")
 
+        # Two different rejections, reported apart so the message can say which happened.
+        # **Neither echoes what was submitted**: the 422 handler forwards only messages, and
+        # a message quoting the digits would put a card number in an error body and very
+        # likely in a client-side log.
         identity = inspect_card_number(card_number)
         if identity is None:
-            # Shape only - the wrong number of digits, or something that is not digits. A
-            # failed check digit is *not* refused here; see `CardIdentity.checksum_ok`.
-            #
-            # Deliberately does not echo what was submitted. The 422 handler forwards only
-            # messages, but a message quoting the digits would defeat that.
             raise ValidationError(
                 f"A card number is {MIN_DIGITS} to {MAX_DIGITS} digits. Check what you "
                 "entered and try again - only the last four are kept.",
                 details={"fields": {"card_number": "Enter a valid card number"}},
+            )
+        if not identity.checksum_ok:
+            # The Luhn check digit. Every real card number satisfies it, so failing means a
+            # typo - and it catches every single-digit slip and almost every transposition,
+            # which is the whole class of mistake someone makes copying digits off a card.
+            # Worth refusing: the last four digits are how this card is recognised later, and
+            # a wrong label defeats the point of keeping one.
+            raise ValidationError(
+                "That is not a valid card number. Check the digits and try again - only "
+                "the last four are kept.",
+                details={"fields": {"card_number": "Check the digits"}},
             )
 
         existing = await self.cards(organization_id, include_archived=True)
@@ -1060,12 +1262,11 @@ class BillingService:
                 "kind": kind.value,
                 "network": identity.network.value,
                 "last4": identity.last4,
-                # A verdict about the number, never a piece of it. Worth recording: if a
-                # user later says the last four do not match their card, this line says
-                # whether the number they typed was self-consistent at the time.
-                "checksum_ok": identity.checksum_ok,
+                # No `checksum_ok` here: a number that failed it never reaches this line, so
+                # logging it would only ever record `True`.
             },
         )
+        created_can_delete, created_reason = await self._card_delete_flags(card)
         return Card(
             id=card.id,
             label=card.label,
@@ -1076,6 +1277,12 @@ class BillingService:
             account_name=account.name,
             is_active=True,
             holder_name=card.holder_name,
+            # A credit card's account was just created, so it has no postings. A *debit*
+            # card points at a bank account that existed first and may well have some - in
+            # which case deleting the card would be refused, so the flags are asked for
+            # rather than assumed, through the one helper the list also uses.
+            can_delete=created_can_delete,
+            delete_blocked_reason=created_reason,
         )
 
     async def _create_card_liability_account(
@@ -1118,6 +1325,216 @@ class BillingService:
             ctx,
         )
 
+    async def _card_delete_flags(self, row: PaymentCard) -> tuple[bool, str | None]:
+        """`(can_delete, reason)` for one card.
+
+        Exists so the single-row paths - create, edit, archive - answer the same way the list
+        does. They used to return `can_delete=False` with no reason at all, which made a card
+        look undeletable the moment you renamed it, with a tooltip claiming the opposite.
+        """
+        has_postings = await self.accounts.has_postings(row.account_id)
+        return (
+            not has_postings,
+            _why_card_not_deletable(kind=row.kind, has_postings=has_postings),
+        )
+
+    async def update_card(
+        self,
+        organization_id: uuid.UUID,
+        card_id: uuid.UUID,
+        *,
+        label: str | None = None,
+        holder_name: str | None = None,
+        card_number: str | None = None,
+    ) -> Card:
+        """Correct what a card is called, whose name is on it, or which number it is.
+
+        **The kind cannot change, and that is not an oversight.** A credit card owns a
+        liability account created alongside it; a debit card points at a bank account that
+        already existed. Flipping the kind would either orphan an account with postings
+        against it or silently start filing card spending as a payment from a bank account
+        that never lost the money. The honest correction is a new card and an archive of the
+        wrong one.
+
+        Re-entering the number is allowed, because a mistyped one leaves the wrong four
+        digits on screen and those digits are the whole point of storing anything. It is
+        read, reduced, and discarded exactly as on create - and the derived network can
+        change with it, since a corrected number may belong to a different scheme.
+        """
+        row = (
+            await self.session.execute(
+                select(PaymentCard)
+                .where(
+                    PaymentCard.organization_id == organization_id,
+                    PaymentCard.id == card_id,
+                )
+                .options(selectinload(PaymentCard.account))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("That card is not on file.", code="card_not_found")
+
+        if label is not None:
+            cleaned = label.strip()
+            if not cleaned:
+                raise ValidationError(
+                    "Give the card a name, so you can tell it apart later."
+                )
+            row.label = cleaned
+
+        if holder_name is not None:
+            row.holder_name = holder_name.strip() or None
+
+        if card_number is not None and card_number.strip():
+            identity = inspect_card_number(card_number)
+            if identity is None:
+                raise ValidationError(
+                    f"A card number is {MIN_DIGITS} to {MAX_DIGITS} digits. Check what you "
+                    "entered and try again - only the last four are kept.",
+                    details={"fields": {"card_number": "Enter a valid card number"}},
+                )
+            if not identity.checksum_ok:
+                raise ValidationError(
+                    "That is not a valid card number. Check the digits and try again - "
+                    "only the last four are kept.",
+                    details={"fields": {"card_number": "Check the digits"}},
+                )
+
+            # The unique constraint is on (org, network, last4, kind), so a correction that
+            # lands on another card already on file has to be caught here rather than as an
+            # integrity error with no useful message.
+            clash = next(
+                (
+                    c
+                    for c in await self.cards(organization_id, include_archived=True)
+                    if c.id != card_id
+                    and c.network is identity.network
+                    and c.last4 == identity.last4
+                    and c.kind is row.kind
+                ),
+                None,
+            )
+            if clash is not None:
+                raise ConflictError(
+                    f"A {row.kind.label.lower()} ending {identity.last4} is already on "
+                    "file.",
+                    code="card_exists",
+                )
+
+            row.network = identity.network
+            row.last4 = identity.last4
+
+        await self.session.flush()
+
+        log.info(
+            "payment card updated",
+            # Never the number, on this path either.
+            extra={"label": row.label, "last4": row.last4},
+        )
+        can_delete, reason = await self._card_delete_flags(row)
+        return self._to_card(row, can_delete=can_delete, delete_blocked_reason=reason)
+
+    async def delete_card(
+        self,
+        organization_id: uuid.UUID,
+        card_id: uuid.UUID,
+        actor: User,
+        ctx: RequestContext | None = None,
+    ) -> None:
+        """Remove a card entirely, when nothing depends on it.
+
+        **Refused once anything has been recorded on it**, with archiving offered instead.
+        That is the same rule the chart of accounts applies to an account, and for the same
+        reason: an entry names the card it was made on, and deleting the card would leave
+        that entry pointing at nothing. Archiving keeps the record and stops offering it.
+
+        A credit card's liability account goes with it, because that account was created
+        for this card alone and would otherwise sit in the chart forever with a zero
+        balance. A debit card's account is a bank account that existed first and is left
+        exactly as it was.
+        """
+        row = (
+            await self.session.execute(
+                select(PaymentCard)
+                .where(
+                    PaymentCard.organization_id == organization_id,
+                    PaymentCard.id == card_id,
+                )
+                .options(selectinload(PaymentCard.account))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("That card is not on file.", code="card_not_found")
+
+        owns_account = row.kind is CardKind.CREDIT
+        if await self.accounts.has_postings(row.account_id):
+            raise BusinessRuleError(
+                "This card has entries recorded on it and cannot be deleted. Archive it "
+                "instead - the history has to stay intact."
+                if owns_account
+                else "Entries have been recorded on the account this card draws on. "
+                "Archive the card instead.",
+                code="card_has_postings",
+            )
+
+        label = row.label
+        account_id = row.account_id
+        await self.session.delete(row)
+        # Flushed before touching the account: the FK from card to account is RESTRICT, so
+        # the account cannot go while the row still references it.
+        await self.session.flush()
+
+        if owns_account:
+            await self.chart.delete_account(organization_id, account_id, actor, ctx)
+
+        log.info("payment card deleted", extra={"label": label})
+
+    async def delete_money_account(
+        self,
+        organization_id: uuid.UUID,
+        account_id: uuid.UUID,
+        actor: User,
+        ctx: RequestContext | None = None,
+    ) -> None:
+        """Remove a cash box or bank account, when nothing depends on it.
+
+        Thin on purpose: the rules - no postings, no children, not a system account - live in
+        the chart of accounts and are enforced there, so this only narrows the route to the
+        accounts this screen owns. Deleting Sales Revenue from the billing screen should not
+        be possible, whatever the chart would allow.
+
+        Its bank details go too, by the ``CASCADE`` on that table - they describe the
+        account rather than record anything that happened.
+        """
+        rows = await self.accounts.list_for_org(
+            organization_id, postable_only=True, include_inactive=True
+        )
+        account = next((a for a in rows if a.id == account_id), None)
+        if account is None:
+            raise NotFoundError("That account does not exist.", code="account_not_found")
+        if not account.subtype.is_cash_equivalent:
+            raise BusinessRuleError(
+                "Only a cash or bank account can be deleted from here.",
+                code="not_a_money_account",
+            )
+
+        # A card pointing at this account would be left dangling, and the FK is RESTRICT so
+        # the database would refuse anyway - with an error nobody could act on.
+        attached = [
+            c
+            for c in await self.cards(organization_id, include_archived=True)
+            if c.account_id == account_id
+        ]
+        if attached:
+            names = ", ".join(f"{c.label} ··{c.last4}" for c in attached)
+            raise BusinessRuleError(
+                f"Remove the card drawing on this account first: {names}.",
+                code="account_has_cards",
+            )
+
+        await self.chart.delete_account(organization_id, account_id, actor, ctx)
+        log.info("money account deleted", extra={"code": account.code})
+
     async def set_card_active(
         self, organization_id: uuid.UUID, card_id: uuid.UUID, *, active: bool
     ) -> Card:
@@ -1141,7 +1558,8 @@ class BillingService:
 
         card.is_active = active
         await self.session.flush()
-        return self._to_card(card)
+        can_delete, reason = await self._card_delete_flags(card)
+        return self._to_card(card, can_delete=can_delete, delete_blocked_reason=reason)
 
     # -----------------------------------------------------------------------
     # Recording

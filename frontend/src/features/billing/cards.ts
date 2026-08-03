@@ -57,30 +57,20 @@ export function cardNumberProblem(digits: string): string | null {
   if (digits === '') return null;
   if (!/^\d+$/.test(digits)) return 'Digits only.';
   if (digits.length < MIN_DIGITS) {
+    // Counted out loud while the number is short, rather than "invalid": one digit missing
+    // and one digit wrong need different things from the user, and until the length is right
+    // there is nothing meaningful to say about the digits themselves.
     return `${digits.length} of at least ${MIN_DIGITS} digits.`;
   }
   if (digits.length > MAX_DIGITS) {
     return `A card number is at most ${MAX_DIGITS} digits.`;
   }
+  // The Luhn check digit, and it **blocks the save**. Every real card number satisfies it,
+  // so failing means a typo - and the last four digits are how this card gets recognised on
+  // an entry months later, so a wrong label defeats the point of keeping one. Only asked
+  // once the length is plausible, or it would fire on every keystroke while typing.
+  if (!passesLuhn(digits)) return 'That is not a valid card number - check the digits.';
   return null;
-}
-
-/**
- * A checksum warning, or `null`. **Does not block saving** - see below.
- *
- * Separate from {@link cardNumberProblem} because the two carry different force. Length and
- * charset are structural: outside 12-19 digits there is nothing sensible to store, so those
- * refuse the save. A failed Luhn digit is a suspicion - "this is probably a typo" - and the
- * server treats it the same way.
- *
- * Blocking on it was the wrong trade for this product. Nothing here is ever charged, the
- * number is discarded within the request, and the only lasting artefact is a four-digit
- * label. Worth saying out loud, because a wrong label defeats the point of keeping one; not
- * worth refusing an entry somebody is deliberately making about their own card.
- */
-export function cardNumberWarning(digits: string): string | null {
-  if (!isPlausibleCardNumber(digits) || passesLuhn(digits)) return null;
-  return 'That does not look like a valid card number - check the digits. You can still save it.';
 }
 
 /**

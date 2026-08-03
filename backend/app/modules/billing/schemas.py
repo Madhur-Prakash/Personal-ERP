@@ -141,6 +141,14 @@ class UpdateBankDetailsRequest(BankDetailsFields):
     would be the only one that could never carry its own details.
     """
 
+    #: A new name for the account. Optional; omitting it leaves the name alone.
+    #:
+    #: **Renaming a seeded account is allowed**, unlike archiving or deleting one. "Primary
+    #: Bank Account" is a placeholder the chart template wrote before anyone was asked, and
+    #: the software finds that account by its `system_key`, not by its name - so calling it
+    #: "HDFC Current" breaks nothing and is the first thing most people want to do.
+    name: Annotated[str | None, Field(default=None, min_length=1, max_length=150)] = None
+
 
 class BankDetailsRead(ResponseSchema):
     """One account's details, **with the number in full.**
@@ -151,6 +159,8 @@ class BankDetailsRead(ResponseSchema):
     """
 
     account_id: uuid.UUID
+    #: The account's own name, so a rename is reflected without a second request.
+    name: str
     bank_name: str | None = None
     holder_name: str | None = None
     account_number: str | None = None
@@ -182,6 +192,12 @@ class MoneyAccountRead(ResponseSchema):
     #: False once archived. Archived accounts are left out of the picker entirely and only
     #: appear on the accounts screen when it asks for them.
     is_active: bool = True
+    #: Whether deleting is allowed: nothing posted to it, not seeded, and no card drawing on
+    #: it. Archiving is the answer when this is false, which is why they are two flags.
+    can_delete: bool = False
+    #: Why deleting is refused, or null. Phrased for a person - it goes into a tooltip, so
+    #: the control can be shown and explained rather than silently missing.
+    delete_blocked_reason: str | None = None
     #: Whether archiving is allowed. A seeded account cannot be deactivated - later modules
     #: post to it by role - so the server answers the question rather than leaving the
     #: client to re-derive a rule it would get wrong.
@@ -231,6 +247,35 @@ class AddCardRequest(BaseSchema):
     bank_account_id: uuid.UUID | None = None
 
 
+class UpdateCardRequest(BaseSchema):
+    """Correct a card's name, its holder, or its number.
+
+    **No `kind`.** A credit card owns a liability account; a debit card points at a bank
+    account that already existed. Switching would either orphan an account with postings
+    against it or start filing card spending as money leaving a bank account that never lost
+    it. The honest correction is a new card and an archive of the wrong one.
+
+    Every field is optional and omitting one leaves it alone - unlike the bank-details `PUT`,
+    which replaces the whole set. Sending `holder_name: ""` clears it.
+    """
+
+    label: Annotated[str | None, Field(default=None, min_length=1, max_length=80)] = None
+    holder_name: PartyName | None = None
+
+    #: A corrected number. Read, reduced to a network and four digits, and discarded - the
+    #: same handling as on create. Worth allowing: a mistyped number leaves the wrong four
+    #: digits on screen, and those digits are the whole reason anything is stored.
+    card_number: (
+        Annotated[
+            str,
+            StringConstraints(
+                strip_whitespace=True, min_length=12, max_length=25, pattern=r"^[\d\s-]+$"
+            ),
+        ]
+        | None
+    ) = None
+
+
 class CardRead(ResponseSchema):
     """A card on file. **There is no field for a number, by design.**"""
 
@@ -247,6 +292,11 @@ class CardRead(ResponseSchema):
     is_active: bool
     #: The name on the card, if it was given.
     holder_name: str | None = None
+    #: Whether deleting is allowed - false once anything has been recorded on the card's
+    #: account. Archive it instead; the entries name it.
+    can_delete: bool = False
+    #: Why deleting is refused, or null. See `MoneyAccountRead.delete_blocked_reason`.
+    delete_blocked_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------

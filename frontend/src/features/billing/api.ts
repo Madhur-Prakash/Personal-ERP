@@ -69,6 +69,12 @@ export interface MoneyAccount {
    * always fails.
    */
   can_archive: boolean;
+  /** Whether deleting is permitted: nothing posted to it, not seeded, and no card
+   *  drawing on it. Archive when this is false - the history has to stay. */
+  can_delete: boolean;
+  /** Why deleting is refused, or null. Phrased for a person: shown as the tooltip on a
+   *  disabled Delete, so the control explains itself instead of going missing. */
+  delete_blocked_reason: string | null;
 
   /** Which bank the account is at, and whose it is. Absent for cash in hand. */
   bank_name: string | null;
@@ -88,6 +94,8 @@ export interface MoneyAccount {
  */
 export interface BankDetails {
   account_id: string;
+  /** The account's own name, so a rename is reflected on the same response. */
+  name: string;
   bank_name: string | null;
   holder_name: string | null;
   account_number: string | null;
@@ -101,6 +109,12 @@ export interface BankDetails {
  * on paperwork. Ignored entirely for a cash account.
  */
 export interface BankDetailsBody {
+  /** A new name for the account. Omitting it leaves the name alone.
+   *
+   *  **Renaming a seeded account is allowed**, unlike archiving or deleting one: the
+   *  software finds it by its role, not by its name, so "Primary Bank Account" is just a
+   *  placeholder nobody chose. */
+  name?: string;
   bank_name?: string;
   holder_name?: string;
   /** As typed - spaces and dashes are stripped server-side. Stored **encrypted**, and
@@ -123,6 +137,11 @@ export interface Card {
   /** The name embossed on the card, if it was given. Kept in the clear - PCI DSS permits
    *  retaining a cardholder name; it is the number and the CVV that may not be kept. */
   holder_name: string | null;
+  /** Whether deleting is permitted - false once anything has been recorded on the card's
+   *  account. Archive it instead; the entries name it. */
+  can_delete: boolean;
+  /** Why deleting is refused, or null. See {@link MoneyAccount.delete_blocked_reason}. */
+  delete_blocked_reason: string | null;
 }
 
 export interface BillingOptions {
@@ -289,6 +308,32 @@ export const billingApi = {
    * as an argument rather than the form keeping it anywhere longer-lived.
    */
   addCard: (body: AddCardBody) => api.post<Card>('/billing/cards', body),
+
+  /**
+   * Correct a card's name, its holder, or its number.
+   *
+   * A `PATCH`, so an omitted field is left alone. **`kind` is not editable** - a credit card
+   * owns a liability account and a debit card points at a bank account, so switching would
+   * either orphan an account with postings or start filing card spending as money leaving a
+   * bank account that never lost it.
+   *
+   * A corrected number is read and discarded exactly as on create, and can change the
+   * derived network as well as the last four digits.
+   */
+  updateCard: (id: string, body: { label?: string; holder_name?: string; card_number?: string }) =>
+    api.patch<Card>(`/billing/cards/${id}`, body),
+
+  /**
+   * Remove a card entirely. **Refused once anything has been recorded on it** - archive it
+   * instead, because an entry names the card it was made on. `Card.can_delete` says which.
+   */
+  deleteCard: (id: string) => api.delete<void>(`/billing/cards/${id}`),
+
+  /**
+   * Remove an account entirely. Refused if it has postings, is seeded, or has a card drawing
+   * on it - `MoneyAccount.can_delete` covers all three.
+   */
+  deleteMoneyAccount: (id: string) => api.delete<void>(`/billing/money-accounts/${id}`),
 
   /** Stop offering a card without deleting it - past entries still name it. */
   archiveCard: (id: string) => api.post<Card>(`/billing/cards/${id}/archive`, {}),

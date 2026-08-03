@@ -153,6 +153,7 @@ class BillingApi {
   /// rejected as too short - turning "remove this number" into a validation error.
   Future<BankDetails> saveBankDetails(
     String accountId, {
+    String? name,
     String? bankName,
     String? holderName,
     String? accountNumber,
@@ -160,6 +161,9 @@ class BillingApi {
     await _client.put<Json>(
       '/billing/money-accounts/$accountId/details',
       body: <String, dynamic>{
+        // Omitted when blank, which the server reads as "leave the name alone" - a blank
+        // name is not a rename, and an account has to be called something.
+        if (name != null && name.isNotEmpty) 'name': name,
         if (bankName != null && bankName.isNotEmpty) 'bank_name': bankName,
         if (holderName != null && holderName.isNotEmpty)
           'holder_name': holderName,
@@ -209,6 +213,48 @@ class BillingApi {
       },
     ),
   );
+
+  /// Correct a card's name, its holder, or its number.
+  ///
+  /// A `PATCH`, so an omitted field is left alone. **The kind is not editable** - a credit
+  /// card owns a liability account and a debit card points at a bank account, so switching
+  /// would either orphan an account with postings or start filing card spending as money
+  /// leaving a bank account that never lost it.
+  ///
+  /// A corrected number is read and discarded exactly as on create, and can change the
+  /// derived network as well as the last four digits.
+  Future<PaymentCard> updateCard(
+    String id, {
+    String? label,
+    String? holderName,
+    String? cardNumber,
+  }) async => PaymentCard.fromJson(
+    await _client.patch<Json>(
+      '/billing/cards/$id',
+      body: <String, dynamic>{
+        'label': ?label,
+        // Sent even when empty: that is how the holder's name gets cleared. Omitting it
+        // would mean "leave it alone", which is a different instruction.
+        'holder_name': ?holderName,
+        if (cardNumber != null && cardNumber.isNotEmpty)
+          'card_number': cardNumber,
+      },
+    ),
+  );
+
+  /// Remove a card entirely.
+  ///
+  /// **Refused once anything has been recorded on it** - archive it instead, because an
+  /// entry names the card it was made on. [PaymentCard.canDelete] says which case applies.
+  Future<void> deleteCard(String id) async =>
+      _client.delete<void>('/billing/cards/$id');
+
+  /// Remove an account entirely.
+  ///
+  /// Refused if it has postings, is seeded, or has a card drawing on it -
+  /// [MoneyAccount.canDelete] covers all three.
+  Future<void> deleteMoneyAccount(String id) async =>
+      _client.delete<void>('/billing/money-accounts/$id');
 
   /// Stop offering a card without deleting it - past entries still name it.
   Future<PaymentCard> archiveCard(String id) async => PaymentCard.fromJson(

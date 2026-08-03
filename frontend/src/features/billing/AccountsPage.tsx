@@ -12,7 +12,7 @@
  * permanently blank.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, CreditCard, Landmark, Plus, RotateCcw, Wallet } from 'lucide-react';
+import { Archive, CreditCard, Landmark, Plus, RotateCcw, Trash2, Wallet } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
@@ -30,8 +30,6 @@ import {
   MIN_DIGITS,
   NETWORK_LABELS,
   cardNumberProblem,
-  cardNumberWarning,
-  isPlausibleCardNumber,
   normaliseCardNumber,
 } from '@/features/billing/cards';
 import {
@@ -89,7 +87,7 @@ export function AccountsPage() {
   return (
     <div>
       <PageHeader
-        title="Accounts & cards"
+        title="Banks & cards"
         description="Where your money sits and the cards you spend on. These are the choices offered when recording a payment."
       />
 
@@ -136,9 +134,14 @@ export function AccountsPage() {
                 </p>
                 <p className="mt-2">Lists show the last four digits only.</p>
                 <p className="mt-2">
-                  Archiving an account stops it being offered when recording a payment. Entries that
-                  already used it keep its name. The accounts created with your books cannot be
-                  archived - the software posts to them by role.
+                  <strong>Archive</strong> stops an account being offered when recording a payment,
+                  and keeps the entries that already used it.
+                </p>
+                <p className="mt-2">
+                  <strong>Delete</strong> appears only where it is possible - an account with
+                  entries against it cannot be removed without orphaning them, and the accounts
+                  created with your books are posted to by role, so neither can be deleted. Archive
+                  those instead.
                 </p>
               </InfoTip>
             </div>
@@ -280,6 +283,19 @@ function AccountRow({ account }: { account: MoneyAccount }) {
       toast.error(error instanceof ApiError ? error.message : 'Could not update the account'),
   });
 
+  const remove = useMutation({
+    mutationFn: () => billingApi.deleteMoneyAccount(account.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['money-accounts'] });
+      void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      void queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+      toast.success(`Deleted ${account.name}`);
+    },
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : 'Could not delete the account'),
+  });
+
   return (
     <li className={cn('py-3', !account.is_active && 'opacity-60')}>
       <div className="flex items-center gap-3">
@@ -337,6 +353,32 @@ function AccountRow({ account }: { account: MoneyAccount }) {
             <span className="sr-only"> {account.name}</span>
           </Button>
         )}
+        {/* **Always rendered, disabled when it would fail**, with the server's reason as
+            the hover tooltip. Kept visible on purpose: the greyed control plus its
+            explanation answers "can I delete this, and if not why" in place, where hiding it
+            left the question unanswered and made the feature look absent. */}
+        <Button
+          variant="ghost"
+          onClick={() => {
+            if (
+              window.confirm(
+                `Delete ${account.name}? This cannot be undone. Nothing has been ` +
+                  'recorded against it, so no entries are affected.',
+              )
+            ) {
+              remove.mutate();
+            }
+          }}
+          disabled={!account.can_delete || remove.isPending}
+          title={
+            account.delete_blocked_reason ??
+            'Delete this account. Nothing has been recorded against it.'
+          }
+        >
+          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          Delete
+          <span className="sr-only"> {account.name}</span>
+        </Button>
       </div>
       {open && <BankDetailsForm account={account} onDone={() => setOpen(false)} />}
     </li>
@@ -360,10 +402,14 @@ function BankDetailsForm({ account, onDone }: { account: MoneyAccount; onDone: (
   // `null` means "not touched yet", so the fetched value shows through without an effect
   // copying server state into local state - the pattern that goes wrong the moment the
   // query resolves a second time.
+  const [name, setName] = useState<string | null>(null);
   const [bankName, setBankName] = useState<string | null>(null);
   const [holderName, setHolderName] = useState<string | null>(null);
   const [accountNumber, setAccountNumber] = useState<string | null>(null);
 
+  // Falls back to the row's own name while the request is in flight, so the field is never
+  // briefly empty on a screen where an empty name would look like data loss.
+  const accountName = name ?? data?.name ?? account.name;
   const bank = bankName ?? data?.bank_name ?? '';
   const holder = holderName ?? data?.holder_name ?? '';
   const number = accountNumber ?? data?.account_number ?? '';
@@ -374,15 +420,17 @@ function BankDetailsForm({ account, onDone }: { account: MoneyAccount; onDone: (
       // the account number has a minimum length, so an empty string would come back as a
       // validation error instead of removing the number.
       billingApi.saveBankDetails(account.id, {
+        ...(accountName.trim() ? { name: accountName.trim() } : {}),
         ...(bank.trim() ? { bank_name: bank.trim() } : {}),
         ...(holder.trim() ? { holder_name: holder.trim() } : {}),
         ...(number.trim() ? { account_number: number.trim() } : {}),
       }),
     onSuccess: (saved) => {
       void queryClient.invalidateQueries({ queryKey: ['bank-details', account.id] });
+      void queryClient.invalidateQueries({ queryKey: ['money-accounts'] });
       void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
       void queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      toast.success(`Saved details for ${account.name}`, {
+      toast.success(`Saved ${saved.name}`, {
         description: saved.bank_name ?? undefined,
       });
       onDone();
@@ -396,10 +444,19 @@ function BankDetailsForm({ account, onDone }: { account: MoneyAccount; onDone: (
 
   return (
     <div className="border-border bg-surface-sunken/50 mt-3 space-y-3 rounded-lg border border-dashed p-3">
+      <Input
+        label="Account name"
+        autoFocus
+        required
+        placeholder="HDFC Current"
+        value={accountName}
+        onChange={(event) => setName(event.target.value)}
+        disabled={isLoading}
+        hint="What this account is called everywhere in the app. Rename it freely - the seeded name is only a placeholder."
+      />
       <div className="grid gap-3 sm:grid-cols-3">
         <Input
           label="Bank name"
-          autoFocus
           placeholder="HDFC Bank"
           value={bank}
           onChange={(event) => setBankName(event.target.value)}
@@ -433,7 +490,7 @@ function BankDetailsForm({ account, onDone }: { account: MoneyAccount; onDone: (
         </Button>
         <Button
           onClick={() => save.mutate()}
-          disabled={isLoading || numberLooksWrong || save.isPending}
+          disabled={isLoading || accountName.trim() === '' || numberLooksWrong || save.isPending}
         >
           {save.isPending ? 'Saving…' : 'Save details'}
         </Button>
@@ -447,6 +504,22 @@ function BankDetailsForm({ account, onDone }: { account: MoneyAccount; onDone: (
 // ---------------------------------------------------------------------------
 function CardRow({ card }: { card: PaymentCard }) {
   const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+
+  const remove = useMutation({
+    mutationFn: () => billingApi.deleteCard(card.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['billing-cards'] });
+      void queryClient.invalidateQueries({ queryKey: ['money-accounts'] });
+      void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
+      // A credit card's liability account goes with it, so the chart has changed.
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      void queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+      toast.success(`Deleted ${card.label}`);
+    },
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : 'Could not delete the card'),
+  });
 
   const toggle = useMutation({
     mutationFn: () =>
@@ -465,42 +538,156 @@ function CardRow({ card }: { card: PaymentCard }) {
   });
 
   return (
-    <li className={cn('flex items-center gap-3 py-3', !card.is_active && 'opacity-60')}>
-      <span className="text-content-muted shrink-0" aria-hidden>
-        <CreditCard className="h-4 w-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="text-content block truncate text-[14px]">
-          {card.label} <span className="text-content-muted tabular-nums">··{card.last4}</span>
+    <li className={cn('py-3', !card.is_active && 'opacity-60')}>
+      <div className="flex items-center gap-3">
+        <span className="text-content-muted shrink-0" aria-hidden>
+          <CreditCard className="h-4 w-4" />
         </span>
-        <span className="text-content-muted block truncate text-[12px]">
-          {[NETWORK_LABELS[card.network], card.holder_name, card.account_name]
-            .filter(Boolean)
-            .join(' · ')}
+        <span className="min-w-0 flex-1">
+          <span className="text-content block truncate text-[14px]">
+            {card.label} <span className="text-content-muted tabular-nums">··{card.last4}</span>
+          </span>
+          <span className="text-content-muted block truncate text-[12px]">
+            {[NETWORK_LABELS[card.network], card.holder_name, card.account_name]
+              .filter(Boolean)
+              .join(' · ')}
+          </span>
         </span>
-      </span>
-      <Badge tone={card.kind === 'credit' ? 'warning' : 'info'}>
-        {card.kind === 'credit' ? 'Credit' : 'Debit'}
-      </Badge>
-      <Button
-        variant="ghost"
-        onClick={() => toggle.mutate()}
-        disabled={toggle.isPending}
-        title={
-          card.is_active
-            ? 'Stop offering this card. Past entries still name it.'
-            : 'Offer this card again when recording a payment.'
-        }
-      >
-        {card.is_active ? (
-          <Archive className="h-3.5 w-3.5" aria-hidden />
-        ) : (
-          <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-        )}
-        {card.is_active ? 'Archive' : 'Restore'}
-        <span className="sr-only"> {card.label}</span>
-      </Button>
+        <Badge tone={card.kind === 'credit' ? 'warning' : 'info'}>
+          {card.kind === 'credit' ? 'Credit' : 'Debit'}
+        </Badge>
+        <Button
+          variant="ghost"
+          onClick={() => toggle.mutate()}
+          disabled={toggle.isPending}
+          title={
+            card.is_active
+              ? 'Stop offering this card. Past entries still name it.'
+              : 'Offer this card again when recording a payment.'
+          }
+        >
+          {card.is_active ? (
+            <Archive className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+          )}
+          {card.is_active ? 'Archive' : 'Restore'}
+          <span className="sr-only"> {card.label}</span>
+        </Button>
+        <Button variant="ghost" onClick={() => setEditing((open) => !open)}>
+          {editing ? 'Close' : 'Edit'}
+          <span className="sr-only"> {card.label}</span>
+        </Button>
+        {/* Disabled rather than hidden, with the reason on hover - the same treatment as an
+            account row, so the two never look like they follow different rules. */}
+        <Button
+          variant="ghost"
+          onClick={() => {
+            if (
+              window.confirm(
+                `Delete ${card.label} ··${card.last4}? This cannot be undone. Nothing has ` +
+                  'been recorded on it, so no entries are affected.',
+              )
+            ) {
+              remove.mutate();
+            }
+          }}
+          disabled={!card.can_delete || remove.isPending}
+          title={card.delete_blocked_reason ?? 'Delete this card. Nothing has been recorded on it.'}
+        >
+          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          Delete
+          <span className="sr-only"> {card.label}</span>
+        </Button>
+      </div>
+      {editing && <CardDetailsForm card={card} onDone={() => setEditing(false)} />}
     </li>
+  );
+}
+
+/**
+ * Correct a card's name, its holder, or its number.
+ *
+ * **No "kind" field.** A credit card owns a liability account; a debit card points at a bank
+ * account that already existed. Switching would either orphan an account with postings
+ * against it or start filing card spending as money leaving a bank account that never lost
+ * it. The honest correction is a new card and an archive of the wrong one.
+ *
+ * The number field starts **empty rather than pre-filled**, because there is nothing to
+ * pre-fill it with - the number was discarded when the card was added, and only the last
+ * four digits survive. Left blank it is not sent, and the stored digits stay as they are.
+ */
+function CardDetailsForm({ card, onDone }: { card: PaymentCard; onDone: () => void }) {
+  const queryClient = useQueryClient();
+  const [label, setLabel] = useState(card.label);
+  const [holderName, setHolderName] = useState(card.holder_name ?? '');
+  const [number, setNumber] = useState('');
+
+  const digits = normaliseCardNumber(number);
+  const problem = cardNumberProblem(digits);
+
+  const save = useMutation({
+    mutationFn: () =>
+      billingApi.updateCard(card.id, {
+        label: label.trim(),
+        holder_name: holderName.trim(),
+        ...(digits ? { card_number: number } : {}),
+      }),
+    onSuccess: (updated) => {
+      // Cleared first: the number has done its only job.
+      setNumber('');
+      void queryClient.invalidateQueries({ queryKey: ['billing-cards'] });
+      void queryClient.invalidateQueries({ queryKey: ['billing-options'] });
+      toast.success(`Saved ${updated.label} ··${updated.last4}`);
+      onDone();
+    },
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : 'Could not save the card'),
+  });
+
+  return (
+    <div className="border-border bg-surface-sunken/50 mt-3 space-y-3 rounded-lg border border-dashed p-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Input
+          label="Name this card"
+          autoFocus
+          required
+          placeholder="HDFC Millennia"
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
+        />
+        <Input
+          label="Name on the card"
+          autoComplete="off"
+          placeholder="Jhon Doe"
+          value={holderName}
+          onChange={(event) => setHolderName(event.target.value)}
+          hint="Clear it to remove it."
+        />
+        <Input
+          label="Card number"
+          autoComplete="off"
+          inputMode="numeric"
+          placeholder={`Currently ··${card.last4}`}
+          value={number}
+          onChange={(event) => setNumber(event.target.value)}
+          className="tabular-nums"
+          error={problem ?? undefined}
+          hint="Leave blank to keep the current one. Only the last four digits are stored."
+        />
+      </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button variant="ghost" onClick={onDone} disabled={save.isPending}>
+          Cancel
+        </Button>
+        <Button
+          onClick={() => save.mutate()}
+          disabled={label.trim() === '' || problem !== null || save.isPending}
+        >
+          {save.isPending ? 'Saving…' : 'Save card'}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -641,11 +828,8 @@ function NewCardCard({ banks, onDone }: { banks: MoneyAccount[]; onDone: () => v
   const [bankId, setBankId] = useState(banks[0]?.id ?? '');
 
   const digits = normaliseCardNumber(number);
-  const plausible = isPlausibleCardNumber(digits);
-  // The blocking problem (wrong length or charset) and the advisory warning (failed check
-  // digit) are deliberately different things - see `cards.ts`.
+  // Length, charset, and the Luhn check digit - all blocking. See `cards.ts`.
   const problem = cardNumberProblem(digits);
-  const warning = cardNumberWarning(digits);
 
   const add = useMutation({
     mutationFn: () =>
@@ -681,8 +865,7 @@ function NewCardCard({ banks, onDone }: { banks: MoneyAccount[]; onDone: () => v
   });
 
   const needsBank = kind === 'debit';
-  // The warning is not in here on purpose: a failed check digit does not block the save.
-  const canSave = label.trim() !== '' && plausible && (!needsBank || bankId !== '');
+  const canSave = label.trim() !== '' && problem === null && (!needsBank || bankId !== '');
 
   return (
     <Card className="mb-4">
@@ -735,10 +918,7 @@ function NewCardCard({ banks, onDone }: { banks: MoneyAccount[]; onDone: () => v
               onChange={(event) => setNumber(event.target.value)}
               className="tabular-nums"
               error={problem ?? undefined}
-              hint={
-                warning ??
-                `${MIN_DIGITS} to ${MAX_DIGITS} digits. Used to work out the network and last four, then discarded.`
-              }
+              hint={`${MIN_DIGITS} to ${MAX_DIGITS} digits. Used to work out the network and last four, then discarded.`}
             />
             <Input
               label="Name on the card"

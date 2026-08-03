@@ -742,11 +742,9 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
       builder: (BuildContext context) => StatefulBuilder(
         builder: (BuildContext context, void Function(void Function()) rebuild) {
           final String digits = normaliseCardNumber(number.text);
-          // Two different things: the blocking problem (wrong length or charset) and the
-          // advisory warning (failed check digit). See `core/card_number.dart` - a bad
-          // check digit is worth saying, not worth refusing.
+          // Length, charset, and the Luhn check digit - all blocking. See
+          // `core/card_number.dart`.
           final String? problem = cardNumberProblem(digits);
-          final String? warning = cardNumberWarning(digits);
 
           return Column(
             spacing: 12,
@@ -792,9 +790,7 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
                 // should invite the OS to hand one over or store one back.
                 textStyle: const TextStyle(fontFeatures: tabularFigures),
                 error: problem,
-                hint:
-                    warning ??
-                    'Only the network and the last four digits are kept.',
+                hint: 'Only the network and the last four digits are kept.',
                 onChanged: (_) => rebuild(() {}),
               ),
               AppInput(
@@ -848,7 +844,7 @@ class _AccountsPanelState extends ConsumerState<AccountsPanel> {
     // form from becoming a request.
     if (confirmed != true ||
         name.isEmpty ||
-        !isPlausibleCardNumber(normaliseCardNumber(typed)) ||
+        cardNumberProblem(normaliseCardNumber(typed)) != null ||
         (debit && bankId.isEmpty)) {
       label.dispose();
       number.dispose();
@@ -998,6 +994,34 @@ class _AccountRowState extends ConsumerState<_AccountRow> {
     }
   }
 
+  Future<void> _delete() async {
+    final MoneyAccount account = widget.account;
+    if (!await confirmAction(
+      context,
+      title: 'Delete ${account.name}?',
+      message:
+          'This cannot be undone. Nothing has been recorded against it, so no entries '
+          'are affected.',
+      confirmLabel: 'Delete',
+    )) {
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await ref.read(billingApiProvider).deleteMoneyAccount(account.id);
+      // The chart of accounts lost a row, so the reports built on it are stale too.
+      invalidateMoneyAccounts(ref);
+      invalidateLedger(ref);
+      if (!mounted) return;
+      context.toastSuccess('Deleted ${account.name}');
+    } catch (error) {
+      if (mounted) context.toastApiError(error, 'Could not delete the account');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppTokens t = context.tokens;
@@ -1088,6 +1112,21 @@ class _AccountRowState extends ConsumerState<_AccountRow> {
                       ? 'Archive ${account.name}'
                       : 'Restore ${account.name}',
                 ),
+              // **Always rendered, disabled when it would fail** - with the server's
+              // reason as the tooltip. Hiding it was worse: cards showed Delete and
+              // accounts did not, so one rule read as "banks cannot be deleted" rather
+              // than "this particular one has entries against it".
+              AppButton(
+                onPressed: account.canDelete && !_busy ? _delete : null,
+                variant: AppButtonVariant.ghost,
+                size: AppButtonSize.sm,
+                leftIcon: LucideIcons.trash2,
+                label: 'Delete',
+                tooltip:
+                    account.deleteBlockedReason ??
+                    'Delete this account. Nothing has been recorded against it.',
+                semanticLabel: 'Delete ${account.name}',
+              ),
             ],
           ),
           if (_editing)
@@ -1118,6 +1157,7 @@ class _BankDetailsForm extends ConsumerStatefulWidget {
 }
 
 class _BankDetailsFormState extends ConsumerState<_BankDetailsForm> {
+  final TextEditingController _name = TextEditingController();
   final TextEditingController _bank = TextEditingController();
   final TextEditingController _holder = TextEditingController();
   final TextEditingController _number = TextEditingController();
@@ -1132,6 +1172,7 @@ class _BankDetailsFormState extends ConsumerState<_BankDetailsForm> {
 
   @override
   void dispose() {
+    _name.dispose();
     _bank.dispose();
     _holder.dispose();
     _number.dispose();
@@ -1145,6 +1186,7 @@ class _BankDetailsFormState extends ConsumerState<_BankDetailsForm> {
           .read(billingApiProvider)
           .saveBankDetails(
             widget.account.id,
+            name: _name.text.trim(),
             bankName: _bank.text.trim(),
             holderName: _holder.text.trim(),
             accountNumber: _number.text.trim(),
@@ -1170,6 +1212,9 @@ class _BankDetailsFormState extends ConsumerState<_BankDetailsForm> {
     final BankDetails? loaded = details.valueOrNull;
     if (loaded != null && !_seeded) {
       _seeded = true;
+      // Falls back to the row's own name, so the field is never briefly blank on a screen
+      // where an empty name would look like data loss.
+      _name.text = loaded.name.isEmpty ? widget.account.name : loaded.name;
       _bank.text = loaded.bankName ?? '';
       _holder.text = loaded.holderName ?? '';
       _number.text = loaded.accountNumber ?? '';
@@ -1189,6 +1234,17 @@ class _BankDetailsFormState extends ConsumerState<_BankDetailsForm> {
         crossAxisAlignment: CrossAxisAlignment.start,
         spacing: 12,
         children: <Widget>[
+          AppInput(
+            label: 'Account name',
+            controller: _name,
+            autofocus: true,
+            required: true,
+            enabled: !loading,
+            placeholder: 'HDFC Current',
+            hint:
+                'What this account is called everywhere in the app. Rename it freely - '
+                'the seeded name is only a placeholder.',
+          ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             spacing: 12,
@@ -1197,7 +1253,6 @@ class _BankDetailsFormState extends ConsumerState<_BankDetailsForm> {
                 child: AppInput(
                   label: 'Bank name',
                   controller: _bank,
-                  autofocus: true,
                   enabled: !loading,
                   placeholder: 'HDFC Bank',
                 ),
@@ -1236,7 +1291,9 @@ class _BankDetailsFormState extends ConsumerState<_BankDetailsForm> {
                 label: 'Cancel',
               ),
               AppButton(
-                onPressed: loading || _saving ? null : _save,
+                onPressed: loading || _saving || _name.text.trim().isEmpty
+                    ? null
+                    : _save,
                 loading: _saving,
                 label: _saving ? 'Saving…' : 'Save details',
               ),
@@ -1286,6 +1343,148 @@ class _CardRowState extends ConsumerState<_CardRow> {
       );
     } catch (error) {
       if (mounted) context.toastApiError(error, 'Could not update the card');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Correct the card's name, its holder, or its number.
+  ///
+  /// **No kind field.** A credit card owns a liability account; a debit card points at a
+  /// bank account that already existed. Switching would either orphan an account with
+  /// postings against it or start filing card spending as money leaving a bank account
+  /// that never lost it. The honest correction is a new card and an archive of this one.
+  ///
+  /// The number field starts **empty**, because there is nothing to pre-fill it with - the
+  /// number was discarded when the card was added and only the last four digits survive.
+  /// Left blank it is not sent, and the stored digits stay as they are.
+  Future<void> _edit() async {
+    final PaymentCard card = widget.card;
+    final TextEditingController label = TextEditingController(text: card.label);
+    final TextEditingController holder = TextEditingController(
+      text: card.holderName ?? '',
+    );
+    final TextEditingController number = TextEditingController();
+
+    void disposeAll() {
+      label.dispose();
+      holder.dispose();
+      number.dispose();
+    }
+
+    try {
+      final bool? confirmed = await showAppModal<bool>(
+        context: context,
+        title: 'Edit ${card.displayName}',
+        description:
+            'The kind cannot change - a credit card and a debit card post to different '
+            'accounts.',
+        builder: (BuildContext context) => StatefulBuilder(
+          builder: (BuildContext context, void Function(void Function()) rebuild) {
+            final String? problem = cardNumberProblem(
+              normaliseCardNumber(number.text),
+            );
+            return Column(
+              spacing: 12,
+              children: <Widget>[
+                AppInput(
+                  label: 'Name this card',
+                  controller: label,
+                  autofocus: true,
+                  required: true,
+                  placeholder: 'HDFC Millennia',
+                ),
+                AppInput(
+                  label: 'Name on the card',
+                  controller: holder,
+                  placeholder: 'Jhon Doe',
+                  hint: 'Clear it to remove it.',
+                ),
+                AppInput(
+                  label: 'Card number',
+                  controller: number,
+                  placeholder: 'Currently ··${card.last4}',
+                  keyboardType: TextInputType.number,
+                  inputFormatters: <TextInputFormatter>[
+                    FilteringTextInputFormatter.allow(RegExp(r'[\d\s-]')),
+                  ],
+                  maxLength: 25,
+                  textStyle: const TextStyle(fontFeatures: tabularFigures),
+                  error: problem,
+                  hint:
+                      'Leave blank to keep the current one. Only the last four '
+                      'digits are stored.',
+                  onChanged: (_) => rebuild(() {}),
+                ),
+              ],
+            );
+          },
+        ),
+        footer: (BuildContext context) => <Widget>[
+          AppButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            variant: AppButtonVariant.ghost,
+            label: 'Cancel',
+          ),
+          AppButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            label: 'Save card',
+          ),
+        ],
+      );
+
+      final String typed = number.text;
+      if (confirmed != true ||
+          label.text.trim().isEmpty ||
+          cardNumberProblem(normaliseCardNumber(typed)) != null) {
+        return;
+      }
+
+      setState(() => _busy = true);
+      try {
+        final PaymentCard updated = await ref
+            .read(billingApiProvider)
+            .updateCard(
+              card.id,
+              label: label.text.trim(),
+              holderName: holder.text.trim(),
+              cardNumber: typed,
+            );
+        invalidateCards(ref);
+        if (!mounted) return;
+        context.toastSuccess('Saved ${updated.displayName}');
+      } catch (error) {
+        if (mounted) context.toastApiError(error, 'Could not save the card');
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
+    } finally {
+      disposeAll();
+    }
+  }
+
+  Future<void> _delete() async {
+    final PaymentCard card = widget.card;
+    if (!await confirmAction(
+      context,
+      title: 'Delete ${card.displayName}?',
+      message:
+          'This cannot be undone. Nothing has been recorded on it, so no entries are '
+          'affected.',
+      confirmLabel: 'Delete',
+    )) {
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await ref.read(billingApiProvider).deleteCard(card.id);
+      // A credit card's liability account goes with it, so the chart has changed too.
+      invalidateCards(ref, ledgerChanged: card.kind == CardKind.credit);
+      if (!mounted) return;
+      context.toastSuccess('Deleted ${card.label}');
+    } catch (error) {
+      if (mounted) context.toastApiError(error, 'Could not delete the card');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1356,6 +1555,27 @@ class _CardRowState extends ConsumerState<_CardRow> {
               semanticLabel: card.isActive
                   ? 'Archive ${card.label}'
                   : 'Restore ${card.label}',
+            ),
+            AppButton(
+              onPressed: _busy ? null : _edit,
+              variant: AppButtonVariant.ghost,
+              size: AppButtonSize.sm,
+              label: 'Edit',
+              semanticLabel: 'Edit ${card.label}',
+            ),
+            // Disabled rather than hidden, with the server's reason as the tooltip - the
+            // same treatment as an account row, so the two never look like they follow
+            // different rules.
+            AppButton(
+              onPressed: card.canDelete && !_busy ? _delete : null,
+              variant: AppButtonVariant.ghost,
+              size: AppButtonSize.sm,
+              leftIcon: LucideIcons.trash2,
+              label: 'Delete',
+              tooltip:
+                  card.deleteBlockedReason ??
+                  'Delete this card. Nothing has been recorded on it.',
+              semanticLabel: 'Delete ${card.label}',
             ),
           ],
         ),

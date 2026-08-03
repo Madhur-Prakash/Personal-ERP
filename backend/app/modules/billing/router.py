@@ -35,6 +35,7 @@ from app.modules.billing.schemas import (
     TransferRead,
     TransferRequest,
     UpdateBankDetailsRequest,
+    UpdateCardRequest,
 )
 from app.modules.billing.service import BillingService, Card, Direction, Entry, MoneyAccount
 from app.modules.organizations.models import Organization
@@ -63,6 +64,8 @@ def _account_response(account: MoneyAccount) -> MoneyAccountRead:
         account_number_last4=account.account_number_last4,
         is_active=account.is_active,
         can_archive=account.can_archive,
+        can_delete=account.can_delete,
+        delete_blocked_reason=account.delete_blocked_reason,
     )
 
 
@@ -77,6 +80,8 @@ def _card_response(card: Card) -> CardRead:
         account_name=card.account_name,
         is_active=card.is_active,
         holder_name=card.holder_name,
+        can_delete=card.can_delete,
+        delete_blocked_reason=card.delete_blocked_reason,
     )
 
 
@@ -337,6 +342,7 @@ async def get_bank_details(
     details = await service.bank_details(organization_id, account_id)
     return BankDetailsRead(
         account_id=account_id,
+        name=details.name,
         bank_name=details.bank_name,
         holder_name=details.holder_name,
         account_number=details.account_number,
@@ -353,10 +359,13 @@ async def put_bank_details(
     account_id: uuid.UUID,
     data: UpdateBankDetailsRequest,
     organization_id: ActiveOrganizationId,
+    user: CurrentUser,
     service: BillingDep,
+    ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
 ) -> BankDetailsRead:
-    """Fill in or correct which bank an account is at, whose it is, and its number.
+    """Rename an account, and fill in or correct which bank it is at, whose it is, and its
+    number.
 
     A `PUT` because it replaces the whole set: sending a blank field clears it, which is how
     someone removes a number they entered by mistake. The seeded "Primary Bank Account"
@@ -366,12 +375,16 @@ async def put_bank_details(
     details = await service.update_bank_details(
         organization_id,
         account_id,
+        user,
+        name=data.name,
         bank_name=data.bank_name,
         holder_name=data.holder_name,
         account_number=data.account_number,
+        ctx=ctx,
     )
     return BankDetailsRead(
         account_id=account_id,
+        name=details.name,
         bank_name=details.bank_name,
         holder_name=details.holder_name,
         account_number=details.account_number,
@@ -433,6 +446,77 @@ async def add_card(
         ctx=ctx,
     )
     return _card_response(card)
+
+
+@router.patch("/cards/{card_id}", response_model=CardRead, summary="Edit a card")
+async def update_card(
+    card_id: uuid.UUID,
+    data: UpdateCardRequest,
+    organization_id: ActiveOrganizationId,
+    service: BillingDep,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> CardRead:
+    """Correct what a card is called, whose name is on it, or which number it is.
+
+    A `PATCH`, so an omitted field is left alone. **The kind is not editable** - see
+    `UpdateCardRequest`. A corrected number is read and discarded exactly as on create, and
+    can change the derived network as well as the last four digits.
+    """
+    card = await service.update_card(
+        organization_id,
+        card_id,
+        label=data.label,
+        holder_name=data.holder_name,
+        card_number=data.card_number,
+    )
+    return _card_response(card)
+
+
+@router.delete(
+    "/cards/{card_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a card",
+)
+async def delete_card(
+    card_id: uuid.UUID,
+    organization_id: ActiveOrganizationId,
+    user: CurrentUser,
+    service: BillingDep,
+    ctx: RequestCtx,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> None:
+    """Remove a card entirely, when nothing has been recorded on it.
+
+    **Refused once it has entries**, with archiving offered instead - an entry names the card
+    it was made on, and deleting the card would leave that entry pointing at nothing.
+    `CardRead.can_delete` says which case a card is in, so a client can offer the right one.
+
+    A credit card's liability account goes with it; a debit card's bank account existed first
+    and is left alone.
+    """
+    await service.delete_card(organization_id, card_id, user, ctx)
+
+
+@router.delete(
+    "/money-accounts/{account_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an account",
+)
+async def delete_money_account(
+    account_id: uuid.UUID,
+    organization_id: ActiveOrganizationId,
+    user: CurrentUser,
+    service: BillingDep,
+    ctx: RequestCtx,
+    _: Annotated[None, Depends(require_permission(Permission.ACCOUNT_WRITE))],
+) -> None:
+    """Remove a cash box or bank account, when nothing depends on it.
+
+    Refused if it has postings, is a seeded account, or has a card drawing on it -
+    `MoneyAccountRead.can_delete` covers all three so the button only appears where it will
+    work. Archiving is the answer in every other case, and it keeps the history.
+    """
+    await service.delete_money_account(organization_id, account_id, user, ctx)
 
 
 @router.post("/cards/{card_id}/archive", response_model=CardRead, summary="Archive a card")

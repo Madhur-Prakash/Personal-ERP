@@ -139,6 +139,8 @@ class MoneyAccount {
     this.accountNumberLast4,
     this.isActive = true,
     this.canArchive = false,
+    this.canDelete = false,
+    this.deleteBlockedReason,
   });
 
   final String id;
@@ -182,6 +184,17 @@ class MoneyAccount {
   /// make a request that always fails.
   final bool canArchive;
 
+  /// Whether deleting is permitted: nothing posted to it, not seeded, and no card
+  /// drawing on it. Archive when this is false - the entries name this account.
+  final bool canDelete;
+
+  /// Why deleting is refused, or null when it is allowed.
+  ///
+  /// **The server knows the reason; this client does not have to guess it.** Shown as the
+  /// tooltip on a disabled Delete, so the control explains itself rather than going
+  /// missing and reading as "accounts cannot be deleted".
+  final String? deleteBlockedReason;
+
   bool get isCard => cardId != null;
 
   /// A stable, unique identity for one entry in a picker.
@@ -217,6 +230,8 @@ class MoneyAccount {
     canArchive: json['can_archive'] is bool
         ? json['can_archive'] as bool
         : false,
+    canDelete: json['can_delete'] is bool ? json['can_delete'] as bool : false,
+    deleteBlockedReason: strOrNull(json, 'delete_blocked_reason'),
   );
 }
 
@@ -227,11 +242,15 @@ class MoneyAccount {
 /// something every load of the billing screen does for every account.
 class BankDetails {
   const BankDetails({
+    this.name = '',
     this.bankName,
     this.holderName,
     this.accountNumber,
     this.accountNumberLast4,
   });
+
+  /// The account's own name, so a rename comes back on the same response the form reads.
+  final String name;
 
   final String? bankName;
   final String? holderName;
@@ -242,6 +261,7 @@ class BankDetails {
   final String? accountNumberLast4;
 
   factory BankDetails.fromJson(Json json) => BankDetails(
+    name: strOrNull(json, 'name') ?? '',
     bankName: strOrNull(json, 'bank_name'),
     holderName: strOrNull(json, 'holder_name'),
     accountNumber: strOrNull(json, 'account_number'),
@@ -261,6 +281,8 @@ class PaymentCard {
     required this.accountName,
     required this.isActive,
     this.holderName,
+    this.canDelete = false,
+    this.deleteBlockedReason,
   });
 
   final String id;
@@ -284,6 +306,13 @@ class PaymentCard {
   /// on its own cannot be used to transact.
   final String? holderName;
 
+  /// Whether deleting is permitted - false once anything has been recorded on the
+  /// card's account. Archive it instead; the entries name it.
+  final bool canDelete;
+
+  /// Why deleting is refused, or null. See [MoneyAccount.deleteBlockedReason].
+  final String? deleteBlockedReason;
+
   String get displayName => '$label ··$last4';
 
   /// The line under the name: "Visa · Jhon Doe · HDFC Millennia".
@@ -303,6 +332,8 @@ class PaymentCard {
     accountName: strOrNull(json, 'account_name') ?? '',
     isActive: boolOf(json, 'is_active'),
     holderName: strOrNull(json, 'holder_name'),
+    canDelete: json['can_delete'] is bool ? json['can_delete'] as bool : false,
+    deleteBlockedReason: strOrNull(json, 'delete_blocked_reason'),
   );
 }
 

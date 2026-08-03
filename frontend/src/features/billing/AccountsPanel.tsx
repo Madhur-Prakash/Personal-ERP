@@ -28,13 +28,7 @@ import { Input } from '@/components/ui/Input';
 import { NumberInput } from '@/components/ui/NumberInput';
 import { Select } from '@/components/ui/Select';
 import { transferableAccounts } from '@/features/billing/accountPicker';
-import {
-  NETWORK_LABELS,
-  cardNumberProblem,
-  cardNumberWarning,
-  isPlausibleCardNumber,
-  normaliseCardNumber,
-} from '@/features/billing/cards';
+import { NETWORK_LABELS, cardNumberProblem, normaliseCardNumber } from '@/features/billing/cards';
 import {
   type BillingOptions,
   type Card,
@@ -554,9 +548,8 @@ function AddCardForm({
   const [bankId, setBankId] = useState(banks[0]?.id ?? '');
 
   const digits = normaliseCardNumber(number);
-  const longEnough = isPlausibleCardNumber(digits);
+  // Length, charset, and the Luhn check digit - all blocking. See `cards.ts`.
   const problem = cardNumberProblem(digits);
-  const warning = cardNumberWarning(digits);
 
   const add = useMutation({
     mutationFn: () =>
@@ -592,8 +585,7 @@ function AddCardForm({
   });
 
   const needsBank = kind === 'debit';
-  // The warning is deliberately absent here: a failed check digit does not block saving.
-  const canSave = label.trim() !== '' && longEnough && (!needsBank || bankId !== '');
+  const canSave = label.trim() !== '' && problem === null && (!needsBank || bankId !== '');
 
   return (
     <form
@@ -643,7 +635,6 @@ function AddCardForm({
           className="tabular-nums"
           error={problem ?? undefined}
           hint={
-            warning ??
             'Only the network and the last four digits are kept. The number itself is never stored.'
           }
         />

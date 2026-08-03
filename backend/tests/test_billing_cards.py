@@ -145,13 +145,12 @@ class TestCardNumberHandling:
         for value in ("", "abcd", "4111", "41111111111111119999999"):
             assert inspect_card_number(value) is None
 
-    def test_a_failed_check_digit_is_reported_rather_than_refused(self) -> None:
-        """**Advisory, not a gate** - see `CardIdentity.checksum_ok`.
+    def test_a_failed_check_digit_is_reported_apart_from_a_bad_shape(self) -> None:
+        """Both are refused, but the caller can tell which happened.
 
-        Nothing here is ever charged and the number is discarded within the request, so the
-        only lasting artefact is a four-digit label. Worth warning about, because it usually
-        means a typo and a wrong label defeats the point of storing one; not worth refusing
-        an entry somebody is deliberately making about their own card.
+        "Twelve to nineteen digits" and "those digits do not check out" are different
+        mistakes with different fixes, so they come back separately - one as `None`, the
+        other on `checksum_ok` - and the API turns each into its own message.
         """
         identity = inspect_card_number("4111111111111112")
         assert identity is not None
@@ -204,10 +203,7 @@ class TestNoCardNumberIsPersisted:
         very likely in a client-side log, which is worse than storing it deliberately
         because nobody would think to look.
         """
-        # Too short to be a card number, so it is refused on shape. A *wrong check digit*
-        # is no longer refused - see `test_a_failed_check_digit_is_reported_rather_than
-        # _refused` - so it cannot be used to drive the rejection path any more.
-        bad = "41111111111"
+        bad = "4111111111111112"  # valid shape, wrong check digit
         response = await authed_client.post(
             f"{api}/billing/cards",
             json={"label": "Typo", "kind": "credit", "card_number": bad},
@@ -216,13 +212,23 @@ class TestNoCardNumberIsPersisted:
         assert bad not in response.text
         assert bad[:6] not in response.text
 
-    async def test_a_mistyped_number_is_accepted_and_keeps_its_last_four(
+    async def test_a_failed_check_digit_is_refused(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        """The check digit does not block the save, and the label still comes from the tail."""
-        card = await add_card(authed_client, api, number="4111111111111112")
-        assert card["last4"] == "1112"
-        assert card["network"] == "visa"
+        """Luhn decides valid from invalid, so a mistyped number does not get stored.
+
+        The last four digits are how this card is recognised on an entry months later, and a
+        wrong label defeats the point of keeping one.
+        """
+        response = await authed_client.post(
+            f"{api}/billing/cards",
+            json={
+                "label": "Typo",
+                "kind": "credit",
+                "card_number": "4111111111111112",
+            },
+        )
+        assert response.status_code == 422, response.text
 
 
 # ---------------------------------------------------------------------------
