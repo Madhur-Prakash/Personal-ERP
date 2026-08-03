@@ -176,7 +176,7 @@ class Settings(BaseSettings):
     #: API rewrites the header or refuses outright. Left unset, the ``From`` header
     #: is omitted and Gmail fills in the authorised mailbox - correct, but without
     #: a display name.
-    gmail_sender: str | None = "synfin.no.reply@gmail.com"
+    gmail_sender: str | None = None
 
     #: The display name on outgoing mail, used when :attr:`gmail_sender` is set.
     email_from_name: str = "Personal ERP"
