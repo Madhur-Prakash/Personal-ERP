@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy import select
 
 from app.core.pagination import Page, PageParams
 from app.core.schemas import MessageResponse, with_computed
 from app.db.types import ZERO
+from app.modules.accounting.exports import export_filename, to_pdf, to_xlsx
 from app.modules.accounting.models import AccountType, EntryStatus
 from app.modules.accounting.reports import ReportingService
 from app.modules.accounting.schemas import (
@@ -25,6 +27,7 @@ from app.modules.accounting.schemas import (
     AccountUpdate,
     AccountWithBalance,
     BalanceSheet,
+    BalanceSheetView,
     CashFlowStatement,
     FiscalYearCreate,
     FiscalYearRead,
@@ -44,6 +47,12 @@ from app.modules.accounting.service import (
     JournalService,
     PostingService,
 )
+from app.modules.accounting.statement_periods import (
+    StatementPeriod,
+    resolve_statement_period,
+)
+from app.modules.analytics.router import CalendarDep as OrgCalendarDep
+from app.modules.analytics.router import OrgCalendar
 from app.modules.auth.dependencies import (
     ActiveOrganizationId,
     CurrentUser,
@@ -52,6 +61,7 @@ from app.modules.auth.dependencies import (
     RequestCtx,
     require_permission,
 )
+from app.modules.organizations.models import Organization
 from app.modules.rbac.permissions import Permission
 
 
@@ -520,6 +530,132 @@ async def balance_sheet(
     retained earnings until the year is closed.
     """
     return await reporting.balance_sheet(organization_id, as_of=as_of or today)
+
+
+async def _sheet_for(
+    reporting: ReportingService,
+    organization_id: uuid.UUID,
+    calendar: OrgCalendar,
+    period: StatementPeriod,
+    as_of: dt.date | None,
+    compare_to: dt.date | None,
+    comparative: bool,
+) -> tuple[BalanceSheet, BalanceSheet | None, dt.date, dt.date | None]:
+    """Resolve the dates once, then build one or two statements.
+
+    Shared by the JSON route and both exports so a downloaded file cannot disagree with what
+    was on screen when the button was pressed - which is the whole reason exports are built
+    from the same call rather than each assembling its own report.
+    """
+    if period is StatementPeriod.CUSTOM:
+        at = as_of or calendar.today
+        against = compare_to
+    else:
+        at, against = resolve_statement_period(
+            period, today=calendar.today, fiscal_start_month=calendar.fiscal_start_month
+        )
+        # An explicit `as_of` still wins, so a named period can be nudged without dropping
+        # to CUSTOM and losing its label.
+        at = as_of or at
+        against = compare_to or against
+
+    if not comparative:
+        against = None
+
+    sheet = await reporting.balance_sheet(organization_id, as_of=at)
+    prior = (
+        await reporting.balance_sheet(organization_id, as_of=against)
+        if against is not None
+        else None
+    )
+    return sheet, prior, at, against
+
+
+@reports_router.get(
+    "/balance-sheet/view",
+    response_model=BalanceSheetView,
+    summary="Balance sheet for a period, with its opening position",
+)
+async def balance_sheet_view(
+    organization_id: ActiveOrganizationId,
+    reporting: ReportingDep,
+    calendar: OrgCalendarDep,
+    _: Annotated[None, Depends(require_permission(Permission.REPORT_READ))],
+    period: Annotated[StatementPeriod, Query()] = StatementPeriod.TO_DATE,
+    as_of: Annotated[dt.date | None, Query()] = None,
+    compare_to: Annotated[dt.date | None, Query()] = None,
+    comparative: Annotated[bool, Query()] = True,
+) -> BalanceSheetView:
+    """The statement, and the position it opened from.
+
+    **A balance sheet is a position at a date, not a total over a window.** Asking for "the
+    balance sheet for this quarter" therefore means "as at the last day of it", and the period
+    only decides which date that is - see `statement_periods.py`. What makes the period
+    genuinely useful is the second column: the closing position of the day before the window
+    opened, which is this window's opening position, so the pair shows movement.
+
+    A window still running is cut off at today rather than reported to its future end, which
+    would date the statement to something that has not happened yet.
+    """
+    sheet, prior, _at, _against = await _sheet_for(
+        reporting, organization_id, calendar, period, as_of, compare_to, comparative
+    )
+    return BalanceSheetView(
+        period=period,
+        period_label=period.label,
+        sheet=sheet,
+        comparative=prior,
+        currency=calendar.currency,
+    )
+
+
+@reports_router.get(
+    "/balance-sheet/export",
+    summary="Balance sheet as a spreadsheet or a PDF",
+    response_class=Response,
+)
+async def balance_sheet_export(
+    organization_id: ActiveOrganizationId,
+    reporting: ReportingDep,
+    calendar: OrgCalendarDep,
+    session: DbSession,
+    _: Annotated[None, Depends(require_permission(Permission.REPORT_READ))],
+    fmt: Annotated[Literal["xlsx", "pdf"], Query(alias="format")] = "xlsx",
+    period: Annotated[StatementPeriod, Query()] = StatementPeriod.TO_DATE,
+    as_of: Annotated[dt.date | None, Query()] = None,
+    compare_to: Annotated[dt.date | None, Query()] = None,
+    comparative: Annotated[bool, Query()] = True,
+) -> Response:
+    """The same statement as a file, built from the same call that renders the screen.
+
+    `Content-Disposition: attachment` with a dated filename, so the browser saves rather than
+    tries to display it and the file says what it is once it is sitting in a downloads folder.
+    """
+    sheet, prior, at, _against = await _sheet_for(
+        reporting, organization_id, calendar, period, as_of, compare_to, comparative
+    )
+
+    name = (
+        await session.execute(
+            select(Organization.name).where(Organization.id == organization_id)
+        )
+    ).scalar_one_or_none() or "Balance sheet"
+
+    writer = to_xlsx if fmt == "xlsx" else to_pdf
+    payload = writer(
+        sheet, organization=name, currency=calendar.currency, comparative=prior
+    )
+    media = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if fmt == "xlsx"
+        else "application/pdf"
+    )
+    filename = export_filename("balance-sheet", at, fmt)
+    return Response(
+        content=payload,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @reports_router.get("/cash-flow", response_model=CashFlowStatement, summary="Cash flow")

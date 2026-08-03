@@ -1,7 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/format.dart';
 import '../../core/locale_settings.dart';
@@ -9,15 +13,18 @@ import '../../models/accounting.dart';
 import '../../models/analytics.dart';
 import '../../models/page.dart';
 import '../../state/data_providers.dart';
+import '../../state/providers.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/oklch.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/app_badge.dart';
+import '../../widgets/app_button.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/data_table.dart';
 import '../../widgets/info_tip.dart';
 import '../../widgets/metric_tile.dart';
 import '../../widgets/primitives.dart';
+import '../../widgets/toast.dart';
 import 'accounting_charts.dart';
 import 'report_range.dart';
 
@@ -816,22 +823,103 @@ class _ProfitAndLossTabState extends ConsumerState<_ProfitAndLossTab>
 // =============================================================================
 // Balance sheet
 // =============================================================================
-class _BalanceSheetTab extends ConsumerWidget {
+/// The balance sheet, for a chosen window, exportable to a file.
+///
+/// **A balance sheet is a position at a date, not a total over a period** - so the period
+/// picker chooses *which date*, and what it buys you is the second column: the position the
+/// day before the window opened. That pair is what shows movement, and it is how the
+/// statement is presented on paper.
+///
+/// A [ConsumerStatefulWidget] rather than the plain [ConsumerWidget] it was, because the
+/// chosen window is local screen state - nothing else in the app needs to know which quarter
+/// somebody is looking at.
+class _BalanceSheetTab extends ConsumerStatefulWidget {
   const _BalanceSheetTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final AppTokens t = context.tokens;
-    final AsyncValue<BalanceSheet> sheet = ref.watch(balanceSheetProvider);
-    final BalanceSheet? data = sheet.valueOrNull;
-    final String currency = localeSettings().currency;
+  ConsumerState<_BalanceSheetTab> createState() => _BalanceSheetTabState();
+}
 
-    if (data == null) {
-      return AppCard(
-        padding: const EdgeInsets.all(20),
-        child: const Skeleton(height: 280),
+class _BalanceSheetTabState extends ConsumerState<_BalanceSheetTab> {
+  BalanceSheetQuery _query = const BalanceSheetQuery();
+
+  /// Which export is in flight, so both buttons disable together and the right one says so.
+  String? _saving;
+
+  /// Write an export to the user's Downloads folder and say where it went.
+  ///
+  /// No save dialog: `file_selector` would be another dependency and another platform
+  /// channel for a file whose name the server already chose. Naming the full path in the
+  /// toast is what makes that acceptable - a file saved somewhere the user was not told
+  /// about is worse than one extra click.
+  Future<void> _export(String format) async {
+    setState(() => _saving = format);
+    try {
+      final List<int> data = await ref
+          .read(accountingApiProvider)
+          .exportBalanceSheet(
+            format: format,
+            period: _query.period,
+            asOf: _query.period == StatementPeriod.custom ? _query.asOf : null,
+            compareTo: _query.period == StatementPeriod.custom
+                ? _query.compareTo
+                : null,
+          );
+
+      final Directory? downloads = await getDownloadsDirectory();
+      final Directory target =
+          downloads ?? await getApplicationDocumentsDirectory();
+      final BalanceSheetView? view = ref
+          .read(balanceSheetViewProvider(_query))
+          .valueOrNull;
+      final String stamp = view?.sheet.asOf ?? 'export';
+      final File file = File(
+        p.join(target.path, 'balance-sheet-$stamp.$format'),
       );
+      await file.writeAsBytes(data);
+
+      if (!mounted) return;
+      context.toastSuccess(
+        'Saved balance-sheet-$stamp.$format',
+        description: file.path,
+      );
+    } catch (error) {
+      if (mounted) {
+        context.toastApiError(error, 'Could not export the $format file');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = null);
     }
+  }
+
+  Future<void> _pickDate({required bool isAsOf}) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      helpText: isAsOf ? 'Position as at' : 'Compare with',
+    );
+    if (picked == null) return;
+    final String iso = picked.toIso8601String().split('T').first;
+    setState(
+      () => _query = isAsOf
+          ? _query.copyWith(asOf: iso)
+          : _query.copyWith(compareTo: iso),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppTokens t = context.tokens;
+    final AsyncValue<BalanceSheetView> async = ref.watch(
+      balanceSheetViewProvider(_query),
+    );
+    final BalanceSheetView? view = async.valueOrNull;
+    final BalanceSheet? data = view?.sheet;
+    final BalanceSheet? prior = view?.comparative;
+    final String currency = view?.currency ?? localeSettings().currency;
+    final bool custom = _query.period == StatementPeriod.custom;
 
     return AppCard(
       child: Column(
@@ -839,72 +927,201 @@ class _BalanceSheetTab extends ConsumerWidget {
         children: <Widget>[
           CardHeader(
             title: 'Balance sheet',
-            description: 'As at ${formatDate(data.asOf)}',
-            action: AppBadge(
-              data.isBalanced ? 'Balanced' : 'Out of balance',
-              tone: data.isBalanced ? BadgeTone.success : BadgeTone.danger,
-              dot: true,
-            ),
+            description: data == null
+                ? 'Built from every posted entry'
+                : prior == null
+                ? 'As at ${formatDate(data.asOf)}'
+                : 'As at ${formatDate(data.asOf)}, beside ${formatDate(prior.asOf)}',
+            action: data == null
+                ? null
+                : AppBadge(
+                    data.isBalanced ? 'Balanced' : 'Out of balance',
+                    tone: data.isBalanced
+                        ? BadgeTone.success
+                        : BadgeTone.danger,
+                    dot: true,
+                  ),
           ),
           CardBody(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              spacing: 20,
+              spacing: 16,
               children: <Widget>[
-                _ReportSection(
-                  title: 'Assets',
-                  lines: data.assets,
-                  total: data.totalAssets,
-                  currency: currency,
-                ),
-                _ReportSection(
-                  title: 'Liabilities',
-                  lines: data.liabilities,
-                  total: data.totalLiabilities,
-                  currency: currency,
-                ),
-                _ReportSection(
-                  title: 'Equity',
-                  lines: data.equity,
-                  total: data.totalEquity,
-                  currency: currency,
-                ),
                 Container(
-                  padding: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
-                    border: Border(top: BorderSide(color: t.border)),
+                    border: Border(bottom: BorderSide(color: t.border)),
                   ),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    spacing: 12,
                     children: <Widget>[
-                      Text(
-                        'Liabilities + equity',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: t.content,
+                      // The shared [Segmented] control, not a dropdown - the same one the
+                      // report range above uses. Six mutually exclusive windows are worth
+                      // showing at once: the choice is the point of the screen, and a closed
+                      // menu hides five of them behind a click.
+                      Segmented(
+                        active: _query.period.wire,
+                        onChanged: (String next) => setState(
+                          () => _query = _query.copyWith(
+                            period: StatementPeriod.parse(next),
+                          ),
                         ),
+                        segments: <(String, String, String?)>[
+                          for (final StatementPeriod period
+                              in StatementPeriod.values)
+                            (period.wire, period.label, null),
+                        ],
                       ),
+                      // Only for a custom window. On a named one the server owns both
+                      // dates, and offering them here would invite someone to set one and
+                      // quietly override the period they picked.
+                      if (custom) ...<Widget>[
+                        AppButton(
+                          onPressed: () => _pickDate(isAsOf: true),
+                          variant: AppButtonVariant.secondary,
+                          leftIcon: LucideIcons.calendar,
+                          label: _query.asOf ?? 'As at',
+                        ),
+                        AppButton(
+                          onPressed: () => _pickDate(isAsOf: false),
+                          variant: AppButtonVariant.secondary,
+                          leftIcon: LucideIcons.calendar,
+                          label: _query.compareTo ?? 'Compare with',
+                        ),
+                      ],
                       const Spacer(),
-                      Text(
-                        // Displayed for the reader to check against total assets. The
-                        // authoritative check is `isBalanced`, computed server-side.
-                        formatMoney(
-                          sumMoney(<String>[
-                            data.totalLiabilities,
-                            data.totalEquity,
-                          ]),
-                          currency: currency,
-                        ),
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: t.content,
-                          fontFeatures: tabularFigures,
-                        ),
+                      AppButton(
+                        onPressed: data == null || _saving != null
+                            ? null
+                            : () => _export('xlsx'),
+                        variant: AppButtonVariant.secondary,
+                        leftIcon: LucideIcons.sheet,
+                        label: _saving == 'xlsx' ? 'Saving…' : 'Excel',
+                      ),
+                      AppButton(
+                        onPressed: data == null || _saving != null
+                            ? null
+                            : () => _export('pdf'),
+                        variant: AppButtonVariant.secondary,
+                        leftIcon: LucideIcons.fileDown,
+                        label: _saving == 'pdf' ? 'Saving…' : 'PDF',
                       ),
                     ],
                   ),
                 ),
+
+                if (data == null)
+                  const Skeleton(height: 260)
+                else ...<Widget>[
+                  if (prior != null)
+                    Row(
+                      children: <Widget>[
+                        const Spacer(),
+                        for (final String label in <String>[
+                          formatDate(data.asOf),
+                          formatDate(prior.asOf),
+                        ])
+                          SizedBox(
+                            width: 132,
+                            child: Text(
+                              label,
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.6,
+                                color: t.contentMuted,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  _ReportSection(
+                    title: 'Assets',
+                    lines: data.assets,
+                    total: data.totalAssets,
+                    currency: currency,
+                    prior: prior?.assets,
+                    priorTotal: prior?.totalAssets,
+                  ),
+                  _ReportSection(
+                    title: 'Liabilities',
+                    lines: data.liabilities,
+                    total: data.totalLiabilities,
+                    currency: currency,
+                    prior: prior?.liabilities,
+                    priorTotal: prior?.totalLiabilities,
+                  ),
+                  _ReportSection(
+                    title: 'Equity',
+                    lines: data.equity,
+                    total: data.totalEquity,
+                    currency: currency,
+                    prior: prior?.equity,
+                    priorTotal: prior?.totalEquity,
+                  ),
+                  Container(
+                    padding: const EdgeInsets.only(top: 12),
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: t.border)),
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        Text(
+                          'Liabilities + equity',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: t.content,
+                          ),
+                        ),
+                        const Spacer(),
+                        SizedBox(
+                          width: 132,
+                          child: Text(
+                            // Displayed for the reader to check against total assets. The
+                            // authoritative check is `isBalanced`, computed server-side.
+                            formatMoney(
+                              sumMoney(<String>[
+                                data.totalLiabilities,
+                                data.totalEquity,
+                              ]),
+                              currency: currency,
+                            ),
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: t.content,
+                              fontFeatures: tabularFigures,
+                            ),
+                          ),
+                        ),
+                        if (prior != null)
+                          SizedBox(
+                            width: 132,
+                            child: Text(
+                              formatMoney(
+                                sumMoney(<String>[
+                                  prior.totalLiabilities,
+                                  prior.totalEquity,
+                                ]),
+                                currency: currency,
+                              ),
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: t.contentMuted,
+                                fontFeatures: tabularFigures,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -914,15 +1131,14 @@ class _BalanceSheetTab extends ConsumerWidget {
   }
 }
 
-// =============================================================================
-// Shared report pieces
-// =============================================================================
 class _ReportSection extends StatelessWidget {
   const _ReportSection({
     required this.title,
     required this.lines,
     required this.total,
     required this.currency,
+    this.prior,
+    this.priorTotal,
   });
 
   final String title;
@@ -930,9 +1146,22 @@ class _ReportSection extends StatelessWidget {
   final String total;
   final String currency;
 
+  /// The same section at the comparison date, when one was asked for.
+  final List<ReportLine>? prior;
+  final String? priorTotal;
+
   @override
   Widget build(BuildContext context) {
     final AppTokens t = context.tokens;
+
+    // Matched by **label, never by position**: the two dates can hold different accounts -
+    // one opened mid-period - so pairing by index would put an unrelated figure beside a row
+    // and print a confident wrong number. A row with no counterpart shows a dash.
+    final Map<String, String> before = <String, String>{
+      for (final ReportLine line in prior ?? const <ReportLine>[])
+        line.label: line.amount,
+    };
+    final bool comparing = priorTotal != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -975,14 +1204,38 @@ class _ReportSection extends StatelessWidget {
                       style: TextStyle(fontSize: 13, color: t.contentSecondary),
                     ),
                   ),
-                  Text(
-                    formatMoney(line.amount, currency: currency),
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: t.content,
-                      fontFeatures: tabularFigures,
+                  SizedBox(
+                    width: 132,
+                    child: Text(
+                      formatMoney(line.amount, currency: currency),
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: t.content,
+                        fontFeatures: tabularFigures,
+                      ),
                     ),
                   ),
+                  if (comparing)
+                    SizedBox(
+                      width: 132,
+                      child: Text(
+                        // A dash, not a zero: the account did not exist at the earlier
+                        // date, and "0.00" would assert a balance never recorded.
+                        before.containsKey(line.label)
+                            ? formatMoney(
+                                before[line.label],
+                                currency: currency,
+                              )
+                            : '-',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: t.contentMuted,
+                          fontFeatures: tabularFigures,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

@@ -263,9 +263,54 @@ export const accountingApi = {
   profitAndLoss: (params: { from_date: string; to_date: string }) =>
     api.get<ProfitAndLoss>('/reports/profit-and-loss', { params }),
 
+  /**
+   * The balance sheet for a period, with the position it opened from.
+   *
+   * **A balance sheet is a position at a date, not a total over a window**, so a period
+   * resolves to a single `as_of` - the last day of it - and the period's value is the second
+   * column: the closing position of the day before it opened. Resolved server-side so this
+   * client and the desktop one cannot disagree about what "this quarter" means for an
+   * organization whose year starts in April.
+   */
+  balanceSheetView: (params?: {
+    period?: StatementPeriod;
+    as_of?: string;
+    compare_to?: string;
+    comparative?: boolean;
+  }) => api.get<BalanceSheetView>('/reports/balance-sheet/view', { params }),
+
+  /** Download the same statement as a spreadsheet or a PDF. */
+  exportBalanceSheet: (
+    format: 'xlsx' | 'pdf',
+    params?: {
+      period?: StatementPeriod;
+      as_of?: string;
+      compare_to?: string;
+      comparative?: boolean;
+    },
+  ) =>
+    api.download('/reports/balance-sheet/export', `balance-sheet.${format}`, {
+      params: { ...params, format },
+    }),
+
   balanceSheet: (params?: { as_of?: string }) =>
     api.get<BalanceSheet>('/reports/balance-sheet', { params }),
 
   ledger: (accountId: string, params: { from_date: string; to_date: string }) =>
     api.get<AccountLedger>(`/accounts/${accountId}/ledger`, { params }),
 };
+
+/** The named windows a statement can be asked for - see `statement_periods.py`. */
+export type StatementPeriod =
+  'to_date' | 'this_quarter' | 'last_quarter' | 'this_fiscal_year' | 'last_fiscal_year' | 'custom';
+
+export interface BalanceSheetView {
+  period: StatementPeriod;
+  /** What to call the window on screen, decided server-side so both clients agree. */
+  period_label: string;
+  sheet: BalanceSheet;
+  /** The position the period opened from, or null when none was asked for. A whole sheet
+   *  rather than a second amount per line: the two dates can hold different accounts. */
+  comparative: BalanceSheet | null;
+  currency: string;
+}

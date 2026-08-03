@@ -319,6 +319,59 @@ final AutoDisposeFutureProvider<TrialBalance> trialBalanceProvider =
       return retrying(() => ref.read(accountingApiProvider).trialBalance());
     });
 
+/// The window a balance sheet is being asked for, as one value so the family has one key.
+class BalanceSheetQuery {
+  const BalanceSheetQuery({
+    this.period = StatementPeriod.thisFiscalYear,
+    this.asOf,
+    this.compareTo,
+  });
+
+  final StatementPeriod period;
+  final String? asOf;
+  final String? compareTo;
+
+  BalanceSheetQuery copyWith({
+    StatementPeriod? period,
+    String? asOf,
+    String? compareTo,
+  }) => BalanceSheetQuery(
+    period: period ?? this.period,
+    asOf: asOf ?? this.asOf,
+    compareTo: compareTo ?? this.compareTo,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is BalanceSheetQuery &&
+      other.period == period &&
+      other.asOf == asOf &&
+      other.compareTo == compareTo;
+
+  @override
+  int get hashCode => Object.hash(period, asOf, compareTo);
+}
+
+final AutoDisposeFutureProviderFamily<BalanceSheetView, BalanceSheetQuery>
+balanceSheetViewProvider = FutureProvider.autoDispose
+    .family<BalanceSheetView, BalanceSheetQuery>((
+      Ref ref,
+      BalanceSheetQuery query,
+    ) {
+      bindCache(ref);
+      final bool custom = query.period == StatementPeriod.custom;
+      return retrying(
+        () => ref
+            .read(accountingApiProvider)
+            .balanceSheetView(
+              period: query.period,
+              // Only for a custom window - see `balanceSheetView`.
+              asOf: custom ? query.asOf : null,
+              compareTo: custom ? query.compareTo : null,
+            ),
+      );
+    });
+
 final AutoDisposeFutureProvider<BalanceSheet> balanceSheetProvider =
     FutureProvider.autoDispose<BalanceSheet>((Ref ref) {
       bindCache(ref);
@@ -701,6 +754,7 @@ void invalidateLedger(WidgetRef ref) {
   ref.invalidate(controlChecksProvider);
   ref.invalidate(trialBalanceProvider);
   ref.invalidate(balanceSheetProvider);
+  ref.invalidate(balanceSheetViewProvider);
   ref.invalidate(profitAndLossProvider);
   ref.invalidate(accountsProvider);
   ref.invalidate(journalEntriesProvider);

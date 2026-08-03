@@ -113,6 +113,21 @@ class ApiClient {
   Future<T> get<T>(String path, {Map<String, dynamic>? query}) =>
       _send<T>(() => _dio.get<dynamic>(path, queryParameters: _clean(query)));
 
+  /// Fetch a response body as raw bytes - a report export, not JSON.
+  ///
+  /// Goes through the same [Dio] instance as everything else on purpose, so the export
+  /// carries the access token and passes through the refresh interceptor. A separate plain
+  /// HTTP call would have to reimplement both, and would 401 the moment a token aged out
+  /// mid-session.
+  Future<List<int>> bytes(String path, {Map<String, dynamic>? query}) =>
+      _send<List<int>>(
+        () => _dio.get<dynamic>(
+          path,
+          queryParameters: _clean(query),
+          options: Options(responseType: ResponseType.bytes),
+        ),
+      );
+
   Future<T> post<T>(
     String path, {
     Object? body,

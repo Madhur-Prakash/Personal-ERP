@@ -56,6 +56,48 @@ class AccountingApi {
         await _client.get<Json>('/reports/profit-and-loss', query: range.query),
       );
 
+  /// The balance sheet for a window, with the position it opened from.
+  ///
+  /// Dates are only sent for [StatementPeriod.custom]: on a named period the server owns
+  /// both, and passing a half-filled pair would silently override the period asked for.
+  Future<BalanceSheetView> balanceSheetView({
+    StatementPeriod period = StatementPeriod.thisFiscalYear,
+    String? asOf,
+    String? compareTo,
+    bool comparative = true,
+  }) async => BalanceSheetView.fromJson(
+    await _client.get<Json>(
+      '/reports/balance-sheet/view',
+      query: <String, dynamic>{
+        'period': period.wire,
+        'as_of': ?asOf,
+        'compare_to': ?compareTo,
+        'comparative': comparative,
+      },
+    ),
+  );
+
+  /// The same statement as a spreadsheet or a PDF, as raw bytes.
+  ///
+  /// Built from the same call that renders the screen, so a saved file cannot disagree with
+  /// what was on display when the button was pressed.
+  Future<List<int>> exportBalanceSheet({
+    required String format,
+    StatementPeriod period = StatementPeriod.thisFiscalYear,
+    String? asOf,
+    String? compareTo,
+    bool comparative = true,
+  }) => _client.bytes(
+    '/reports/balance-sheet/export',
+    query: <String, dynamic>{
+      'format': format,
+      'period': period.wire,
+      'as_of': ?asOf,
+      'compare_to': ?compareTo,
+      'comparative': comparative,
+    },
+  );
+
   Future<BalanceSheet> balanceSheet({String? asOf}) async =>
       BalanceSheet.fromJson(
         await _client.get<Json>(

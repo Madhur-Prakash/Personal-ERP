@@ -285,6 +285,69 @@ class ProfitAndLoss {
   );
 }
 
+/// The named windows a balance sheet can be asked for.
+///
+/// **A balance sheet is a position at a date, not a total over a window**, so a period only
+/// decides *which date* - the last day of it. What the period actually buys you is the
+/// comparative: the position the day before it opened. See the backend's
+/// `statement_periods.py`.
+///
+/// Resolved server-side, which is why these carry no date arithmetic. An organization's year
+/// may start in April, and this app working out "this quarter" for itself would diverge from
+/// the web client with nothing failing.
+enum StatementPeriod {
+  toDate('to_date', 'As things stand'),
+  thisQuarter('this_quarter', 'This quarter'),
+  lastQuarter('last_quarter', 'Last quarter'),
+  thisFiscalYear('this_fiscal_year', 'This financial year'),
+  lastFiscalYear('last_fiscal_year', 'Last financial year'),
+  custom('custom', 'Custom dates');
+
+  const StatementPeriod(this.wire, this.label);
+
+  final String wire;
+  final String label;
+
+  static StatementPeriod parse(String? value) =>
+      StatementPeriod.values.firstWhere(
+        (StatementPeriod p) => p.wire == value,
+        orElse: () => StatementPeriod.toDate,
+      );
+}
+
+/// A balance sheet, and optionally the position it opened from.
+///
+/// [comparative] is a whole sheet rather than a second amount per line, because the two dates
+/// can hold different accounts - one opened mid-period - and a per-line pair would have
+/// nowhere to put a row that exists on only one side.
+class BalanceSheetView {
+  const BalanceSheetView({
+    required this.period,
+    required this.periodLabel,
+    required this.sheet,
+    required this.currency,
+    this.comparative,
+  });
+
+  final StatementPeriod period;
+
+  /// What to call the window on screen, decided server-side so both clients agree.
+  final String periodLabel;
+  final BalanceSheet sheet;
+  final BalanceSheet? comparative;
+  final String currency;
+
+  factory BalanceSheetView.fromJson(Json json) => BalanceSheetView(
+    period: StatementPeriod.parse(strOrNull(json, 'period')),
+    periodLabel: strOrNull(json, 'period_label') ?? '',
+    sheet: BalanceSheet.fromJson(mapOf(json, 'sheet')),
+    comparative: json['comparative'] is Map<String, dynamic>
+        ? BalanceSheet.fromJson(json['comparative'] as Json)
+        : null,
+    currency: strOrNull(json, 'currency') ?? 'INR',
+  );
+}
+
 class BalanceSheet {
   const BalanceSheet({
     required this.asOf,

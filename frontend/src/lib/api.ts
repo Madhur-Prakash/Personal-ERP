@@ -278,6 +278,33 @@ export const api = {
     const { data } = await http.put<T>(url, body, config);
     return data;
   },
+  /**
+   * Fetch a file and hand it to the browser as a download.
+   *
+   * **Not a plain `<a href>`**, which is the obvious approach and does not work here: the
+   * export routes are guarded like every other endpoint, and a bare link carries no
+   * `Authorization` header, so the browser would navigate to a 401. So the bytes come through
+   * the same axios instance as everything else - interceptors, refresh-on-401 and all - and
+   * are then handed over as an object URL.
+   *
+   * The URL is revoked immediately afterwards. A blob URL pins its data in memory for the
+   * life of the document otherwise, and a few exports of a large report add up.
+   */
+  async download(url: string, filename: string, config?: AxiosRequestConfig): Promise<void> {
+    const response = await http.get<Blob>(url, { ...config, responseType: 'blob' });
+    const href = URL.createObjectURL(response.data);
+    try {
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      URL.revokeObjectURL(href);
+    }
+  },
+
   async delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
     const { data } = await http.delete<T>(url, config);
     return data;

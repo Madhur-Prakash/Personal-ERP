@@ -26,6 +26,7 @@ from app.modules.accounting.models import (
     JournalType,
     PeriodStatus,
 )
+from app.modules.accounting.statement_periods import StatementPeriod
 
 # ---------------------------------------------------------------------------
 # Field types
@@ -445,6 +446,22 @@ class BalanceSheet(ResponseSchema):
     #: sheet would not balance.
     current_period_earnings: Decimal
     is_balanced: bool
+
+
+class BalanceSheetView(ResponseSchema):
+    """A balance sheet, optionally beside the position it opened from.
+
+    `comparative` is a whole balance sheet rather than a second amount per line, because the
+    two dates can hold different accounts - one opened mid-period - and a per-line pair would
+    have nowhere to put a row that exists on only one side.
+    """
+
+    period: StatementPeriod
+    #: What to call the window on screen. Computed here so both clients say the same thing.
+    period_label: str
+    sheet: BalanceSheet
+    comparative: BalanceSheet | None = None
+    currency: str
 
 
 class CashFlowStatement(ResponseSchema):

@@ -40,6 +40,14 @@ dependencies = [
     # periods depend on them, so it is a real runtime dependency, not dev-only.
     "tzdata>=2025.2",
     "minio>=7.2.20",
+    # --- Report exports ---
+    # `openpyxl` writes real .xlsx; a CSV renamed would open in Excel but carry no
+    # formatting, no column widths, and no way to mark a figure as currency.
+    # `fpdf2` rather than reportlab or weasyprint: a balance sheet is a table of labels and
+    # numbers, and fpdf2 does that in pure Python with no system libraries - weasyprint
+    # would pull cairo and pango into the image for a document with no HTML in it.
+    "openpyxl>=3.1.5",
+    "fpdf2>=2.8.7",
 ]
 
 [project.optional-dependencies]
@@ -67,6 +75,7 @@ dev = [
     "ruff>=0.14.0",
     "mypy>=1.18.0",
     "types-passlib>=1.7.7",
+    "types-openpyxl>=3.1.5.20260724",
 ]
 
 # =============================================================================
