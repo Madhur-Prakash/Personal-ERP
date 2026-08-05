@@ -1,5 +1,5 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { Eye, EyeOff, Hash, Key, KeyIcon, KeyRound, KeyRoundIcon, LockKeyholeIcon, Mail } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, LockKeyholeIcon, Mail } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';

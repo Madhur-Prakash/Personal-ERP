@@ -122,9 +122,47 @@ export class ApiError extends Error {
     return this.status === 404;
   }
 
+  get isRateLimited(): boolean {
+    return this.status === 429;
+  }
+
   /** True for conditions a retry might resolve - offline, timeout, 5xx. */
   get isRetryable(): boolean {
     return this.status === 0 || this.status >= 500;
+  }
+
+  /**
+   * How long to wait before retrying, in seconds, or `undefined` if unknown.
+   *
+   * The API sends this two ways - a `Retry-After` header and
+   * `details.retry_after_seconds` - and this reads the body, because the header is only
+   * legible cross-origin when the server remembers to list it in `expose_headers`.
+   * The body always survives.
+   */
+  get retryAfterSeconds(): number | undefined {
+    const raw = this.details['retry_after_seconds'];
+    const seconds = typeof raw === 'number' ? raw : Number(raw);
+    return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : undefined;
+  }
+
+  /**
+   * A displayable "too many requests" message, with the wait when the server gave one.
+   *
+   * Exists because the server's own message is `"Too many requests. Slow down."` - correct
+   * but unhelpful, since the one thing a user needs is *how long*. A rate limit with no
+   * stated wait is indistinguishable from the app being broken, so people retry
+   * immediately, which is exactly what keeps the bucket empty.
+   */
+  get rateLimitMessage(): string {
+    const seconds = this.retryAfterSeconds;
+    if (seconds === undefined) {
+      return 'Too many attempts. Please wait a moment and try again.';
+    }
+    if (seconds < 60) {
+      return `Too many attempts. Please try again in ${seconds} second${seconds === 1 ? '' : 's'}.`;
+    }
+    const minutes = Math.ceil(seconds / 60);
+    return `Too many attempts. Please try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
   }
 }
 

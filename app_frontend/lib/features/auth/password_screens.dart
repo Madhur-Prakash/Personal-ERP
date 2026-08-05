@@ -50,10 +50,33 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
 
     try {
       await ref.read(authApiProvider).forgotPassword(email);
-    } catch (_) {
-      // Swallowed deliberately. The server responds identically whether or not the
-      // account exists, and surfacing a transport error differently here would
-      // reintroduce the enumeration signal the API works to avoid.
+    } catch (error) {
+      // Rate limits and server failures are reported; nothing else is.
+      //
+      // The distinction is what keeps the enumeration guarantee intact. The API answers
+      // 200 identically whether or not the address has an account, so a 429 or a 5xx
+      // cannot be *about* the address - a 429 is about how often this client has asked,
+      // and a 5xx is about the server. Neither reveals anything, so hiding them buys no
+      // privacy and costs the user everything: this used to swallow all of it and advance
+      // anyway, leaving someone waiting on the next screen for an email that was never
+      // sent, with a rate-limit warning visible only in the server log.
+      //
+      // Anything else still falls through to the navigation below, so an unexpected
+      // status cannot become an oracle by accident.
+      final ApiError apiError = ApiError.from(error);
+      if (apiError.isRateLimited || apiError.isRetryable) {
+        if (!mounted) return;
+        final String message = apiError.isRateLimited
+            ? apiError.rateLimitMessage
+            : 'We could not send the code just now. Please try again in a moment.';
+        setState(() {
+          _error = message;
+          _submitting = false;
+        });
+        // Deliberately no navigation: the code was not sent, so the code-entry screen
+        // has nothing to offer, and landing there is what made this failure invisible.
+        return;
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -177,6 +200,27 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     } catch (error) {
       if (!mounted) return;
       final ApiError apiError = ApiError.from(error);
+
+      // Rate limiting first, and as a toast rather than a field error. It is not a
+      // complaint about any input - the code and the password may both be perfect - so
+      // pinning it under one of them tells the user to go and fix something that is not
+      // broken. This previously fell through to the catch-all below and appeared under
+      // "New password" as "Too many requests. Slow down.", with no wait time.
+      if (apiError.isRateLimited) {
+        context.toastError(
+          'Too many attempts',
+          description: apiError.rateLimitMessage,
+        );
+        return;
+      }
+      if (apiError.isRetryable) {
+        context.toastError(
+          'Could not reach the server',
+          description: 'Your code is still valid. Please try again in a moment.',
+        );
+        return;
+      }
+
       final String? passwordProblem = apiError.fieldErrors['password'];
       setState(() {
         if (passwordProblem != null) {

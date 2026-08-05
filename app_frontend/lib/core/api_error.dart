@@ -49,9 +49,46 @@ class ApiError implements Exception {
   bool get isUnauthenticated => status == 401;
   bool get isForbidden => status == 403;
   bool get isNotFound => status == 404;
+  bool get isRateLimited => status == 429;
 
   /// True for conditions a retry might resolve - offline, timeout, 5xx.
   bool get isRetryable => status == 0 || status >= 500;
+
+  /// How long to wait before retrying, in seconds, or null if unknown.
+  ///
+  /// The API sends this two ways - a `Retry-After` header and
+  /// `details.retry_after_seconds` - and this reads the body, because the header is only
+  /// legible cross-origin when the server remembers to list it in `expose_headers`. The
+  /// body always survives.
+  int? get retryAfterSeconds {
+    final Object? raw = details['retry_after_seconds'];
+    final num? seconds = raw is num ? raw : num.tryParse('$raw');
+    if (seconds == null || seconds <= 0) return null;
+    return seconds.ceil();
+  }
+
+  /// A displayable "too many requests" message, with the wait when the server gave one.
+  ///
+  /// Exists because the server's own message is `"Too many requests. Slow down."` -
+  /// correct but unhelpful, since the one thing a user needs is *how long*. A rate limit
+  /// with no stated wait is indistinguishable from the app being broken, so people retry
+  /// immediately, which is exactly what keeps the bucket empty.
+  ///
+  /// Kept worded identically to `frontend/src/lib/api.ts` so the same condition does not
+  /// read as two different problems depending on which client the user is holding.
+  String get rateLimitMessage {
+    final int? seconds = retryAfterSeconds;
+    if (seconds == null) {
+      return 'Too many attempts. Please wait a moment and try again.';
+    }
+    if (seconds < 60) {
+      return 'Too many attempts. Please try again in $seconds '
+          'second${seconds == 1 ? '' : 's'}.';
+    }
+    final int minutes = (seconds / 60).ceil();
+    return 'Too many attempts. Please try again in $minutes '
+        'minute${minutes == 1 ? '' : 's'}.';
+  }
 
   /// Normalise anything thrown by Dio, or by us, into one of these.
   static ApiError from(Object error) {
