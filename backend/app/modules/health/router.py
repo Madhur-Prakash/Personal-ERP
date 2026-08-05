@@ -26,18 +26,19 @@ from app.core.logging import get_logger
 from app.core.redis import check_redis_health
 from app.core.schemas import HealthStatus
 from app.db.session import check_database_health
+from app.core.limiter import limiter
 
 log = get_logger(__name__)
 
 router = APIRouter(prefix="/health", tags=["Health"])
 
-
+@limiter.limit("3/minute")
 @router.get("/live", summary="Liveness probe", status_code=status.HTTP_200_OK)
 async def liveness() -> dict[str, str]:
     """Is the process alive? No dependency checks - see the module docstring."""
     return {"status": "alive"}
 
-
+@limiter.limit("3/minute")
 @router.get("/ready", summary="Readiness probe")
 async def readiness(response: Response) -> dict[str, object]:
     """Can this instance serve traffic?
