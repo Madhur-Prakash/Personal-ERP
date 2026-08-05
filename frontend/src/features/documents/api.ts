@@ -183,9 +183,6 @@ export const documentsApi = {
 
   confirm: (id: string, bill: BillFromDocument) =>
     api.post<ConfirmResult>(`/documents/${id}/confirm`, { bill }),
-  /** Mark a document not usable. The reason is optional - who and when are audited anyway. */
-  reject: (id: string, reason?: string) =>
-    api.post<Document>(`/documents/${id}/reject`, { reason: reason ?? null }),
   remove: (id: string) => api.delete<{ message: string }>(`/documents/${id}`),
 
   /**

@@ -24,7 +24,6 @@ import {
   RefreshCw,
   Trash2,
   Upload,
-  XCircle,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -388,20 +387,6 @@ function DocumentReview({ id, onClose }: { id: string; onClose: () => void }) {
       toast.error(error instanceof ApiError ? error.message : 'Could not re-read'),
   });
 
-  const reject = useMutation({
-    mutationFn: () => documentsApi.reject(id),
-    onSuccess: () => {
-      invalidate();
-      toast.success('Document rejected', {
-        description: 'It stays on file and in the audit trail, marked as not usable.',
-      });
-      // Back to the inbox, like Delete. Staying put left the screen showing the document
-      // exactly as before with a toast over it, which reads as "nothing happened".
-      onClose();
-    },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Failed'),
-  });
-
   const remove = useMutation({
     mutationFn: () => documentsApi.remove(id),
     onSuccess: () => {
@@ -435,27 +420,10 @@ function DocumentReview({ id, onClose }: { id: string; onClose: () => void }) {
             <RefreshCw className="h-3.5 w-3.5" aria-hidden />
             Read again
           </Button>
-          {/* A plain yes/no. This used to prompt for a reason before it would do
-              anything, which put a text box in front of a decision that is usually
-              self-evident - a blank page, the wrong file - and collected "no" as often as
-              anything worth reading. Who rejected it and when are on the audit row
-              either way. */}
-          <Button
-            variant="ghost"
-            onClick={() => {
-              if (
-                window.confirm(
-                  'Reject this document?\n\nIt will be marked as not usable and cannot be entered as a bill. The file and its recognised text are kept.',
-                )
-              ) {
-                reject.mutate();
-              }
-            }}
-            disabled={reject.isPending || document.status === 'confirmed'}
-          >
-            <XCircle className="h-3.5 w-3.5" aria-hidden />
-            Reject
-          </Button>
+          {/* No Reject action. Two buttons for "I do not want this document" was one too
+              many - Delete says it plainly and refuses on anything backing a posted bill,
+              which is the only case rejecting protected. Documents already rejected keep
+              their status and still render; nothing here can create a new one. */}
           <Button
             variant="ghost"
             onClick={() => {

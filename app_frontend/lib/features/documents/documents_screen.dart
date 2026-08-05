@@ -540,35 +540,6 @@ class _DocumentReview extends ConsumerWidget {
       }
     }
 
-    // A plain yes/no. This used to demand a typed reason before it would do anything,
-    // which put a text box in front of a decision that is usually self-evident - a blank
-    // page, the wrong file - and collected "no" as often as anything worth reading. Who
-    // rejected it and when are on the audit row regardless.
-    Future<void> reject() async {
-      final bool confirmed = await confirmAction(
-        context,
-        title: 'Reject this document?',
-        message:
-            'It will be marked as not usable and cannot be entered as a bill. The file '
-            'and its recognised text are kept.',
-        confirmLabel: 'Reject',
-      );
-      if (!confirmed) return;
-      try {
-        await ref.read(documentsApiProvider).reject(id);
-        invalidate();
-        if (context.mounted) context.toastSuccess('Document rejected');
-        // Back to the inbox, like Delete. Staying put left the screen showing the
-        // document exactly as before with a toast over it, which reads as "nothing
-        // happened".
-        onClose();
-      } catch (error) {
-        if (context.mounted) {
-          context.toastApiError(error, 'Could not reject it');
-        }
-      }
-    }
-
     Future<void> remove() async {
       final bool confirmed = await confirmAction(
         context,
@@ -610,13 +581,10 @@ class _DocumentReview extends ConsumerWidget {
               leftIcon: LucideIcons.refreshCw,
               label: 'Read again',
             ),
-            const SizedBox(width: 8),
-            AppButton(
-              onPressed: document.status == 'confirmed' ? null : reject,
-              variant: AppButtonVariant.ghost,
-              leftIcon: LucideIcons.circleX,
-              label: 'Reject',
-            ),
+            // No Reject action. Two buttons for "I do not want this document" was one too
+            // many - Delete says it plainly and refuses on anything backing a posted bill,
+            // which is the only case rejecting protected. Documents already rejected keep
+            // their status and still render; nothing here can create a new one.
             const SizedBox(width: 8),
             AppButton(
               onPressed: document.billId != null ? null : remove,

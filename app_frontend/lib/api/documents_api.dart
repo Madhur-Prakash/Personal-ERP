@@ -90,16 +90,6 @@ class DocumentsApi {
         await _client.patch<Json>('/documents/$id/extracted', body: fields),
       );
 
-  /// Mark a document not usable. The reason is optional - who rejected it and when are
-  /// recorded on the audit row either way.
-  Future<ScannedDocument> reject(String id, [String? reason]) async =>
-      ScannedDocument.fromJson(
-        await _client.post<Json>(
-          '/documents/$id/reject',
-          body: <String, dynamic>{'reason': reason},
-        ),
-      );
-
   Future<void> remove(String id) => _client.delete<Json>('/documents/$id');
 
   Future<Bill> confirm(
