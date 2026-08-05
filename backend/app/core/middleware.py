@@ -19,14 +19,15 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Final
 from urllib.parse import urlsplit
 
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import settings
 from app.core.logging import clear_log_context, get_logger, set_log_context
@@ -42,6 +43,15 @@ REQUEST_ID_HEADER: Final = "X-Request-ID"
 #: gating them on a proxy-injected header would fail every healthcheck and roll the
 #: deployment back.
 PROBE_PREFIXES: Final = ("/health",)
+
+#: The two probes that answer an orchestrator, exempt from the production-only
+#: trusted-host check as well - see :class:`ProbeExemptTrustedHostMiddleware`.
+#:
+#: Exact paths, not a prefix. ``/health`` itself is deliberately absent: it reports the
+#: version, the environment and whether email is configured, and in production the host
+#: check is the only thing standing in front of it. These two report a fixed shape and
+#: nothing about the deployment.
+HOST_EXEMPT_PROBES: Final = frozenset({"/health/live", "/health/ready"})
 
 #: The interactive documentation and the machine-readable schema behind it.
 #:
@@ -310,6 +320,42 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Strict-Transport-Security"] = "; ".join(directives)
 
         return response
+
+
+class ProbeExemptTrustedHostMiddleware:
+    """Starlette's ``TrustedHostMiddleware``, minus the orchestrator probes.
+
+    **The host check is the one production-only gate in front of ``/health``.** Every
+    other control here already exempts probes - :data:`PROBE_PREFIXES` keeps them out of
+    the origin guard and the rate limiter, for the stated reason that a probe reaches the
+    app directly and cannot satisfy conditions a proxy would normally arrange. The
+    trusted-host check was added wholesale and knows nothing about that, so in production
+    anything whose ``Host`` is not in ``ALLOWED_HOSTS`` gets ``400 Invalid host header`` -
+    including an uptime monitor or a load balancer probing ``/health/ready`` by hostname
+    or IP. The endpoint is registered and working; the request never reaches it.
+
+    So the two probes bypass the check and everything else still goes through the real
+    implementation, unchanged, including its ``www.`` redirect behaviour.
+
+    **Why this is safe to exempt.** The Host header is dangerous when it is *reflected* -
+    into a generated link, a cache key, a password-reset URL. These two endpoints read no
+    header, emit no URL, and return a fixed JSON shape either way. ``/health`` is not
+    exempt, because it names the version and environment; see :data:`HOST_EXEMPT_PROBES`.
+
+    Plain ASGI rather than ``BaseHTTPMiddleware``: this only inspects the path and picks a
+    branch, and the request/response wrapping that ``BaseHTTPMiddleware`` performs would be
+    pure overhead on the readiness probe of every replica.
+    """
+
+    def __init__(self, app: ASGIApp, allowed_hosts: Sequence[str]) -> None:
+        self.app = app
+        self._guarded = TrustedHostMiddleware(app, allowed_hosts=list(allowed_hosts))
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("path", "") in HOST_EXEMPT_PROBES:
+            await self.app(scope, receive, send)
+            return
+        await self._guarded(scope, receive, send)
 
 
 class DocsGuardMiddleware(BaseHTTPMiddleware):

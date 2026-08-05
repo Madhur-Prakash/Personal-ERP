@@ -17,7 +17,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -28,6 +27,7 @@ from app.core.middleware import (
     BodySizeLimitMiddleware,
     DocsGuardMiddleware,
     OriginGuardMiddleware,
+    ProbeExemptTrustedHostMiddleware,
     RateLimitMiddleware,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
@@ -248,7 +248,15 @@ def _register_middleware(app: FastAPI) -> None:
     app.add_middleware(RequestContextMiddleware)
 
     if settings.environment.is_production:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+        # Not Starlette's `TrustedHostMiddleware` directly: it would answer
+        # `400 Invalid host header` to a readiness probe whose Host is not in
+        # ALLOWED_HOSTS - a load balancer probing by IP, an uptime monitor by hostname -
+        # which reads as "the health endpoints are disabled in production" when they are
+        # registered and working. The wrapper exempts `/health/live` and `/health/ready`
+        # and delegates everything else unchanged.
+        app.add_middleware(
+            ProbeExemptTrustedHostMiddleware, allowed_hosts=settings.allowed_hosts
+        )
 
     app.add_middleware(SecurityHeadersMiddleware)
 
