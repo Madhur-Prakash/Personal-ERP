@@ -258,21 +258,31 @@ class OtpStore:
         await pipe.execute()
         return code
 
-    async def verify(self, email: str, code: str) -> bool:
-        """Verify a code, enforcing an attempt budget.
+    async def check(self, email: str, code: str) -> bool:
+        """Is this the current code? Enforces the attempt budget, but does **not** spend it.
 
-        ``MAX_OTP_ATTEMPTS`` wrong guesses are permitted; the failure that
-        exhausts the budget destroys the code immediately. Deferring destruction
-        to the *next* request would leave a spent code sitting in Redis, still
-        redeemable, whenever an attacker simply stops guessing.
+        Split from :meth:`consume` because "the code is correct" and "the request that
+        presented it succeeded" are different facts, and collapsing them cost a user their
+        code every time anything *after* the check rejected the request. See
+        :meth:`~app.modules.auth.service.AuthService.reset_password` for the case that
+        matters: a correct code with a password the policy refuses.
 
-        A correct code is always accepted while budget remains, so a user who
-        mistyped four times can still succeed on the fifth.
+        ``MAX_OTP_ATTEMPTS`` wrong guesses are permitted; the failure that exhausts the
+        budget destroys the code immediately. Deferring destruction to the *next* request
+        would leave a spent code sitting in Redis, still redeemable, whenever an attacker
+        simply stops guessing.
+
+        **A correct code does not spend budget.** The counter exists to bound *guessing*,
+        and a caller who presented the right code is not guessing. Without the refund below,
+        five policy-rejected passwords would destroy a perfectly good code - the attempt
+        limiter punishing the one person it is not aimed at.
         """
         redis = get_redis()
         code_key = RedisKey.otp(self._purpose, email)
         attempts_key = RedisKey.otp_attempts(self._purpose, email)
 
+        # `incr` first, and atomically: a `get`-then-`incr` lets concurrent guesses read the
+        # same value and each conclude it has budget left.
         attempts = await redis.incr(attempts_key)
         if attempts == 1:
             await redis.expire(attempts_key, self._ttl_seconds())
@@ -292,10 +302,31 @@ class OtpStore:
                 )
             return False
 
+        await redis.decr(attempts_key)
+        return True
+
+    async def consume(self, email: str) -> None:
+        """Spend the code, so it cannot be presented again.
+
+        Separate from :meth:`check` so a caller with more work to do can defer this until
+        that work has succeeded. Idempotent - deleting an absent key is not an error.
+        """
+        redis = get_redis()
         pipe = redis.pipeline()
-        pipe.delete(code_key)
-        pipe.delete(attempts_key)
+        pipe.delete(RedisKey.otp(self._purpose, email))
+        pipe.delete(RedisKey.otp_attempts(self._purpose, email))
         await pipe.execute()
+
+    async def verify(self, email: str, code: str) -> bool:
+        """Check a code and spend it in one step.
+
+        The right call when nothing after it can fail in a way the user could correct - the
+        sign-in flow, where the next step is issuing a session. When something *can* reject
+        the request afterwards, use :meth:`check` and :meth:`consume` instead.
+        """
+        if not await self.check(email, code):
+            return False
+        await self.consume(email)
         return True
 
 

@@ -801,6 +801,110 @@ class TestPasswordReset:
         )
         assert response.status_code == 422
 
+    # -- A rejected password must not cost the user their code -----------------
+    #
+    # The bug these cover: the code was consumed *before* the password was validated, so a
+    # correct code plus a refused password destroyed the code. The retry then reported "This
+    # reset code is invalid or has expired" - blaming the part the user had got right - and
+    # the freshly requested code would be burned by the next policy failure just the same.
+    # Reported from the UI as "the code becomes invalid very quickly".
+    async def test_a_policy_rejected_password_leaves_the_code_usable(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        code = await password_reset_otp_store.issue(user.email)
+
+        weak = await client.post(
+            f"{api}/auth/reset-password",
+            json={"email": user.email, "code": code, "new_password": "password123"},
+        )
+        assert weak.status_code == 422
+
+        # Same code, corrected password. This is the assertion that failed before.
+        retry = await client.post(
+            f"{api}/auth/reset-password",
+            json={
+                "email": user.email,
+                "code": code,
+                "new_password": "Quixotic-Ledger-Verse-77",
+            },
+        )
+        assert retry.status_code == 200, retry.text
+
+    async def test_reusing_the_current_password_leaves_the_code_usable(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        """The second way `_apply_new_password` refuses, and it burned the code too."""
+        code = await password_reset_otp_store.issue(user.email)
+
+        same = await client.post(
+            f"{api}/auth/reset-password",
+            json={"email": user.email, "code": code, "new_password": TEST_PASSWORD},
+        )
+        assert same.status_code == 422
+
+        retry = await client.post(
+            f"{api}/auth/reset-password",
+            json={
+                "email": user.email,
+                "code": code,
+                "new_password": "Quixotic-Ledger-Verse-77",
+            },
+        )
+        assert retry.status_code == 200, retry.text
+
+    async def test_policy_failures_do_not_exhaust_the_attempt_budget(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        """More policy failures than the guess budget, and the code still works.
+
+        The attempt counter bounds *guessing*. Presenting the correct code is not a guess, so
+        it must not spend budget - otherwise the brute-force limiter destroys the code of the
+        one person it is not aimed at.
+        """
+        from app.modules.auth.token_store import MAX_OTP_ATTEMPTS
+
+        code = await password_reset_otp_store.issue(user.email)
+
+        for _ in range(MAX_OTP_ATTEMPTS + 2):
+            rejected = await client.post(
+                f"{api}/auth/reset-password",
+                json={"email": user.email, "code": code, "new_password": "password123"},
+            )
+            assert rejected.status_code == 422
+
+        accepted = await client.post(
+            f"{api}/auth/reset-password",
+            json={
+                "email": user.email,
+                "code": code,
+                "new_password": "Quixotic-Ledger-Verse-77",
+            },
+        )
+        assert accepted.status_code == 200, accepted.text
+
+    async def test_wrong_guesses_still_destroy_the_code(self, user: User) -> None:
+        """The refund must not become a bypass: wrong codes still spend the budget."""
+        from app.core.redis import RedisKey
+        from app.modules.auth.token_store import MAX_OTP_ATTEMPTS
+
+        code = await password_reset_otp_store.issue(user.email)
+
+        for _ in range(MAX_OTP_ATTEMPTS):
+            assert await password_reset_otp_store.check(user.email, "000000") is False
+
+        assert await get_redis().get(RedisKey.otp("password-reset", user.email)) is None
+        assert await password_reset_otp_store.check(user.email, code) is False
+
+    async def test_check_does_not_spend_the_code_but_consume_does(self, user: User) -> None:
+        """The split that fixes the bug, asserted directly on the store."""
+        code = await password_reset_otp_store.issue(user.email)
+
+        assert await password_reset_otp_store.check(user.email, code) is True
+        assert await password_reset_otp_store.check(user.email, code) is True
+
+        await password_reset_otp_store.consume(user.email)
+        assert await password_reset_otp_store.check(user.email, code) is False
+
 
 class TestChangePassword:
     async def test_requires_correct_current_password(

@@ -844,18 +844,23 @@ class AuthService:
                 details={"retry_after_seconds": lock_seconds},
             )
 
-        if not await password_reset_otp_store.verify(email, code):
+        if not await password_reset_otp_store.check(email, code):
             await self._record_failed_login(email, ctx, reason="bad_password_reset_code")
             raise InvalidTokenError("This reset code is invalid or has expired")
 
         user = await self.users.get_by_email(email)
         if user is None:
             # Only reachable if the account was deleted between the two requests -
-            # the code was verified, so the address existed when it was issued.
+            # the code was checked, so the address existed when it was issued.
             raise NotFoundError("User")
 
         await login_throttle.reset(email)
         await self._apply_new_password(user, new_password, ctx, reason="reset")
+
+        # Spent only now, with every check that could reject the request behind us. A raise
+        # above leaves the code live for the corrected retry, which is what a single-use code
+        # should mean: used once *successfully*, not consumed by the attempt.
+        await password_reset_otp_store.consume(email)
 
         await self.audit.record(
             AuditAction.USER_PASSWORD_RESET_COMPLETED,
