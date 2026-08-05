@@ -32,7 +32,7 @@ import os
 from collections.abc import MutableMapping
 from contextvars import ContextVar
 from typing import Any
-
+from app.core.config import settings
 from logifyx import (
     ContextLoggerAdapter,
     Logifyx,
@@ -94,7 +94,7 @@ def _resolve_log_file() -> str:
     operator set it. ``LOG_FILE`` belongs to logifyx's config namespace, so it
     is read here rather than in :mod:`app.core.config`.
     """
-    return os.getenv("LOG_FILE") or "personalerp.log"
+    return settings.log_file
 
 
 def configure_logging() -> None:
