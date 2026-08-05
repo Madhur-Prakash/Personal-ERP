@@ -43,7 +43,6 @@ dependencies = [
     # "Asia/Kolkata" without this. Organizations store IANA zones and fiscal
     # periods depend on them, so it is a real runtime dependency, not dev-only.
     "tzdata>=2025.2",
-    "minio>=7.2.20",
     # --- Report exports ---
     # `openpyxl` writes real .xlsx; a CSV renamed would open in Excel but carry no
     # formatting, no column widths, and no way to mark a figure as currency.
@@ -53,6 +52,9 @@ dependencies = [
     "openpyxl>=3.1.5",
     "fpdf2>=2.8.7",
     "slowapi>=0.1.10",
+    "minio>=7.2.20",
+    "pytesseract==0.3.13",
+    "pypdf==6.14.2",
 ]
 
 [project.optional-dependencies]
@@ -70,6 +72,21 @@ kafka = ["logifyx[kafka]>=1.1.2"]
 ocr = [
     "pytesseract>=0.3.13",
     "pypdf>=6.0.0",
+]
+
+# S3-compatible object storage for document blobs.
+#
+# `minio` is also in the base dependencies above, so this extra is a no-op on a normal
+# install - it exists to name the requirement, and so a slimmed-down build that drops it from
+# the base list has one flag to put it back.
+#
+# The client being installed does **not** select the backend. Documents go to PostgreSQL
+# (`document_blob`) unless MINIO_ENDPOINT, MINIO_ACCESS_KEY and MINIO_SECRET_KEY are all set;
+# see `app/modules/ocr/storage.py` for why that is derived from the credentials rather than a
+# separate switch. `app/modules/ocr/object_storage.py` is the only module that imports the
+# client, and it is imported lazily, so the default path never loads it either way.
+objectstore = [
+    "minio>=7.2.20",
 ]
 
 [dependency-groups]
@@ -148,7 +165,12 @@ exclude = ["migrations/", "tests/"]
 
 [[tool.mypy.overrides]]
 # pytesseract is a thin subprocess wrapper that ships no stubs and never will.
-module = ["logifyx.*", "qrcode.*", "pytesseract.*", "googleapiclient.*"]
+#
+# `minio` is here for a different reason: it is an optional extra (see `objectstore`), so on
+# a default install it is genuinely absent and mypy would report the import as missing on
+# every run. Ignoring it keeps the type check meaningful for the code everyone runs rather
+# than failing on a dependency almost nobody installs.
+module = ["logifyx.*", "qrcode.*", "pytesseract.*", "googleapiclient.*", "minio.*"]
 ignore_missing_imports = true
 
 # =============================================================================

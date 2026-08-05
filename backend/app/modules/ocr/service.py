@@ -45,7 +45,12 @@ from app.modules.audit.service import AuditService
 from app.modules.ocr.engines import UnsupportedDocumentError, recognise, sniff_format
 from app.modules.ocr.extraction import HIGH_CONFIDENCE, ExtractedDocument, extract_document
 from app.modules.ocr.models import Document, DocumentKind, DocumentStatus
-from app.modules.ocr.storage import document_store, relative_path_for, sha256_of
+from app.modules.ocr.storage import (
+    DocumentStore,
+    document_store,
+    relative_path_for,
+    sha256_of,
+)
 from app.modules.organizations.clock import organization_today
 from app.modules.purchasing.models import Bill, Supplier
 from app.modules.purchasing.receiving import BillService
@@ -79,14 +84,40 @@ class DuplicateMatch:
     reason: str
 
 
+@dataclass(frozen=True, slots=True)
+class UploadMetadata:
+    """What the storage backend records alongside the bytes.
+
+    Satisfies :class:`~app.modules.ocr.storage.BlobMetadata`. A value object rather than
+    three positional arguments so adding a field later does not touch both backends and every
+    call site - and so the database backend can persist all of it while the object backend
+    quietly uses only the MIME type.
+    """
+
+    original_filename: str
+    mime_type: str
+    uploaded_by_user_id: uuid.UUID | None
+
+
 class DocumentService:
     """Everything that happens to an uploaded document."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        self.store = document_store()
         self.audit = AuditService(session)
         self.bills = BillService(session)
+
+    def _store(self, organization_id: uuid.UUID) -> DocumentStore:
+        """The blob backend, scoped to one tenant.
+
+        Built per call rather than once in ``__init__`` because the default backend is
+        tenant-scoped: it holds the organization id so that every blob read is filtered by it
+        in SQL, not merely by a key that happens to start with the right prefix. A store
+        constructed before the organization is known could not do that, and "the key contains
+        the tenant id" is a convention, whereas a ``WHERE organization_id = ...`` is a
+        constraint.
+        """
+        return document_store(self.session, organization_id)
 
     # -----------------------------------------------------------------------
     # Reads
@@ -218,7 +249,9 @@ class DocumentService:
         undermine the one thing the document is for.
         """
         document = await self.get(organization_id, document_id)
-        data = await self.store.read(document.storage_path, verify=document.sha256)
+        data = await self._store(organization_id).read(
+            document.storage_path, verify=document.sha256
+        )
         return data, document
 
     # -----------------------------------------------------------------------
@@ -278,7 +311,15 @@ class DocumentService:
             return existing, None, True
 
         relative = relative_path_for(organization_id, digest, fmt)
-        await self.store.write(relative, data)
+        await self._store(organization_id).write(
+            relative,
+            data,
+            UploadMetadata(
+                original_filename=(filename or "upload")[:MAX_FILENAME_LENGTH],
+                mime_type=fmt.value,
+                uploaded_by_user_id=actor.id,
+            ),
+        )
 
         document = Document(
             organization_id=organization_id,
@@ -339,7 +380,7 @@ class DocumentService:
         scan to the bill. Discarding the upload because recognition struggled would
         destroy the more useful half of the feature.
         """
-        data = await self.store.read(document.storage_path)
+        data = await self._store(document.organization_id).read(document.storage_path)
 
         try:
             result = await recognise(data, document.content_type)

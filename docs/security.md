@@ -419,6 +419,60 @@ An organization must not be able to destroy its own administrability:
 
 ---
 
+## Document storage
+
+Uploaded documents are compressed and stored in PostgreSQL, in the `document_blob` table, as
+`BYTEA`. Object storage is available but optional, and needs an extra dependency; see
+[`storage.py`](../backend/app/modules/ocr/storage.py) for the trade-offs. Four properties here
+are security ones rather than plumbing.
+
+### The path is never attacker-controlled
+
+A blob's key is `{organization_id}/{sha256[:2]}/{sha256}.{ext}` - derived from a digest and
+nothing else. A filename is attacker-supplied text, and joining one onto a path is how
+`../../../etc/authorized_keys` becomes a write target; no amount of sanitising is as safe as
+never using it. `original_filename` is kept for display and read by nothing that resolves a
+location.
+
+Retiring the filesystem backend removed the class entirely: there is no longer a path to
+traverse, because the key is a value in a `WHERE` clause.
+
+### Tenant isolation is a predicate, not a prefix
+
+The key *contains* the organization id, which means a store that matched on key alone would
+look correct. Every read instead filters `WHERE organization_id = ...` from the store's own
+scope, which is set when it is constructed and never taken from the request path. There is a
+test that asks a store scoped to one tenant for another tenant's key by exact string and
+asserts it is not found.
+
+### Bytes and rows commit together
+
+A blob is written in the request's transaction. Under the retired filesystem backend - and
+under a bucket today - the write is *outside* it, so a request that failed after storing bytes
+leaked them permanently, and a restored backup could pair a row with a blob from a different
+moment. Now a rolled-back upload leaves nothing, and one `pg_dump` captures a posted bill and
+the scan that supports it at one consistent point in time.
+
+That consistency is the security argument for the default backend: the integrity of accounting
+evidence is not separable from the integrity of the entries citing it.
+
+### The round trip is byte-exact, and checked
+
+`document.sha256` is the digest of the **original** upload and does three jobs: the duplicate
+key, the storage address, and the integrity check on download. Compression is therefore
+lossless and never rewrites content - notably, PDFs are **not** re-encoded or re-rendered,
+even though that would compress better. A file that renders identically but hashes differently
+is not the file the supplier sent, and an auditor asking "is this the document the entry cites"
+deserves an answer that is not "morally, yes".
+
+Downloads verify the decompressed bytes against the recorded digest and fail with
+`blob_corrupted` rather than serving something else. Uploads are still bounded while streaming
+(`MAX_UPLOAD_BYTES`, 15 MB), the declared content type is ignored in favour of the type sniffed
+from the bytes, and the download response carries `Content-Disposition: attachment`, `nosniff`,
+and a `sandbox` CSP - see [Transport and headers](#transport-and-headers).
+
+---
+
 ## Secrets and logging
 
 **logifyx redacts by default.** Passwords, tokens, and secrets are masked in every

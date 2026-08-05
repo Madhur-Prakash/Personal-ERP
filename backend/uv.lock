@@ -852,6 +852,8 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyjwt" },
     { name = "pyotp" },
+    { name = "pypdf" },
+    { name = "pytesseract" },
     { name = "python-multipart" },
     { name = "qrcode", extra = ["pil"] },
     { name = "redis", extra = ["hiredis"] },
@@ -864,6 +866,9 @@ dependencies = [
 [package.optional-dependencies]
 kafka = [
     { name = "logifyx" },
+]
+objectstore = [
+    { name = "minio" },
 ]
 ocr = [
     { name = "pypdf" },
@@ -897,12 +902,15 @@ requires-dist = [
     { name = "logifyx", specifier = ">=1.1.2" },
     { name = "logifyx", extras = ["kafka"], marker = "extra == 'kafka'", specifier = ">=1.1.2" },
     { name = "minio", specifier = ">=7.2.20" },
+    { name = "minio", marker = "extra == 'objectstore'", specifier = ">=7.2.20" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0" },
     { name = "pyjwt", specifier = ">=2.10.0" },
     { name = "pyotp", specifier = ">=2.9.0" },
+    { name = "pypdf", specifier = "==6.14.2" },
     { name = "pypdf", marker = "extra == 'ocr'", specifier = ">=6.0.0" },
+    { name = "pytesseract", specifier = "==0.3.13" },
     { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.13" },
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "qrcode", extras = ["pil"], specifier = ">=8.2" },
@@ -912,7 +920,7 @@ requires-dist = [
     { name = "tzdata", specifier = ">=2025.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.37.0" },
 ]
-provides-extras = ["kafka", "ocr"]
+provides-extras = ["kafka", "ocr", "objectstore"]
 
 [package.metadata.requires-dev]
 dev = [

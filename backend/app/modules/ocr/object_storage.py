@@ -1,13 +1,30 @@
-"""S3-compatible object storage for uploaded documents.
+"""S3-compatible object storage for uploaded documents - the **optional** backend.
+
+**Not the default.** Documents live in PostgreSQL unless S3-compatible credentials are
+configured; see :mod:`app.modules.ocr.storage` for why the database is the default and what
+its limits are. This module exists for the deployment that has outgrown those limits - blobs
+dominating dump time and WAL volume, somewhere past tens of gigabytes.
+
+Selecting it takes two things, and forgetting either is a distinct, visible failure:
+
+1. ``MINIO_ENDPOINT``, ``MINIO_ACCESS_KEY`` and ``MINIO_SECRET_KEY``, all three.
+2. Something at that endpoint. The development stack has a MinIO behind the ``objectstore``
+   compose profile - ``make up-objectstore`` - deliberately not started by a plain
+   ``docker compose up``, because the container should not be running unless this backend was
+   chosen.
+
+The client library ships in the base dependencies, so it is present either way. That is
+convenience, not selection: this module is still imported *lazily* from
+:func:`app.modules.ocr.storage.document_store`, so the default path never loads it, and a
+build that trims ``minio`` out of the base list gets a clear
+``object_storage_unavailable`` error instead of an ``ImportError`` from inside a handler.
 
 Same interface as :class:`~app.modules.ocr.storage.DocumentStore`, so nothing above it knows
-which one it is talking to - the choice is made once, in
-:func:`app.modules.ocr.storage.document_store`.
+which one it is talking to.
 
-**S3-compatible rather than tied to one vendor.** The same code addresses MinIO running
-beside the app in development, MinIO on the operator's own machine, or real S3 - which is the
-point for a product whose premise is that you host it yourself. Nothing here depends on a
-provider-specific feature.
+**S3-compatible rather than tied to one vendor.** The same code addresses MinIO on the
+operator's own machine or real S3 - which is the point for a product whose premise is that
+you host it yourself. Nothing here depends on a provider-specific feature.
 
 **Objects are private, and the bytes come back exactly as they went in.** No transformation
 pipeline, no re-encoding, no format parsing: a blob is addressed by the SHA-256 of its own
@@ -15,13 +32,19 @@ bytes and verified against that on read, so anything that rewrote a single byte 
 every read into a corruption error. Object storage is the right shape for that; a media CDN
 is not, which was worth learning the hard way.
 
+**No compression here, unlike the database backend.** The blob goes to the bucket verbatim.
+Object storage is billed and sized per byte stored, so compressing would help - but it would
+also mean the object at a key is no longer the document at that key, which breaks every
+external tool an operator might reasonably point at the bucket, including the one they use to
+verify the backup. In the database that trade is worth it because nothing else reads the
+column; in a bucket it is not.
+
 **The client is synchronous, so every call runs in a worker thread.** A 15 MB upload on the
 event loop stalls every concurrent request.
 
-A note on durability: the development compose file runs MinIO **without a volume**, so
-uploaded documents live only as long as the container. That is deliberate for a throwaway dev
-stack and completely wrong anywhere else - a real deployment must mount storage, or the first
-`docker compose down` takes the books' supporting evidence with it.
+A note on durability: this backend needs storage the operator mounts and backs up themselves.
+That is the cost of moving blobs out of the database - the single consistent ``pg_dump`` stops
+covering them, and a restore reinstates rows pointing at objects from a different moment.
 """
 
 from __future__ import annotations
@@ -35,7 +58,13 @@ from minio.error import S3Error
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.modules.ocr.storage import BlobCorruptedError, StorageError, sha256_of
+from app.modules.ocr.storage import (
+    BlobCorruptedError,
+    BlobMetadata,
+    BlobMissingError,
+    StorageError,
+    sha256_of,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -109,12 +138,18 @@ class ObjectDocumentStore:
     # -----------------------------------------------------------------------
     # Operations
     # -----------------------------------------------------------------------
-    async def write(self, relative: str, data: bytes) -> None:
+    async def write(self, relative: str, data: bytes, meta: BlobMetadata) -> None:
         """Store bytes under ``relative``.
 
         Content-addressed, so an object already at this key holds these exact bytes and
         re-uploading would be pure cost. Checked first for that reason, not for safety -
         overwriting would be harmless, just wasteful.
+
+        ``meta`` is accepted to satisfy the shared contract and mostly unused: a bucket has
+        nowhere to put an uploader id, and the key already encodes the format. Only the MIME
+        type is recorded, as object metadata, and only so a human browsing the bucket sees a
+        PDF as a PDF - the application always trusts the type it sniffed at upload, which is
+        on the document row.
         """
 
         def work(client: Minio) -> None:
@@ -135,7 +170,7 @@ class ObjectDocumentStore:
                     relative,
                     io.BytesIO(data),
                     length=len(data),
-                    content_type=_content_type(relative),
+                    content_type=meta.mime_type or _content_type(relative),
                 )
             except S3Error as exc:
                 log.error("object store write failed", extra={"key": relative, "code": exc.code})
@@ -158,11 +193,7 @@ class ObjectDocumentStore:
                 return bytes(response.read())
             except S3Error as exc:
                 if exc.code in MISSING_CODES:
-                    raise StorageError(
-                        "The stored file is missing. It may have been removed from storage.",
-                        code="blob_missing",
-                        status_code=410,
-                    ) from exc
+                    raise BlobMissingError from exc
                 log.error("object store read failed", extra={"key": relative, "code": exc.code})
                 raise StorageError from exc
             finally:

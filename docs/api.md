@@ -223,6 +223,11 @@ Three behaviours worth knowing before integrating:
 - **Uploading the same bytes twice is not an error.** The response carries
   `already_uploaded: true` and the document created the first time. Blobs are
   content-addressed by SHA-256, so identical files cannot become two documents.
+- **`GET /{id}/file` returns the exact bytes that were uploaded.** They are stored
+  compressed in PostgreSQL and decompressed on the way out, which is invisible to the
+  client: the response body is byte-identical to the upload and its SHA-256 matches
+  `document.sha256`. That is verified on every read, so a corrupted blob fails loudly
+  rather than serving a document that is not the one the ledger cites.
 - **A likely duplicate invoice is a warning, not a rejection.** When an earlier
   document has the same supplier GSTIN and invoice number, `duplicate` is populated
   and `document.is_duplicate` is true - but the upload succeeds and can still be

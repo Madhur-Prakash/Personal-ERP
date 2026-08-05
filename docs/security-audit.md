@@ -332,14 +332,32 @@ rather than a copy of its text.
 ## 8. Medium - uploaded documents were not durable in production
 
 `docker-compose.prod.yml` mounted `./logs` and nothing else. With object storage
-unconfigured, `document_storage` falls back to local disk and writes to
-`backend/var/uploads` **inside the container** - a layer a redeploy discards. Those files
-are the supporting evidence for posted ledger entries, and they were the only thing in the
-stack with no durability at all.
+unconfigured, `document_storage` fell back to local disk and wrote to `backend/var/uploads`
+**inside the container** - a layer a redeploy discards. Those files are the supporting
+evidence for posted ledger entries, and they were the only thing in the stack with no
+durability at all.
 
-**Fixed.** A named `documents` volume mounted at `/app/var/uploads`. This became
-load-bearing rather than merely correct once the backend got a read-only root filesystem
-(finding 12), which refuses the write outright instead of losing it later.
+**Fixed twice.** The first fix was a named volume, which made the bytes survive a redeploy
+and became load-bearing once the backend got a read-only root filesystem (finding 12).
+
+The second fix removed the problem rather than mitigating it: **documents now live in
+PostgreSQL**, compressed into `document_blob` as `BYTEA`, written in the same transaction as
+the row describing them. The filesystem backend is gone, the volume is gone, and the backend
+container writes nothing to disk at all. Three consequences worth naming:
+
+- One `pg_dump` captures a posted bill and the scan supporting it at one consistent moment.
+  A split store could restore a row pointing at a blob from a different point in time, and
+  that failure surfaces months later as an invoice that cannot be produced.
+- A rolled-back upload leaves nothing behind. A filesystem or bucket write is outside the
+  transaction, so every failed upload used to leak bytes nobody would look for again.
+- There is no second service whose volume can be forgotten - which is exactly what the
+  development compose file did, silently making uploads ephemeral.
+
+Object storage remains available for an install whose blobs outgrow the database, selected by
+setting all three `MINIO_*` variables. The MinIO container that serves it in development now
+sits behind the `objectstore` compose profile, so a plain `docker compose up` does not start
+it - a service that only makes sense under one backend should not be running under the other.
+See [security.md](security.md#document-storage) and `backend/app/modules/ocr/storage.py`.
 
 ---
 

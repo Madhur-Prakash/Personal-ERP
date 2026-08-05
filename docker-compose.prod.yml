@@ -166,15 +166,14 @@ services:
       LOG_JSON: 'true' # structured output for the aggregator
     volumes:
       - ./logs:/app/logs
-      # Uploaded documents, when object storage is not configured.
+      # No documents volume, and none needed. Uploaded files are compressed into
+      # PostgreSQL (`document_blob`), so they are on the postgres-data volume and inside
+      # the same `pg_dump` as the ledger entries they support.
       #
-      # Without this the local storage backend writes into the container's own
-      # filesystem, which `read_only: true` above now refuses outright - and before that
-      # change it wrote to a layer that a redeploy discards. Either way the scans
-      # supporting posted ledger entries were the one thing in the stack with no
-      # durability at all. Ignored when MINIO_* is configured, since blobs then go to
-      # object storage.
-      - documents:/app/var/uploads
+      # That is what removed the last reason for this container to write to disk at all,
+      # which is why `read_only: true` above is viable. It also closed a real durability
+      # hole: the previous filesystem backend wrote into the container's own layer, so a
+      # redeploy discarded the scans supporting posted bills.
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -277,10 +276,10 @@ services:
     networks: [internal]
 
 volumes:
+  # Uploaded documents live in here too, inside PostgreSQL - see the `backend` service.
+  # One volume to back up, and one dump that is internally consistent.
   postgres-data:
   redis-data:
-  #: Uploaded documents under the local storage backend. See the `backend` service.
-  documents:
 
 networks:
   internal:

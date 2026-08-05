@@ -127,13 +127,27 @@ up: ## Start the full development stack in Docker
 	@echo "  API        http://localhost:8000"
 	@echo "  API docs   http://localhost:8000/docs"
 
+.PHONY: up-objectstore
+up-objectstore: ## Start the stack plus MinIO, for the object-storage backend
+	$(COMPOSE) --profile objectstore up -d
+	@echo ""
+	@echo "  Frontend       http://localhost:5173"
+	@echo "  API            http://localhost:8000"
+	@echo "  MinIO console  http://localhost:9001"
+	@echo ""
+	@echo "  Documents still go to PostgreSQL until you set all three of"
+	@echo "  MINIO_ENDPOINT, MINIO_ACCESS_KEY and MINIO_SECRET_KEY in .env."
+
 .PHONY: down
 down: ## Stop the development stack
-	$(COMPOSE) down
+	# `--profile objectstore` on the way down too, or a MinIO started by
+	# `up-objectstore` is left running by a plain `make down` - compose only stops
+	# services in the active profiles, so the default `down` cannot see it.
+	$(COMPOSE) --profile objectstore down
 
 .PHONY: clean
 clean: ## Stop and DELETE all volumes (destroys local data)
-	$(COMPOSE) down -v
+	$(COMPOSE) --profile objectstore down -v
 
 .PHONY: services
 services: ## Start only PostgreSQL and Redis

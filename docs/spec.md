@@ -155,7 +155,14 @@ while destroying others, so there was nothing safe to add.
 Ollama/OpenAI-compatible + Sentence Transformers + Qdrant + LangGraph (AI).
 
 **Infrastructure** - Docker Compose, Nginx, GitHub Actions, Prometheus, Grafana,
-Loki, Sentry, MinIO. Self-hosted on one VPS.
+Loki, Sentry. Self-hosted on one VPS.
+
+No object store. Uploaded documents are compressed into PostgreSQL, so a single
+`pg_dump` captures the ledger and the scans that support it at one consistent moment
+and there is no second service whose volume can be forgotten. S3-compatible storage
+remains an option for an install whose blobs outgrow that - see
+[security.md](security.md#document-storage) and
+`backend/app/modules/ocr/storage.py`.
 
 Deferred deliberately: Kafka, Temporal, and Kubernetes. All three are in the
 original wish-list and all three contradict "one person can operate this". Revisit

@@ -40,6 +40,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     text,
@@ -49,6 +50,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, OrgScopedMixin, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 from app.db.types import LedgerDate, Money, Rate, enum_column
+from app.modules.ocr.compression import Codec
 from app.modules.ocr.engines import DocumentFormat
 from app.modules.ocr.extraction import HIGH_CONFIDENCE
 
@@ -105,6 +107,95 @@ class DocumentStatus(StrEnum):
         return self is DocumentStatus.EXTRACTED
 
 
+class DocumentBlob(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin):
+    """The uploaded file's bytes, compressed, in PostgreSQL.
+
+    **Its own table, not a column on :class:`Document`.** The obvious shape - one
+    ``BYTEA`` beside the extracted fields - is a trap in a way that only shows up under
+    load. Every unqualified ``select(Document)`` would then carry the blob, so listing
+    25 documents in the review queue pulls up to 375 MB through the driver to render a
+    table of filenames and amounts. ``deferred()`` fixes that until the first person
+    writes a query without it, and nothing fails loudly when they do. A separate table
+    makes the expensive read impossible to perform by accident: the bytes are only ever
+    fetched by code that names this table.
+
+    Postgres would TOAST a large ``BYTEA`` out of line anyway, so the storage layout is
+    much the same. What differs is which queries pay for it.
+
+    **Addressed by content, like the object and filesystem backends it replaces.**
+    ``storage_key`` is the same string a bucket key or a file path would be, so
+    :attr:`Document.storage_path` means the same thing under every backend and switching
+    between them needs no schema change. It also means the key is derived from a digest
+    and never from a filename - a filename is attacker-controlled text.
+
+    **What is stored is compressed, and what is recorded is the original.**
+    :attr:`sha256` and :attr:`original_size` describe the bytes the user uploaded;
+    :attr:`compression` and :attr:`compressed_size` describe what is in :attr:`data`.
+    Keeping both is what lets a download verify itself against the digest the document row
+    has always carried - see :mod:`app.modules.ocr.compression` on why the round trip is
+    byte-exact.
+
+    **No soft delete.** Deliberately unlike its parent. A :class:`Document` is soft-deleted
+    because an accounting record with holes in it is not an audit trail - but its blob is
+    the *evidence*, and a soft-deleted document keeps its bytes reachable. When a blob is
+    genuinely purged it goes, because a "deleted" 12 MB scan still occupying the database
+    and every backup of it is not a record of anything.
+    """
+
+    #: The content-addressed key, identical in form to a bucket key or a relative path.
+    #: Unique per organization: the same bytes are the same document, so a second row for
+    #: one key would be a bug rather than a duplicate.
+    storage_key: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    #: Lowercase hex SHA-256 of the **original**, uncompressed upload.
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    #: As supplied by the client, for the benefit of anyone reading this table directly
+    #: during a restore or an export. Display only - never used to build a key.
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    #: The type sniffed from the bytes at upload, never the one the client announced.
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    #: Bytes before compression - what a download returns and what the digest covers.
+    original_size: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    #: Bytes actually in :attr:`data`. Equal to :attr:`original_size` under
+    #: :attr:`~app.modules.ocr.compression.Codec.NONE`, which is the correct outcome for a
+    #: scan or a JPEG that has nothing left to compress.
+    compressed_size: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    #: Which codec :attr:`data` is encoded with. Per row, so changing the default codec
+    #: never invalidates bytes already stored.
+    compression: Mapped[Codec] = mapped_column(
+        enum_column(Codec, length=20),
+        nullable=False,
+        default=Codec.ZLIB,
+        server_default=text("'zlib'"),
+    )
+
+    #: The document itself. ``LargeBinary`` maps to PostgreSQL ``BYTEA``.
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+    uploaded_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    # `app_user`, not `user`: USER is a reserved word in PostgreSQL.
+    uploaded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (Index("uq_document_blob_key", "organization_id", "storage_key", unique=True),)
+
+    @property
+    def saving_ratio(self) -> float:
+        """Fraction of the original size compression saved. For reporting only."""
+        if self.original_size == 0:
+            return 0.0
+        return 1 - (self.compressed_size / self.original_size)
+
+
 class Document(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     """An uploaded file, what was read out of it, and what became of it."""
 
@@ -124,8 +215,10 @@ class Document(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
     #: two blobs, and it is a checksum for free.
     sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
-    #: Path relative to ``settings.upload_dir``. Relative so the install can be
-    #: moved or restored to a different directory without rewriting every row.
+    #: Where the bytes are, expressed the same way under every storage backend:
+    #: :attr:`DocumentBlob.storage_key` in the database, an object key in a bucket.
+    #: Backend-agnostic on purpose, so switching one for the other moves bytes without
+    #: rewriting a single row.
     storage_path: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # --- Classification and state ------------------------------------------

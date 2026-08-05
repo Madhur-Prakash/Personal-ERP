@@ -48,32 +48,27 @@ SUPPLIER_GSTIN = "27AABCU9603R1ZM"
 # Fixtures
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
-def isolated_upload_dir(tmp_path) -> Iterator[None]:
-    """Point blob storage at a temp directory for every test in this file.
+def database_backed_storage() -> Iterator[None]:
+    """Force the database storage backend for every test in this file.
 
-    Autouse and mandatory: without it the suite writes real files into
-    ``backend/var/uploads`` and leaves them there, because the outer transaction
-    rollback undoes the database row but cannot undo a filesystem write. That
-    asymmetry is worth naming - soft-deleting a document deliberately keeps its blob,
-    so nothing in production cleans up after a test either.
+    ``document_storage`` is derived from whether object-storage credentials are configured,
+    and a developer's ``.env`` may have them - so without this the suite would upload every
+    fixture document into a real bucket and leave it there. A test that depends on a running
+    object store is a test that fails for reasons that have nothing to do with the code.
+
+    Note what this fixture *no longer* has to do. It used to also redirect a temp upload
+    directory, because the outer transaction rollback undid the database row but could not
+    undo a filesystem write - so the suite left real files behind on every run. Blobs now
+    live in ``document_blob``, inside the same transaction as everything else, so the
+    rollback takes them with it and the asymmetry is gone.
     """
-    original_dir = settings.upload_dir
-    settings.upload_dir = tmp_path / "uploads"
-
-    # And force the *local* backend for the duration.
-    #
-    # `document_storage` is derived from whether object-storage credentials are configured,
-    # and a developer's `.env` has them - so without this the suite would upload every
-    # fixture document into the real bucket and leave it there. A test that depends on a
-    # running MinIO is a test that fails for reasons that have nothing to do with the code.
     original_secret = settings.minio_secret_key
     settings.minio_secret_key = SecretStr("")
-    assert settings.document_storage == "local", "storage must be local under test"
+    assert settings.document_storage == "database", "storage must be the database under test"
 
     try:
         yield
     finally:
-        settings.upload_dir = original_dir
         settings.minio_secret_key = original_secret
 
 

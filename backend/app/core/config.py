@@ -376,28 +376,34 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
 
     # ---- Documents & OCR ----------------------------------------------------
-    #: Where uploaded documents are stored **when the local backend is in use**.
-    #:
-    #: Never the database, under either backend. Scanned invoices are megabytes of
-    #: opaque bytes: putting them in Postgres bloats every backup and every
-    #: replication stream with data no query ever reads. A directory is also what
-    #: makes `rsync`-ing the whole install to a new box a viable backup story for a
-    #: self-hosted deployment.
-    #:
-    #: Ignored when object storage is configured - see :data:`document_storage`.
-    upload_dir: Path = BACKEND_DIR / "var" / "uploads"
-
     #: Hard ceiling on one upload. A 600 dpi colour scan of an A4 invoice is
     #: ~8 MB, so 15 MB accepts real documents and refuses everything else - the
     #: limit is enforced while streaming, so an oversized body is never buffered.
     max_upload_bytes: int = Field(default=15 * 1024 * 1024, ge=64 * 1024)
 
-    # ---- Object storage (MinIO / S3-compatible) -----------------------------
-    #: Where document blobs go when object storage is configured.
+    # ---- Object storage: optional, off unless configured ---------------------
+    #: S3-compatible object storage for document blobs. **Leave these blank.**
     #:
-    #: S3-compatible rather than tied to one vendor: the same code addresses MinIO in
-    #: development, MinIO on the operator's own box, or real S3 - which matters for a
-    #: product whose premise is that you host it yourself.
+    #: Blank is the default and the supported configuration: documents are compressed and
+    #: stored in PostgreSQL, in the same transaction as the row describing them, and covered
+    #: by the same ``pg_dump``. See :mod:`app.modules.ocr.storage` for the reasoning and for
+    #: the point at which it stops being the right answer.
+    #:
+    #: Filling all three in switches the backend to a bucket, for an install whose blobs have
+    #: outgrown the database. Two out of three is a half-finished configuration and reads as
+    #: "not configured" - see :attr:`document_storage`.
+    #:
+    #: Something has to be listening at that endpoint. In development that is the MinIO behind
+    #: the ``objectstore`` compose profile (``make up-objectstore``), which a plain
+    #: ``docker compose up`` deliberately does not start.
+    #:
+    #: The switch also makes document durability the operator's problem rather than the
+    #: database's: the single consistent ``pg_dump`` stops covering them, and a restore can
+    #: pair a ledger entry with a blob from a different moment.
+    #:
+    #: S3-compatible rather than tied to one vendor: the same code addresses MinIO on the
+    #: operator's own box or real S3, which matters for a product whose premise is that you
+    #: host it yourself.
     #:
     #: Objects are **private**. A bucket that allows anonymous reads would expose every
     #: invoice - a supplier's GSTIN, an amount, sometimes a bank account - to anyone who
@@ -407,26 +413,30 @@ class Settings(BaseSettings):
     minio_secret_key: SecretStr = SecretStr("")
     minio_bucket: str = "personalerp-documents"
 
-    #: TLS to the object store. False for a local MinIO on plain HTTP, true for anything
-    #: reachable over a network - the credentials and the documents both cross it.
+    #: TLS to the object store. False only for a store on the loopback interface; true for
+    #: anything reachable over a network - the credentials and the documents both cross it.
     minio_secure: bool = False
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def document_storage(self) -> Literal["object", "local"]:
-        """Which backend holds document blobs.
+    def document_storage(self) -> Literal["object", "database"]:
+        """Which backend holds document blobs. ``"database"`` unless a bucket is configured.
 
-        Derived from whether object storage is configured rather than set by a separate
-        variable. A separate switch is a way for the credentials and the backend to
+        Derived from whether object-storage credentials are present rather than set by a
+        separate variable. A separate switch is a way for the credentials and the backend to
         disagree - configured but unused, or selected but unusable - and neither failure
         announces itself until someone uploads a file.
+
+        All three of endpoint, access key and secret are required to switch. Two out of three
+        is a half-finished configuration, and the safe reading of it is "not configured": the
+        alternative is a deployment that boots happily and fails on its first upload.
         """
         configured = (
             self.minio_endpoint
             and self.minio_access_key
             and self.minio_secret_key.get_secret_value()
         )
-        return "object" if configured else "local"
+        return "object" if configured else "database"
 
     ocr_enabled: bool = True
 
