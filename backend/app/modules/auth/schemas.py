@@ -137,7 +137,10 @@ class ForgotPasswordRequest(BaseSchema):
 
 
 class ResetPasswordRequest(BaseSchema):
-    token: str
+    #: The address the code was sent to. Needed because a code carries no identity
+    #: of its own - it is looked up under the address that requested it.
+    email: Email
+    code: OtpCode
     new_password: PasswordStr
 
 

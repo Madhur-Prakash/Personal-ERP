@@ -19,7 +19,11 @@ from app.core.redis import get_redis
 from app.modules.audit.models import AuditAction, AuditLog, AuditSeverity
 from app.modules.auth.dependencies import REFRESH_COOKIE_NAME
 from app.modules.auth.models import SessionRevocationReason, UserSession
-from app.modules.auth.token_store import email_verification_store, otp_store
+from app.modules.auth.token_store import (
+    email_verification_store,
+    otp_store,
+    password_reset_otp_store,
+)
 from app.modules.organizations.models import Organization
 from app.modules.users.models import User
 from tests.conftest import TEST_PASSWORD
@@ -681,14 +685,12 @@ class TestPasswordReset:
             f"{api}/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
         )
 
-        from app.modules.auth.token_store import password_reset_store
-
-        token = await password_reset_store().issue({"user_id": str(user.id)})
+        code = await password_reset_otp_store.issue(user.email)
 
         new_password = "Quixotic-Ledger-Verse-77"
         response = await client.post(
             f"{api}/auth/reset-password",
-            json={"token": token, "new_password": new_password},
+            json={"email": user.email, "code": code, "new_password": new_password},
         )
         assert response.status_code == 200, response.text
 
@@ -705,34 +707,96 @@ class TestPasswordReset:
             )
         ).status_code == 200
 
-    async def test_reset_token_is_single_use(
+    async def test_reset_code_is_single_use(
         self, client: AsyncClient, api: str, user: User
     ) -> None:
-        from app.modules.auth.token_store import password_reset_store
-
-        token = await password_reset_store().issue({"user_id": str(user.id)})
+        code = await password_reset_otp_store.issue(user.email)
 
         assert (
             await client.post(
                 f"{api}/auth/reset-password",
-                json={"token": token, "new_password": "Quixotic-Ledger-Verse-77"},
+                json={
+                    "email": user.email,
+                    "code": code,
+                    "new_password": "Quixotic-Ledger-Verse-77",
+                },
             )
         ).status_code == 200
 
         second = await client.post(
             f"{api}/auth/reset-password",
-            json={"token": token, "new_password": "Another-Valid-Phrase-88"},
+            json={"email": user.email, "code": code, "new_password": "Another-Valid-Phrase-88"},
         )
         assert second.status_code == 401
+
+    async def test_wrong_reset_code_rejected(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        await password_reset_otp_store.issue(user.email)
+        response = await client.post(
+            f"{api}/auth/reset-password",
+            json={
+                "email": user.email,
+                "code": "000000",
+                "new_password": "Quixotic-Ledger-Verse-77",
+            },
+        )
+        assert response.status_code == 401
+
+    async def test_sign_in_code_cannot_reset_a_password(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        """The two emailed codes must not be interchangeable.
+
+        A sign-in code is issued on an unauthenticated request to anyone who knows
+        the address. If it also worked here, that request would be enough to take
+        the account over - so the namespaces are separate and this must fail.
+        """
+        sign_in_code = await otp_store.issue(user.email)
+
+        response = await client.post(
+            f"{api}/auth/reset-password",
+            json={
+                "email": user.email,
+                "code": sign_in_code,
+                "new_password": "Quixotic-Ledger-Verse-77",
+            },
+        )
+        assert response.status_code == 401
+
+        # And the sign-in code still works for what it was minted for - the failed
+        # attempt above must not have consumed it.
+        assert (
+            await client.post(
+                f"{api}/auth/otp/verify", json={"email": user.email, "code": sign_in_code}
+            )
+        ).status_code == 200
+
+    async def test_reset_code_brute_force_is_budgeted(self, user: User) -> None:
+        """Six digits must not be guessable. Same budget as the sign-in code.
+
+        Exercised against the store rather than the endpoint, because repeated wrong
+        guesses there also trip the account lockout, which would mask whether the
+        *code* itself was destroyed.
+        """
+        from app.core.redis import RedisKey
+        from app.modules.auth.token_store import MAX_OTP_ATTEMPTS
+
+        code = await password_reset_otp_store.issue(user.email)
+
+        for _ in range(MAX_OTP_ATTEMPTS):
+            assert await password_reset_otp_store.verify(user.email, "000000") is False
+
+        assert await get_redis().get(RedisKey.otp("password-reset", user.email)) is None
+        assert await password_reset_otp_store.verify(user.email, code) is False
 
     async def test_reset_enforces_password_policy(
         self, client: AsyncClient, api: str, user: User
     ) -> None:
-        from app.modules.auth.token_store import password_reset_store
-
-        token = await password_reset_store().issue({"user_id": str(user.id)})
+        code = await password_reset_otp_store.issue(user.email)
         response = await client.post(
-            f"{api}/auth/reset-password", json={"token": token, "new_password": "password123"}
+            f"{api}/auth/reset-password",
+            json={"email": user.email, "code": code, "new_password": "password123"},
         )
         assert response.status_code == 422
 
@@ -780,6 +844,32 @@ class TestChangePassword:
 # Passwordless
 # =============================================================================
 class TestPasswordless:
+    async def test_magic_link_email_points_at_the_verify_route(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The emailed link must be the one that *consumes* the token.
+
+        `/magic-link` is the request form and ignores search parameters, so a link
+        aimed there re-showed the form and signed nobody in. Asserted rather than
+        eyeballed because nothing else fails when it regresses - the mail sends, the
+        link opens, and the user simply never gets a session.
+        """
+        from app.modules.notifications import email as mailer
+
+        captured: dict[str, str] = {}
+
+        async def fake_send_email(**kwargs: str) -> bool:
+            captured.update(kwargs)
+            return True
+
+        monkeypatch.setattr(mailer, "send_email", fake_send_email)
+
+        assert await mailer.send_magic_link_email(
+            to="someone@example.com", name="Ada", token="tok-123"
+        )
+        assert "/magic-link/verify?token=tok-123" in captured["text"]
+        assert "/magic-link/verify?token=tok-123" in captured["html"]
+
     async def test_magic_link_signs_user_in(
         self, client: AsyncClient, api: str, user: User
     ) -> None:
@@ -872,7 +962,7 @@ class TestPasswordless:
             assert await otp_store.verify(user.email, "000000") is False
 
         # Budget spent: the stored code is destroyed, not merely rejected.
-        assert await get_redis().get(RedisKey.otp(user.email)) is None
+        assert await get_redis().get(RedisKey.otp("login", user.email)) is None
         assert await otp_store.verify(user.email, code) is False
 
     async def test_otp_brute_force_locks_the_account(

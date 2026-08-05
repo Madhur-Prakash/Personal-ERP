@@ -62,7 +62,7 @@ export function MagicLinkPage() {
             className="bg-primary/10 text-primary mx-auto flex h-12 w-12 items-center justify-center rounded-xl"
             aria-hidden
           >
-            <Sparkles className="h-6 w-6" />
+            <Mail className="h-6 w-6" />
           </div>
           <p className="text-content-muted text-[13px] leading-relaxed">
             The link expires in 15 minutes and can be used once.

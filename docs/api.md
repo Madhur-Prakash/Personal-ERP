@@ -122,8 +122,8 @@ drift from the implementation the way a hand-written table does.
 | POST | `/logout` | Bearer | `{all_devices: true}` revokes everything |
 | GET | `/me` | Bearer | Full principal: orgs, active org, permissions |
 | GET | `/password-policy` | - | The enforced policy |
-| POST | `/forgot-password` | - | Neutral response |
-| POST | `/reset-password` | - | Revokes all sessions |
+| POST | `/forgot-password` | - | Emails a 6-digit code. Neutral response |
+| POST | `/reset-password` | - | `{email, code, new_password}`. 5 attempts, then the code is destroyed. Revokes all sessions |
 | POST | `/change-password` | Bearer | Requires the current password; revokes all sessions |
 | POST | `/magic-link` | - | Neutral response |
 | POST | `/magic-link/verify` | - | Single-use |

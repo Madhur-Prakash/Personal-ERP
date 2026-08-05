@@ -326,7 +326,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             onPressed: () => context.go('/magic-link'),
             variant: AppButtonVariant.secondary,
             fullWidth: true,
-            leftIcon: LucideIcons.sparkles,
+            leftIcon: LucideIcons.mail,
             label: 'Email me a sign-in link',
           ),
           const SizedBox(height: 8),

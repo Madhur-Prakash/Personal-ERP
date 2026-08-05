@@ -28,7 +28,6 @@ class ForgotPasswordScreen extends ConsumerStatefulWidget {
 class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   final TextEditingController _email = TextEditingController();
   bool _submitting = false;
-  bool _sent = false;
   String? _error;
 
   @override
@@ -56,73 +55,22 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       // account exists, and surfacing a transport error differently here would
       // reintroduce the enumeration signal the API works to avoid.
     } finally {
-      // Always show the same confirmation, for the same reason.
-      if (mounted) {
-        setState(() {
-          _submitting = false;
-          _sent = true;
-        });
-      }
+      if (mounted) setState(() => _submitting = false);
     }
+
+    if (!mounted) return;
+    // Straight to code entry, carrying the address so it does not have to be
+    // retyped. Advancing unconditionally is what keeps the flow silent about
+    // whether that address has an account.
+    context.go('/reset-password?email=${Uri.encodeQueryComponent(email)}');
   }
 
   @override
   Widget build(BuildContext context) {
-    final AppTokens t = context.tokens;
-
-    if (_sent) {
-      return AuthLayout(
-        title: 'Check your email',
-        subtitle: Text.rich(
-          TextSpan(
-            children: <InlineSpan>[
-              const TextSpan(text: 'If an account exists for '),
-              TextSpan(
-                text: _email.text.trim(),
-                style: TextStyle(color: t.content, fontWeight: FontWeight.w600),
-              ),
-              const TextSpan(
-                text: ', we have sent a link to reset the password.',
-              ),
-            ],
-          ),
-        ),
-        footer: AuthFooterPrompt(
-          prompt: '',
-          actionLabel: 'Back to sign in',
-          onAction: () => context.go('/login'),
-        ),
-        child: Column(
-          spacing: 16,
-          children: <Widget>[
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: t.infoBg,
-                borderRadius: BorderRadius.circular(Radii.xl),
-              ),
-              alignment: Alignment.center,
-              child: Icon(LucideIcons.mail, size: 24, color: t.info),
-            ),
-            Text(
-              'The link expires in 30 minutes and can be used once.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: t.contentMuted,
-                height: 1.6,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
     return AuthLayout(
       title: 'Reset your password',
       subtitle: const Text(
-        'Enter your email and we will send you a reset link.',
+        'Enter your email and we will send you a 6-digit reset code.',
       ),
       footer: const BackToSignIn(),
       child: Column(
@@ -144,7 +92,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             loading: _submitting,
             fullWidth: true,
             size: AppButtonSize.lg,
-            label: 'Send reset link',
+            label: 'Send reset code',
           ),
         ],
       ),
@@ -156,9 +104,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
 // Reset password
 // =============================================================================
 class ResetPasswordScreen extends ConsumerStatefulWidget {
-  const ResetPasswordScreen({super.key, this.token});
+  const ResetPasswordScreen({super.key, this.email});
 
-  final String? token;
+  /// Prefills the address the code was sent to. A convenience only - the code is
+  /// what authorises the change, and it is never carried in the URL.
+  final String? email;
 
   @override
   ConsumerState<ResetPasswordScreen> createState() =>
@@ -166,22 +116,39 @@ class ResetPasswordScreen extends ConsumerStatefulWidget {
 }
 
 class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
+  late final TextEditingController _email = TextEditingController(
+    text: widget.email ?? '',
+  );
+  final TextEditingController _code = TextEditingController();
   final TextEditingController _password = TextEditingController();
   final TextEditingController _confirm = TextEditingController();
   bool _showPassword = false;
   bool _submitting = false;
+  String? _emailError;
+  String? _codeError;
   String? _passwordError;
   String? _confirmError;
 
   @override
   void dispose() {
+    _email.dispose();
+    _code.dispose();
     _password.dispose();
     _confirm.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
+    final String email = _email.text.trim();
+    final String code = _code.text.trim();
+
     setState(() {
+      _emailError = email.isEmpty || !email.contains('@')
+          ? 'Enter a valid email address'
+          : null;
+      _codeError = RegExp(r'^\d{6}$').hasMatch(code)
+          ? null
+          : 'Enter the 6-digit code from your email';
       _passwordError = _password.text.isEmpty ? 'Password is required' : null;
       _confirmError = _confirm.text.isEmpty
           ? 'Confirm your password'
@@ -189,13 +156,22 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
           ? 'Passwords do not match'
           : null;
     });
-    if (_passwordError != null || _confirmError != null) return;
+    if (_emailError != null ||
+        _codeError != null ||
+        _passwordError != null ||
+        _confirmError != null) {
+      return;
+    }
 
     setState(() => _submitting = true);
     try {
       await ref
           .read(authApiProvider)
-          .resetPassword(token: widget.token!, newPassword: _password.text);
+          .resetPassword(
+            email: email,
+            code: code,
+            newPassword: _password.text,
+          );
       if (!mounted) return;
       context.toastSuccess(
         'Password updated',
@@ -205,10 +181,19 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     } catch (error) {
       if (!mounted) return;
       final ApiError apiError = ApiError.from(error);
-      setState(
-        () => _passwordError =
-            apiError.fieldErrors['password'] ?? apiError.message,
-      );
+      final String? passwordProblem = apiError.fieldErrors['password'];
+      setState(() {
+        if (passwordProblem != null) {
+          _passwordError = passwordProblem;
+        } else if (apiError.code == 'invalid_token' ||
+            apiError.fieldErrors.containsKey('code')) {
+          // A rejected code is the common failure; attaching it to the password
+          // field would send the user to re-read the wrong input.
+          _codeError = apiError.fieldErrors['code'] ?? apiError.message;
+        } else {
+          _passwordError = apiError.message;
+        }
+      });
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -216,39 +201,45 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final AppTokens t = context.tokens;
     final PasswordPolicy? policy = ref
         .watch(passwordPolicyProvider)
         .valueOrNull;
 
-    // A missing token means the user landed here directly or the link was truncated by a
-    // mail client. Say so, rather than failing on submit.
-    if (widget.token == null || widget.token!.isEmpty) {
-      return AuthLayout(
-        title: 'Invalid reset link',
-        subtitle: const Text(
-          'This link is missing its token. Request a new one.',
-        ),
-        footer: AuthFooterPrompt(
-          prompt: '',
-          actionLabel: 'Request a new link',
-          onAction: () => context.go('/forgot-password'),
-        ),
-        child: Text(
-          'Reset links expire after 30 minutes and can only be used once.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: t.contentMuted),
-        ),
-      );
-    }
-
     return AuthLayout(
       title: 'Choose a new password',
-      subtitle: const Text('Make it long and hard to guess.'),
+      subtitle: const Text(
+        'Enter the code we emailed you, then pick a new password.',
+      ),
+      footer: AuthFooterPrompt(
+        prompt: '',
+        actionLabel: 'Send a new code',
+        onAction: () => context.go('/forgot-password'),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         spacing: 16,
         children: <Widget>[
+          AppInput(
+            label: 'Email',
+            controller: _email,
+            placeholder: 'you@company.com',
+            leftIcon: LucideIcons.mail,
+            error: _emailError,
+            keyboardType: TextInputType.emailAddress,
+          ),
+          AppInput(
+            label: 'Reset code',
+            controller: _code,
+            placeholder: '000000',
+            leftIcon: LucideIcons.keyRound,
+            error: _codeError,
+            hint: _codeError == null
+                ? 'Expires 30 minutes after it was sent'
+                : null,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+          ),
           AppInput(
             label: 'New password',
             controller: _password,
@@ -256,7 +247,6 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
             obscureText: !_showPassword,
             error: _passwordError,
             hint: _passwordError == null ? summarisePolicy(policy) : null,
-            autofocus: true,
             onChanged: (_) => setState(() {}),
             rightSlot: Padding(
               padding: const EdgeInsets.only(right: 4),

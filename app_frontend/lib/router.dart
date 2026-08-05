@@ -147,7 +147,9 @@ final Provider<GoRouter> routerProvider = Provider<GoRouter>((Ref ref) {
       GoRoute(
         path: '/reset-password',
         builder: (BuildContext context, GoRouterState state) =>
-            ResetPasswordScreen(token: state.uri.queryParameters['token']),
+            // `email` only - it prefills the form. The reset code is typed in,
+            // never carried in the URL.
+            ResetPasswordScreen(email: state.uri.queryParameters['email']),
       ),
       GoRoute(
         path: '/verify-email',

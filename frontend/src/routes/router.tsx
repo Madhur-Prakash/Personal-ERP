@@ -118,8 +118,11 @@ const resetPasswordRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/reset-password',
   component: ResetPasswordPage,
-  validateSearch: (search: Record<string, unknown>): { token?: string } =>
-    typeof search['token'] === 'string' ? { token: search['token'] } : {},
+  // `email` only, and it is a convenience: the reset code is what authorises the
+  // change, and it is typed in - never carried in the URL, where it would land in
+  // browser history and any `Referer` header.
+  validateSearch: (search: Record<string, unknown>): { email?: string } =>
+    typeof search['email'] === 'string' ? { email: search['email'] } : {},
 });
 
 const verifyEmailRoute = createRoute({

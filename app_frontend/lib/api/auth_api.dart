@@ -95,11 +95,16 @@ class AuthApi {
   );
 
   Future<void> resetPassword({
-    required String token,
+    required String email,
+    required String code,
     required String newPassword,
   }) => _client.post<Json>(
     '/auth/reset-password',
-    body: <String, dynamic>{'token': token, 'new_password': newPassword},
+    body: <String, dynamic>{
+      'email': email,
+      'code': code,
+      'new_password': newPassword,
+    },
   );
 
   Future<void> changePassword({

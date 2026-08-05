@@ -374,8 +374,12 @@ CSP on API responses is `default-src 'none'; frame-ancestors 'none'; base-uri
 'none'; form-action 'none'` - the API returns only JSON, so "load nothing, frame
 nothing" is both correct and maximally strict.
 
-`Referrer-Policy` specifically protects magic-link and reset tokens, which appear
-in URLs and would otherwise leak to third parties through the `Referer` header.
+`Referrer-Policy` specifically protects magic-link, verification and invitation
+tokens, which appear in URLs and would otherwise leak to third parties through the
+`Referer` header. The password-reset code is deliberately *not* one of them: it is
+typed into the page that requested it and never enters a URL, because a prefetched
+reset link hands over the account permanently, where a prefetched sign-in link
+grants only a session that 2FA still gates and the user can revoke.
 
 HSTS is production-only. Sending it over plain HTTP in development would pin
 `localhost` to HTTPS in the developer's browser and break every other local

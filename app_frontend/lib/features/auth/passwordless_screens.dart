@@ -100,7 +100,7 @@ class _MagicLinkScreenState extends ConsumerState<MagicLinkScreen> {
                 borderRadius: BorderRadius.circular(Radii.xl),
               ),
               alignment: Alignment.center,
-              child: Icon(LucideIcons.sparkles, size: 24, color: t.primary),
+              child: Icon(LucideIcons.mail, size: 24, color: t.primary),
             ),
             Text(
               'The link expires in 15 minutes and can be used once.',

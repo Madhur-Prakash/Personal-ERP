@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import uuid
+from collections.abc import Callable
 from typing import Any, Final
 
 from app.core.config import settings
@@ -88,13 +89,6 @@ def email_verification_store() -> OneTimeTokenStore:
     )
 
 
-def password_reset_store() -> OneTimeTokenStore:
-    return OneTimeTokenStore(
-        RedisKey.password_reset,
-        dt.timedelta(minutes=settings.password_reset_ttl_minutes),
-    )
-
-
 def magic_link_store() -> OneTimeTokenStore:
     return OneTimeTokenStore(
         RedisKey.magic_link,
@@ -112,18 +106,36 @@ class OtpStore:
     the only available lookup key. Requesting a new code overwrites the old one,
     which keeps "the code from my most recent email" true - the behaviour users
     expect.
+
+    **One instance per purpose.** ``purpose`` is part of every key, so a sign-in
+    code and a password-reset code for the same address are different entries with
+    independent attempt budgets. Sharing a namespace would mean a code mailed to
+    start a session could be typed into the reset form instead - the weaker intent
+    buying the stronger capability. Requesting one also must not silently invalidate
+    the other, which a shared key would do.
+
+    The TTL is read through a callable rather than captured at construction: these
+    are module-level singletons built at import, and a test that overrides
+    ``settings`` afterwards would otherwise keep the old window.
     """
+
+    def __init__(self, purpose: str, ttl_minutes: Callable[[], int]) -> None:
+        self._purpose = purpose
+        self._ttl_minutes = ttl_minutes
+
+    def _ttl_seconds(self) -> int:
+        return int(dt.timedelta(minutes=self._ttl_minutes()).total_seconds())
 
     async def issue(self, email: str) -> str:
         code = generate_otp()
         redis = get_redis()
-        ttl = int(dt.timedelta(minutes=settings.otp_ttl_minutes).total_seconds())
 
         pipe = redis.pipeline()
         # Store the digest, not the code: an OTP is low-entropy enough that a
         # Redis dump would otherwise hand over live codes.
-        pipe.set(RedisKey.otp(email), hash_token(code), ex=ttl)
-        pipe.delete(RedisKey.otp_attempts(email))  # fresh code, fresh budget
+        pipe.set(RedisKey.otp(self._purpose, email), hash_token(code), ex=self._ttl_seconds())
+        # Fresh code, fresh budget.
+        pipe.delete(RedisKey.otp_attempts(self._purpose, email))
         await pipe.execute()
         return code
 
@@ -139,32 +151,31 @@ class OtpStore:
         mistyped four times can still succeed on the fifth.
         """
         redis = get_redis()
+        code_key = RedisKey.otp(self._purpose, email)
+        attempts_key = RedisKey.otp_attempts(self._purpose, email)
 
-        attempts = await redis.incr(RedisKey.otp_attempts(email))
+        attempts = await redis.incr(attempts_key)
         if attempts == 1:
-            await redis.expire(
-                RedisKey.otp_attempts(email),
-                int(dt.timedelta(minutes=settings.otp_ttl_minutes).total_seconds()),
-            )
+            await redis.expire(attempts_key, self._ttl_seconds())
 
         if attempts > MAX_OTP_ATTEMPTS:
             # Budget was already spent by an earlier request.
-            await redis.delete(RedisKey.otp(email))
+            await redis.delete(code_key)
             return False
 
-        stored = await redis.get(RedisKey.otp(email))
+        stored = await redis.get(code_key)
         if stored is None or stored != hash_token(code.strip()):
             if attempts >= MAX_OTP_ATTEMPTS:
-                await redis.delete(RedisKey.otp(email))
+                await redis.delete(code_key)
                 log.warning(
                     "otp attempt budget exhausted - code destroyed",
-                    extra={"email": email, "attempts": attempts},
+                    extra={"email": email, "purpose": self._purpose, "attempts": attempts},
                 )
             return False
 
         pipe = redis.pipeline()
-        pipe.delete(RedisKey.otp(email))
-        pipe.delete(RedisKey.otp_attempts(email))
+        pipe.delete(code_key)
+        pipe.delete(attempts_key)
         await pipe.execute()
         return True
 
@@ -338,7 +349,13 @@ class SessionRevocationStore:
 
 
 # Module-level singletons - all are stateless wrappers over the shared pool.
-otp_store = OtpStore()
+#: The sign-in code.
+otp_store = OtpStore("login", lambda: settings.otp_ttl_minutes)
+
+#: The password-reset code. A separate namespace from :data:`otp_store` - see
+#: :class:`OtpStore` - and it borrows ``password_reset_ttl_minutes`` so the reset
+#: window stays tunable independently of the sign-in one.
+password_reset_otp_store = OtpStore("password-reset", lambda: settings.password_reset_ttl_minutes)
 revoked_sessions = SessionRevocationStore()
 login_throttle = LoginThrottle()
 two_factor_challenges = TwoFactorChallengeStore()

@@ -80,7 +80,7 @@ from app.modules.auth.token_store import (
     login_throttle,
     magic_link_store,
     otp_store,
-    password_reset_store,
+    password_reset_otp_store,
     revoked_sessions,
     token_epochs,
     two_factor_challenges,
@@ -629,32 +629,64 @@ class AuthService:
     # Password reset / change
     # =========================================================================
     async def forgot_password(self, email: str) -> str:
+        """Mail a reset code. Always answers neutrally, account or not.
+
+        A code rather than a link, unlike signing in. A magic link is a bearer
+        credential in an inbox and that is an accepted trade for a session that 2FA
+        still gates; the same prefetch against a reset link hands over the account
+        permanently, so this one never leaves the browser that asked for it.
+        """
         user = await self.users.get_by_email(email)
 
         if user is not None and user.can_authenticate:
-            token = await password_reset_store().issue({"user_id": str(user.id)})
-            await mailer.send_password_reset_email(to=user.email, name=user.full_name, token=token)
+            code = await password_reset_otp_store.issue(user.email)
+            await mailer.send_password_reset_email(to=user.email, name=user.full_name, code=code)
             await self.audit.record(
                 AuditAction.USER_PASSWORD_RESET_REQUESTED,
                 actor=user,
                 resource_type="user",
                 resource_id=user.id,
-                summary="Requested a password reset",
+                summary="Requested a password reset code",
             )
         else:
             log.info("password reset requested for unknown address", extra={"email": email})
 
         return _NEUTRAL_EMAIL_MESSAGE
 
-    async def reset_password(self, token: str, new_password: str, ctx: RequestContext) -> User:
-        payload = await password_reset_store().consume(token)
-        if payload is None:
-            raise InvalidTokenError("This reset link is invalid or has expired")
+    async def reset_password(
+        self, email: str, code: str, new_password: str, ctx: RequestContext
+    ) -> User:
+        """Set a new password against a code mailed by :meth:`forgot_password`.
 
-        user = await self.users.get(uuid.UUID(payload["user_id"]))
+        The code is the whole proof, so everything protecting it matters: it is
+        purpose-scoped (a sign-in code cannot be used here), single-use, and backed
+        by an attempt budget that destroys it after
+        :data:`~app.modules.auth.token_store.MAX_OTP_ATTEMPTS` wrong guesses.
+
+        The lockout is checked *and* recorded here, unlike the magic-link flow. Six
+        digits is guessable in a way a 32-byte token is not, so without it an attacker
+        gets a fresh budget of five for every code they force the account to send
+        itself.
+        """
+        email = email.strip().lower()
+
+        if (lock_seconds := await login_throttle.is_locked(email)) > 0:
+            raise AccountLockedError(
+                f"Too many failed attempts. Try again in {lock_seconds // 60 + 1} minutes.",
+                details={"retry_after_seconds": lock_seconds},
+            )
+
+        if not await password_reset_otp_store.verify(email, code):
+            await self._record_failed_login(email, ctx, reason="bad_password_reset_code")
+            raise InvalidTokenError("This reset code is invalid or has expired")
+
+        user = await self.users.get_by_email(email)
         if user is None:
+            # Only reachable if the account was deleted between the two requests -
+            # the code was verified, so the address existed when it was issued.
             raise NotFoundError("User")
 
+        await login_throttle.reset(email)
         await self._apply_new_password(user, new_password, ctx, reason="reset")
 
         await self.audit.record(

@@ -38,11 +38,17 @@ exercises is the one that breaks. See
 
 **With `GMAIL_CREDENTIALS_B64` unset (the default)** the mailer writes the message
 body to the log instead of sending it, so a fresh checkout and the test suite work
-with no credentials. **But logifyx's masking redacts `token=...` from the logged
-URL**, so the link is not usable as logged:
+with no credentials.
+
+**Emailed codes are readable straight out of the log** - the sign-in code and the
+password-reset code are 6 digits in the body, not URL parameters, so nothing masks
+them. Request one, read it from the console, type it in.
+
+**Links are not.** Verification and magic-link mails carry a `token=` parameter, and
+**logifyx's masking redacts it from the logged URL**:
 
 ```
-http://localhost:5173/verify-email?****
+http://localhost:5173/magic-link/verify?****
 ```
 
 That redaction is correct - a one-time credential should not sit in a log file -

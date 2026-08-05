@@ -1,5 +1,5 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { ArrowLeft, Check, Eye, EyeOff, Mail } from 'lucide-react';
+import { ArrowLeft, Check, Eye, EyeOff, KeyRound, Mail } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -24,11 +24,10 @@ const forgotSchema = z.object({
 });
 
 export function ForgotPasswordPage() {
-  const [sent, setSent] = useState(false);
+  const navigate = useNavigate();
   const {
     register,
     handleSubmit,
-    getValues,
     setError,
     formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof forgotSchema>>({ defaultValues: { email: '' } });
@@ -47,45 +46,16 @@ export function ForgotPasswordPage() {
       // the account exists, and surfacing a transport error differently here
       // would reintroduce the enumeration signal the API works to avoid.
     }
-    // Always show the same confirmation, for the same reason.
-    setSent(true);
-  }
-
-  if (sent) {
-    return (
-      <AuthLayout
-        title="Check your email"
-        subtitle={
-          <>
-            If an account exists for <strong className="text-content">{getValues('email')}</strong>,
-            we have sent a link to reset the password.
-          </>
-        }
-        footer={
-          <Link to="/login" className="text-primary font-medium hover:underline">
-            Back to sign in
-          </Link>
-        }
-      >
-        <div className="space-y-4 text-center">
-          <div
-            className="bg-info-bg text-info mx-auto flex h-12 w-12 items-center justify-center rounded-xl"
-            aria-hidden
-          >
-            <Mail className="h-6 w-6" />
-          </div>
-          <p className="text-content-muted text-[13px] leading-relaxed">
-            The link expires in 30 minutes and can be used once.
-          </p>
-        </div>
-      </AuthLayout>
-    );
+    // Straight to code entry, always - carrying the address so it does not have
+    // to be retyped. Advancing unconditionally is what keeps the flow silent
+    // about whether that address has an account.
+    void navigate({ to: '/reset-password', search: { email: parsed.data.email }, replace: true });
   }
 
   return (
     <AuthLayout
       title="Reset your password"
-      subtitle="Enter your email and we will send you a reset link."
+      subtitle="Enter your email and we will send you a 6-digit reset code."
       footer={
         <Link
           to="/login"
@@ -108,7 +78,7 @@ export function ForgotPasswordPage() {
           {...register('email')}
         />
         <Button type="submit" fullWidth size="lg" loading={isSubmitting}>
-          Send reset link
+          Send reset code
         </Button>
       </form>
     </AuthLayout>
@@ -120,6 +90,8 @@ export function ForgotPasswordPage() {
 // =============================================================================
 const resetSchema = z
   .object({
+    email: z.string().min(1, 'Email is required').email('Enter a valid email address'),
+    code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code from your email'),
     new_password: z.string().min(1, 'Password is required'),
     confirm_password: z.string().min(1, 'Confirm your password'),
   })
@@ -127,6 +99,8 @@ const resetSchema = z
     message: 'Passwords do not match',
     path: ['confirm_password'],
   });
+
+type ResetField = 'email' | 'code' | 'new_password' | 'confirm_password';
 
 export function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -139,44 +113,33 @@ export function ResetPasswordPage() {
     setError,
     formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof resetSchema>>({
-    defaultValues: { new_password: '', confirm_password: '' },
+    // The address arrives from the request page so it does not have to be
+    // retyped, but it stays editable: someone who opens this page from a
+    // bookmark, or on a different device from the one that asked, has no other
+    // way to supply it.
+    defaultValues: {
+      email: typeof search.email === 'string' ? search.email : '',
+      code: '',
+      new_password: '',
+      confirm_password: '',
+    },
   });
 
-  // Declared above the early return below - hooks must run unconditionally.
   const { data: policy } = usePasswordPolicy();
-
-  // A missing token means the user landed here directly or the link was
-  // truncated by a mail client. Say so, rather than failing on submit.
-  if (!search.token) {
-    return (
-      <AuthLayout
-        title="Invalid reset link"
-        subtitle="This link is missing its token. Request a new one."
-        footer={
-          <Link to="/forgot-password" className="text-primary font-medium hover:underline">
-            Request a new link
-          </Link>
-        }
-      >
-        <p className="text-content-muted text-center text-[13px]">
-          Reset links expire after 30 minutes and can only be used once.
-        </p>
-      </AuthLayout>
-    );
-  }
 
   async function onSubmit(values: z.infer<typeof resetSchema>) {
     const parsed = resetSchema.safeParse(values);
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
-        setError(issue.path[0] as 'new_password' | 'confirm_password', { message: issue.message });
+        setError(issue.path[0] as ResetField, { message: issue.message });
       }
       return;
     }
 
     try {
       await authApi.resetPassword({
-        token: search.token!,
+        email: parsed.data.email,
+        code: parsed.data.code,
         new_password: parsed.data.new_password,
       });
       toast.success('Password updated', {
@@ -190,6 +153,12 @@ export function ResetPasswordPage() {
           setError('new_password', { message: fieldErrors['password'] });
           return;
         }
+        // A rejected code is the common failure, and attaching the message to
+        // the password field would send the user to re-read the wrong input.
+        if (error.code === 'invalid_token' || fieldErrors['code']) {
+          setError('code', { message: fieldErrors['code'] ?? error.message });
+          return;
+        }
         setError('new_password', { message: error.message });
         return;
       }
@@ -198,13 +167,44 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <AuthLayout title="Choose a new password" subtitle="Make it long and hard to guess.">
+    <AuthLayout
+      title="Choose a new password"
+      subtitle="Enter the code we emailed you, then pick a new password."
+      footer={
+        <Link to="/forgot-password" className="text-primary font-medium hover:underline">
+          Send a new code
+        </Link>
+      }
+    >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <Input
+          label="Email"
+          type="email"
+          autoComplete="email"
+          placeholder="you@company.com"
+          leftIcon={<Mail />}
+          error={errors.email?.message}
+          {...register('email')}
+        />
+
+        <Input
+          label="Reset code"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          autoFocus
+          maxLength={6}
+          placeholder="000000"
+          className="text-center font-mono text-lg tracking-[0.3em]"
+          leftIcon={<KeyRound />}
+          hint={errors.code ? undefined : 'Expires 30 minutes after it was sent'}
+          error={errors.code?.message}
+          {...register('code')}
+        />
+
         <Input
           label="New password"
           type={showPassword ? 'text' : 'password'}
           autoComplete="new-password"
-          autoFocus
           placeholder={passwordPlaceholder(policy)}
           hint={errors.new_password ? undefined : summarisePolicy(policy)}
           error={errors.new_password?.message}

@@ -1,7 +1,7 @@
 """Transactional email through the Gmail API.
 
 **One transport, in one file.** Everything here - loading the credential, minting
-access tokens, posting the message, and the five message templates - is the single
+access tokens, posting the message, and the six message templates - is the single
 path an email takes out of this application. There is no SMTP fallback and no
 local mail catcher: a second transport means two code paths that can render the
 same email differently, and the one that is not exercised is the one that breaks.
@@ -10,9 +10,9 @@ Two behaviours, chosen by whether ``GMAIL_CREDENTIALS_B64`` is configured:
 
 * **Configured** - sends through the Gmail API.
 * **Not configured** - renders the message and writes it to the logifyx log,
-  including the verification link and the sign-in and password-reset codes. This is
-  not a transport; it is what makes the test suite and a fresh checkout work with no
-  credentials at all, and it is the only way to complete either flow without them.
+  including the verification and sign-in links and the emailed codes. This is not a
+  transport; it is what makes the test suite and a fresh checkout work with no
+  credentials at all, and it is the only way to complete those flows without them.
 
 **Why the Gmail API rather than SMTP.** Google refuses plain passwords, and app
 passwords require 2FA plus a per-account secret that any Workspace admin can
@@ -37,9 +37,11 @@ value with ``uv run python scripts/mint_gmail_token.py``.
 executes whatever the payload tells it to, so this blob is not data - it carries the
 same authority as the code in this repository. It is safe here because it comes from
 the operator's own ``.env`` or secret store, written by the operator. It would not be
-safe sourced from a database, an upload, an API request, or a shared/untrusted
-config service, and :func:`_load_credentials` deliberately refuses anything that is
-not a pickled ``Credentials`` so a swapped-in value fails loudly rather than running.
+safe sourced from a database, an upload, an API request, or a shared/untrusted config
+service. :func:`_load_credentials` does not validate the payload before unpickling
+it, so that constraint is the only thing keeping this safe - if the value ever starts
+arriving from somewhere the operator does not control, this function has to change
+first.
 
 Sending never raises into a request. A signup that succeeded must not report
 failure because Google was briefly unreachable - the user can always request
@@ -47,19 +49,24 @@ another verification email, but a rolled-back registration is unrecoverable. A
 transient failure is retried a few times and logged as a warning; a permanent one,
 or the last attempt, is logged at error level for alerting.
 
-**Codes, not sign-in links.** Both flows a user can start from the sign-in screen -
-an email sign-in code and a password reset - deliver a short numeric code that is
-typed back into the page that asked for it. There is no magic link, and adding one
-back would reintroduce what got it removed: a link is a bearer credential sitting in
-an inbox, it authenticates whoever opens it (including a mail scanner that prefetches
-URLs), and it has to survive being mangled by clients that rewrite links. A code is
-useless without the session that requested it.
+**Links and codes, and which is which.** Signing in offers both: a magic link
+(:func:`send_magic_link_email`) and a 6-digit code (:func:`send_otp_email`).
+Resetting a password is a code only - never a link.
 
-The two codes are *not* interchangeable - see
-:mod:`app.modules.auth.token_store`, where each purpose gets its own namespace, so a
-sign-in code cannot be replayed to reset a password.
+The distinction is not stylistic. A link in an inbox is a bearer credential: it
+authenticates whoever opens it, including a mail scanner that prefetches URLs. That
+risk is acceptable for *signing in*, where the link grants a session that 2FA still
+gates and the user can revoke from device history - and it buys the one-tap flow
+that makes passwordless worth having. It is not acceptable for a password reset,
+where the same prefetch would hand over permanent control of the account. So the
+reset code is typed back into the page that asked for it, and never leaves the
+browser it was requested from.
 
-Templates are inline Jinja2 rather than files: Stage 1 has five emails, and a
+The two codes are *not* interchangeable - see :mod:`app.modules.auth.token_store`,
+where each purpose gets its own namespace, so a sign-in code cannot be replayed to
+reset a password.
+
+Templates are inline Jinja2 rather than files: Stage 1 has six emails, and a
 template directory plus loader configuration is machinery for a problem that does
 not exist yet. Extracting them is mechanical when the count grows.
 """
@@ -79,7 +86,6 @@ from urllib.parse import urlencode
 import anyio.to_thread
 from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from jinja2 import Environment, select_autoescape
@@ -116,17 +122,20 @@ class GmailConfigurationError(RuntimeError):
 # =============================================================================
 # Credentials
 # =============================================================================
-def _load_credentials() -> Credentials:
-    """Decode and unpickle the configured credential.
+def _load_credentials() -> Any:
+    """Unpickle the configured credential and build an authorised Gmail client.
 
-    Every failure here is a deployment mistake, and the difference between "not
-    valid base64" and "no refresh token in it" is the difference between a
-    five-second fix and an hour of guessing - so each is reported separately.
+    Returns the *client*, not the credential - hence ``Any``: `googleapiclient` has
+    no stubs, so `build()` is untyped, and annotating this `-> Credentials` made
+    mypy reject the `service.users()` call at the only call site.
     """
     b64 = settings.gmail_credentials_b64
     if not b64:
         raise ValueError("GMAIL_TOKEN_B64 environment variable is not set.")
-    creds = pickle.loads(base64.b64decode(b64))
+    # S301: the blob is the operator's own configuration, which carries the same
+    # authority as this repository's code - see the module docstring. It must never
+    # be sourced from a database, an upload, or an untrusted config service.
+    creds = pickle.loads(base64.b64decode(b64))  # noqa: S301
 
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
@@ -142,6 +151,7 @@ def _load_credentials() -> Credentials:
 #: messages per signup, so serialising costs nothing measurable and removes the
 #: whole class of problem.
 _send_lock = threading.Lock()
+
 
 def _send_sync(message: EmailMessage) -> None:
     """Post one message. Blocking - the whole reason this runs in a thread."""
@@ -403,6 +413,38 @@ async def send_password_reset_email(*, to: str, name: str, code: str) -> bool:
         "changed.\n"
     )
     return await send_email(to=to, subject=subject, html=html, text=text, category="password_reset")
+
+
+async def send_magic_link_email(*, to: str, name: str, token: str) -> bool:
+    """The one-click sign-in link.
+
+    Points at ``/magic-link/verify``, not ``/magic-link``. The latter is the *request*
+    form, which discards search parameters - an emailed link aimed there silently did
+    nothing but re-show the form.
+    """
+    link = _frontend_url("/magic-link/verify", token=token)
+    minutes = settings.magic_link_ttl_minutes
+
+    html = _render(
+        """
+        <h1>Your sign-in link</h1>
+        <p>Hi {{ name }}, tap below to sign in. No password needed.</p>
+        <a class="btn" href="{{ link }}">Sign in to Personal ERP</a>
+        <p class="fallback">Or paste this into your browser:<br>{{ link }}</p>
+        <p>This link expires in {{ minutes }} minutes and can be used once.</p>
+        """,
+        subject="Your sign-in link",
+        name=name,
+        link=link,
+        minutes=minutes,
+    )
+    text = (
+        f"Hi {name},\n\nSign in to Personal ERP:\n{link}\n\n"
+        f"This link expires in {minutes} minutes and can be used once.\n"
+    )
+    return await send_email(
+        to=to, subject="Your sign-in link", html=html, text=text, category="magic_link"
+    )
 
 
 async def send_otp_email(*, to: str, name: str, code: str) -> bool:

@@ -312,7 +312,7 @@ async def password_policy() -> PasswordPolicyResponse:
 @router.post(
     "/forgot-password",
     response_model=MessageResponse,
-    summary="Request a password reset link",
+    summary="Request a password reset code by email",
 )
 async def forgot_password(
     data: ForgotPasswordRequest,
@@ -325,7 +325,7 @@ async def forgot_password(
 @router.post(
     "/reset-password",
     response_model=MessageResponse,
-    summary="Set a new password using a reset token",
+    summary="Set a new password using an emailed reset code",
 )
 async def reset_password(
     data: ResetPasswordRequest,
@@ -333,7 +333,7 @@ async def reset_password(
     service: AuthServiceDep,
     ctx: RequestCtx,
 ) -> MessageResponse:
-    await service.reset_password(data.token, data.new_password, ctx)
+    await service.reset_password(data.email, data.code, data.new_password, ctx)
     # Every session was revoked, so any refresh cookie in this browser is dead.
     _clear_refresh_cookie(response)
     return MessageResponse(

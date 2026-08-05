@@ -36,20 +36,22 @@ class RedisKey:
         return f"{cls.PREFIX}:auth:verify:{token}"
 
     @classmethod
-    def password_reset(cls, token: str) -> str:
-        return f"{cls.PREFIX}:auth:reset:{token}"
-
-    @classmethod
     def magic_link(cls, token: str) -> str:
         return f"{cls.PREFIX}:auth:magic:{token}"
 
+    # --- auth: emailed codes (value -> code digest) ---
+    #: ``purpose`` separates the code namespaces, and it is load-bearing rather than
+    #: tidiness: signing in and resetting a password both mail a 6-digit code to the
+    #: same address, and sharing one key would let a sign-in code be typed into the
+    #: reset form. That is a privilege escalation - a code minted to start a session
+    #: would instead set a new password - so the two can never collide.
     @classmethod
-    def otp(cls, email: str) -> str:
-        return f"{cls.PREFIX}:auth:otp:{email.lower()}"
+    def otp(cls, purpose: str, email: str) -> str:
+        return f"{cls.PREFIX}:auth:otp:{purpose}:{email.lower()}"
 
     @classmethod
-    def otp_attempts(cls, email: str) -> str:
-        return f"{cls.PREFIX}:auth:otp-attempts:{email.lower()}"
+    def otp_attempts(cls, purpose: str, email: str) -> str:
+        return f"{cls.PREFIX}:auth:otp-attempts:{purpose}:{email.lower()}"
 
     # --- auth: brute-force protection ---
     @classmethod

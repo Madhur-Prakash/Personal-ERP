@@ -279,7 +279,7 @@ export function LoginPage() {
           Rendered as links, not buttons - they navigate, so they must be `<a>`. */}
       <div className="grid gap-2">
         <Link to="/magic-link" className={buttonClasses('secondary', 'md', 'w-full')}>
-          <Sparkles className="mr-2 h-4 w-4" aria-hidden />
+          <Mail className="mr-2 h-4 w-4" aria-hidden />
           Email me a sign-in link
         </Link>
         <Link to="/otp" className={buttonClasses('ghost', 'md', 'w-full')}>
