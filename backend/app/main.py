@@ -22,8 +22,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
+from app.core.limiter import register_limiter
 from app.core.logging import configure_logging, flush_logs, get_logger
 from app.core.middleware import (
+    BodySizeLimitMiddleware,
+    DocsGuardMiddleware,
+    GatewayGuardMiddleware,
     RateLimitMiddleware,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
@@ -60,6 +64,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             "environment": str(settings.environment),
             "debug": settings.debug,
             "docs": settings.docs_url,
+            # The posture, named at boot. Every one of these is a thing an operator will
+            # otherwise discover by being attacked: a gateway check silently off because
+            # the variable was not carried into the new deployment, or a rate limiter
+            # disabled for a load test and never turned back on. Config validation
+            # refuses to start a production process in any of these states, but staging
+            # and development run happily, and those are where the misconfiguration is
+            # written before it is copied.
+            "gateway_enforced": settings.gateway_enforced,
+            "origin_enforced": settings.enforce_origin,
+            "rate_limiting": settings.rate_limit_enabled,
+            "proxy_headers_trusted": settings.trust_proxy_headers,
             # Where uploaded documents go, named at startup because it is derived from
             # whether credentials happen to be configured - and settings are read once per
             # process, so an `.env` edited after the server started has no effect until it
@@ -74,6 +89,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             ),
         },
     )
+
+    # Reported here rather than raised in config validation, because it is a tuning
+    # choice rather than a mistake - but an invisible one. Both rate-limit buckets must
+    # have room, so a per-IP ceiling below a tier makes that tier a dead letter and the
+    # per-IP number the only limit that binds. Since that bucket is shared by everyone
+    # behind one NAT, the symptom is intermittent 429s that track how many colleagues are
+    # online, which is not a trail that leads back to a configuration file.
+    if eclipsed := settings.rate_limit_tiers_eclipsed_by_ip:
+        log.warning(
+            "RATE_LIMIT_IP is below one or more tiers, so those tiers can never bind - "
+            "the per-IP ceiling is the effective limit, and it is shared across a NAT",
+            extra={"rate_limit_ip": settings.rate_limit_ip, "eclipsed_tiers": eclipsed},
+        )
 
     # Before Redis and before the first request: a missing schema is fatal in a way an
     # unreachable Redis is not. No-op unless RUN_MIGRATIONS_ON_STARTUP is set.
@@ -112,9 +140,14 @@ def create_app() -> FastAPI:
             "`Authorization: Bearer <access_token>`. Refresh tokens are delivered "
             "as an HttpOnly cookie and rotated on every use."
         ),
+        # All three are None in production. `docs_enabled` is the single fact behind
+        # them, so there is no way for the schema to be exposed while the viewers are
+        # hidden - which is the configuration that looks safe and is not, since the
+        # schema is the part worth having. :class:`DocsGuardMiddleware` enforces the same
+        # rule at the HTTP layer, so re-adding a route by hand does not reopen it.
         docs_url=settings.docs_url,
-        redoc_url="/redoc" if not settings.environment.is_production else None,
-        openapi_url="/openapi.json" if not settings.environment.is_production else None,
+        redoc_url=settings.redoc_url,
+        openapi_url=settings.openapi_url,
         lifespan=lifespan,
         # Trailing-slash redirects turn a POST into a GET and silently drop the
         # body; better to 404 and make the client fix its URL.
@@ -122,6 +155,10 @@ def create_app() -> FastAPI:
     )
 
     _register_middleware(app)
+
+    # Before the exception handlers, because it registers one of its own for slowapi's
+    # RateLimitExceeded - which must be in place before any decorated route can raise it.
+    register_limiter(app)
     register_exception_handlers(app)
 
     # Unversioned: orchestrators should not have to track an API version.
@@ -140,18 +177,39 @@ def _register_middleware(app: FastAPI) -> None:
 
     Starlette applies middleware in reverse registration order, so the *last*
     registered runs *first* on an incoming request. Reading the calls below
-    bottom-up gives the actual request path:
+    bottom-up gives the actual request path::
 
-        TrustedHost -> RequestContext -> RateLimit -> CORS -> GZip
-            -> SecurityHeaders -> route handler
+        SecurityHeaders -> TrustedHost -> RequestContext -> DocsGuard
+            -> GatewayGuard -> CORS -> BodySizeLimit -> RateLimit -> GZip
+            -> route handler
 
-    Which is what we want: reject bad hosts before doing any work, assign a
-    request id early so everything downstream can be correlated, then rate-limit
-    before touching the database.
+    Every position in that list is a decision:
+
+    * **SecurityHeaders outermost.** It is the only layer that touches the response on
+      the way out, so being furthest out is what makes the headers unconditional -
+      present on a 429 from the limiter, a 404 from a guard, and a 500 from a handler
+      alike. Registered innermost (the obvious reading of "applied last") it would only
+      ever decorate responses that reached the router, and the rejections - the ones an
+      attacker sees most - would go out bare.
+    * **TrustedHost before anything expensive.** A forged ``Host`` poisons the absolute
+      URLs in password-reset mail, so it is refused before a request id is even minted.
+      Disabled locally, where the host legitimately varies (localhost, 127.0.0.1, a LAN
+      IP for testing from a phone).
+    * **RequestContext next.** Everything below it can reject, and a rejection with no
+      request id cannot be correlated with the report that follows it.
+    * **The two guards before CORS.** A caller that has not come through our edge should
+      not learn whether this origin is allowed, or that there is an API here at all.
+    * **CORS above the limiter.** A 429 or a 413 has to be *readable* by the frontend -
+      it needs ``Retry-After`` to back off intelligently. Without the CORS headers on
+      those responses the browser hands the page an opaque network error instead, and
+      the client cannot tell "slow down" from "the server is gone".
+    * **RateLimit before the router.** A flood costs one Redis round trip rather than a
+      database transaction.
     """
-    app.add_middleware(SecurityHeadersMiddleware)
-
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
@@ -161,25 +219,30 @@ def _register_middleware(app: FastAPI) -> None:
         # `*` together with credentials.
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        # An allow-list, not a wildcard. `*` is invalid alongside credentials anyway,
+        # and enumerating the four headers the frontend actually sends means a request
+        # carrying anything else is rejected at the preflight.
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", settings.gateway_header],
         expose_headers=[
             "X-Request-ID",
             "X-RateLimit-Limit",
             "X-RateLimit-Remaining",
             "X-RateLimit-Reset",
+            "X-RateLimit-Policy",
             "Retry-After",
+            "Content-Disposition",
         ],
         max_age=3600,
     )
 
-    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(GatewayGuardMiddleware)
+    app.add_middleware(DocsGuardMiddleware)
     app.add_middleware(RequestContextMiddleware)
 
-    # Blocks Host-header injection, which otherwise poisons absolute URLs in
-    # emails. Disabled locally, where the host varies (localhost, 127.0.0.1,
-    # a LAN IP for mobile testing).
     if settings.environment.is_production:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+
+    app.add_middleware(SecurityHeadersMiddleware)
 
 
 app = create_app()

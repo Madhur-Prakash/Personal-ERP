@@ -28,6 +28,27 @@ os.environ.update(
         "ENVIRONMENT": "test",
         "DEBUG": "true",
         "POSTGRES_DB": "personalerp_test",
+        # ---------------------------------------------------------------------
+        # Neutralise the full-URL overrides. This is the most important pair of
+        # lines in the file.
+        #
+        # `DATABASE_URL` and `REDIS_URL` take priority over the composed
+        # `POSTGRES_*`/`REDIS_*` parts, so setting `POSTGRES_DB` above and
+        # `REDIS_DB` below achieves *nothing* while either URL is present - and a
+        # developer whose `.env` holds a managed-database URL for a real
+        # deployment has both. The suite runs `Base.metadata.drop_all` and
+        # `redis.flushdb()`, so under that `.env` `make test` drops every table in
+        # the deployment's database and flushes its Redis, with no warning and no
+        # way to tell from the output that it happened.
+        #
+        # A `.env` entry cannot be removed from here, only overridden, so the
+        # override is the empty string - which `app.core.config` maps back to
+        # "not set" (see `_blank_to_none`). `Settings._enforce_test_safety` then
+        # refuses to start at all if the resolved database name does not end in
+        # `_test`, so this cannot be quietly undone.
+        # ---------------------------------------------------------------------
+        "DATABASE_URL": "",
+        "REDIS_URL": "",
         # Dedicated Redis index so a test run cannot touch development data.
         "REDIS_DB": "15",
         "SECRET_KEY": "test-secret-key-not-used-in-production-0123456789abcdef",
@@ -119,6 +140,14 @@ async def _create_test_database() -> AsyncGenerator[None]:
     Not ``autouse``: :func:`engine` depends on it, so it runs for exactly the
     tests that need a database and no others. See :data:`INFRA_FIXTURES`.
     """
+    # Belt and braces with `Settings._enforce_test_safety`, which has already refused to
+    # construct if this is wrong. Restated at the call site because this is the line that
+    # does the destroying, and a future refactor that moves the settings check has to
+    # trip over this one to get here.
+    assert settings.database_name.endswith("_test"), (
+        f"refusing to drop_all against '{settings.database_name}'"
+    )
+
     admin_dsn = settings.sqlalchemy_dsn.rsplit("/", 1)[0] + "/postgres"
     admin_engine = create_async_engine(admin_dsn, isolation_level="AUTOCOMMIT")
 

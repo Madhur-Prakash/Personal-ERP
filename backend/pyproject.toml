@@ -52,6 +52,7 @@ dependencies = [
     # would pull cairo and pango into the image for a document with no HTML in it.
     "openpyxl>=3.1.5",
     "fpdf2>=2.8.7",
+    "slowapi>=0.1.10",
 ]
 
 [project.optional-dependencies]

@@ -19,12 +19,11 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import (
     BeforeValidator,
     Field,
-    PostgresDsn,
-    RedisDsn,
     SecretStr,
     computed_field,
     model_validator,
@@ -79,6 +78,49 @@ def _split_csv(value: object) -> object:
 CsvList = Annotated[list[str], NoDecode, BeforeValidator(_split_csv)]
 
 
+def _blank_to_none(value: object) -> object:
+    """Treat an empty or whitespace-only value as "not set".
+
+    Needed because a ``.env`` entry cannot be *removed* by the process environment, only
+    overridden - and there is no string that means "ignore the file's value". Without
+    this, ``DATABASE_URL=`` is a validation error rather than a way to fall back to the
+    composed ``POSTGRES_*`` parts, which is exactly what the test suite needs in order to
+    guarantee it is not pointed at the developer's real database.
+
+    It also fixes the plain case: an operator who comments out the value but leaves the
+    key gets the documented fallback instead of a crash at boot.
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+#: A URL-shaped override where blank means "fall back to the composed parts".
+OptionalDsn = Annotated[str | None, BeforeValidator(_blank_to_none)]
+
+#: Period names accepted in a rate-limit spec, in seconds.
+_RATE_PERIODS = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
+
+
+def _rate_per_second(spec: str) -> float | None:
+    """Requests per second described by ``"<count>/<period>"``, or ``None`` if malformed.
+
+    A deliberate four-line duplicate of :func:`app.core.ratelimit.parse_budget`, which is
+    the real parser and the one the limiter uses. Importing it here is a cycle - this
+    module is what every other module imports for configuration, including the logging
+    setup that ``ratelimit`` acquires a logger from - and the alternative, deferring the
+    whole check to startup, would put it somewhere nobody reads.
+
+    Returns a rate rather than a count so that ``600/hour`` and ``10/minute`` compare
+    equal, which is the comparison the caller actually wants.
+    """
+    try:
+        count, period = spec.split("/", 1)
+        return int(count) / _RATE_PERIODS[period.strip().lower().rstrip("s")]
+    except (ValueError, KeyError, ZeroDivisionError):
+        return None
+
+
 class Settings(BaseSettings):
     """Typed, validated application settings."""
 
@@ -102,13 +144,95 @@ class Settings(BaseSettings):
     cors_origins: CsvList = Field(default_factory=lambda: ["http://localhost:5173"])
     allowed_hosts: CsvList = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
 
+    # ---- Edge gateway -------------------------------------------------------
+    #: Shared secret the edge proxy stamps on every request it forwards.
+    #:
+    #: This is what makes "only our own frontend reaches the API" enforceable rather
+    #: than aspirational. A browser bundle and a desktop binary are both public code -
+    #: anything they can send, an attacker can replay from `curl`, so no header the
+    #: *client* holds can authenticate the client. The proxy is different: it runs on
+    #: the operator's own machine, and a value it injects server-side is never visible
+    #: to a user, a page, or a decompiler.
+    #:
+    #: So the rule the backend enforces is "this request came through our edge", which
+    #: is exactly the property that is actually checkable. Combined with a deployment
+    #: where the API publishes no host port (see ``docker-compose.prod.yml``), reaching
+    #: the backend at all requires both network access to the internal bridge *and* the
+    #: secret.
+    #:
+    #: Unset means the check is skipped, which is right for local development and for
+    #: the test suite. Production refuses to start without it unless
+    #: :attr:`allow_direct_backend_access` is explicitly set - see
+    #: :meth:`_enforce_production_safety`.
+    gateway_secret: SecretStr | None = None
+
+    #: Header carrying :attr:`gateway_secret`. Renameable so it can be made
+    #: unremarkable in logs and traces; the default is descriptive on purpose.
+    gateway_header: str = "X-Gateway-Key"
+
+    #: Deliberately serve a production deployment with no gateway secret.
+    #:
+    #: The escape hatch for a topology where the API genuinely is the public edge - a
+    #: single Render/Fly service with no proxy of your own in front. Costs the
+    #: "only through our edge" guarantee; everything else (auth, rate limits, headers,
+    #: host and origin checks) still applies.
+    allow_direct_backend_access: bool = False
+
+    #: Enforce ``Origin``/``Referer`` on state-changing requests.
+    #:
+    #: Defence in depth behind ``SameSite=Strict`` and the bearer token: a browser
+    #: cannot forge these two headers, so a cross-site POST from an attacker's page is
+    #: rejected before it reaches a handler. Non-browser callers send neither header and
+    #: are unaffected - this closes the browser-driven CSRF path, not scripted access.
+    enforce_origin: bool = True
+
+    #: Trust ``X-Forwarded-For``/``X-Forwarded-Proto`` when resolving the client.
+    #:
+    #: True is correct behind any reverse proxy (nginx, Render, Fly, a load balancer).
+    #: It is safe here because :func:`app.core.net.client_ip` counts hops from the
+    #: *right* - the end nearest our own proxy - rather than taking the left-most
+    #: value a client can write freely.
+    trust_proxy_headers: bool = True
+
+    #: How many proxies sit between the internet and this process.
+    #:
+    #: Each one appends the address it saw to ``X-Forwarded-For``, so the real client is
+    #: the Nth entry from the right. One for a single nginx or a single PaaS router; two
+    #: for a CDN in front of nginx. Too high hands the client control of its own
+    #: apparent IP, so this is a value to get right rather than pad.
+    trusted_proxy_hops: int = Field(default=1, ge=1, le=8)
+
+    #: Hard ceiling on a request body that is not a file upload.
+    #:
+    #: Enforced from ``Content-Length`` before the body is read, so a 2 GB JSON payload
+    #: costs a rejection rather than memory. File uploads are exempt and bounded by
+    #: :attr:`max_upload_bytes` instead, which is enforced while streaming.
+    max_request_bytes: int = Field(default=1024 * 1024, ge=16 * 1024)
+
+    #: HSTS ``max-age``, in seconds. Two years, the preload-list minimum.
+    hsts_max_age: int = Field(default=63_072_000, ge=0)
+
+    #: Add ``preload`` to the HSTS header.
+    #:
+    #: Off by default: submitting a domain to the preload list is effectively permanent,
+    #: and it commits every subdomain to HTTPS forever. Turn it on deliberately, once
+    #: TLS is known to work everywhere.
+    hsts_preload: bool = False
+
     # ---- PostgreSQL ---------------------------------------------------------
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_user: str = "personalerp"
     postgres_password: str = "personalerp"
     postgres_db: str = "personalerp"
-    database_url: PostgresDsn | None = None
+
+    #: Full DSN override. When set, every ``POSTGRES_*`` part above is ignored.
+    #:
+    #: Typed as a validated string rather than ``PostgresDsn`` so that a blank value
+    #: means "not set" - see :func:`_blank_to_none`. The scheme is still checked, in
+    #: :meth:`_validate_dsn_overrides`, so a typo is caught at boot rather than becoming
+    #: a connection error on the first query.
+    database_url: OptionalDsn = None
     db_pool_size: int = Field(default=10, ge=1)
     db_max_overflow: int = Field(default=20, ge=0)
     db_pool_recycle: int = Field(default=1800, ge=60)
@@ -132,7 +256,11 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
     redis_password: str | None = None
-    redis_url: RedisDsn | None = None
+
+    #: Full Redis URL override. When set, every ``REDIS_*`` part above is ignored -
+    #: including ``REDIS_DB``, which is how the test suite isolates itself. See
+    #: :meth:`_enforce_test_safety`.
+    redis_url: OptionalDsn = None
 
     # ---- Security -----------------------------------------------------------
     secret_key: str = Field(default_factory=lambda: secrets.token_urlsafe(64))
@@ -155,9 +283,59 @@ class Settings(BaseSettings):
     invite_ttl_days: int = Field(default=7, ge=1)
 
     # ---- Rate limiting ------------------------------------------------------
+    #: Budgets are written ``"<count>/<period>"`` (``second``, ``minute``, ``hour``,
+    #: ``day``). Each is a token bucket: the bucket holds ``count`` tokens and refills
+    #: at ``count`` per ``period``, so a client may burst up to the full budget and then
+    #: settles into the sustained rate. See :mod:`app.core.ratelimit` for why a bucket
+    #: rather than a fixed window.
     rate_limit_enabled: bool = True
-    rate_limit_default: str = "200/minute"
+
+    #: Anything not matched by a more specific tier.
+    rate_limit_default: str = "15/minute"
+
+    #: Credential and enumeration surfaces: login, register, 2FA, token exchange.
     rate_limit_auth: str = "10/minute"
+
+    #: The subset of auth endpoints that *send mail* or mint a one-time secret -
+    #: password reset, magic link, OTP. Tighter than the rest of auth because abuse
+    #: here spends someone else's inbox and the sending domain's reputation, and no
+    #: legitimate user needs a fourth reset email inside a minute.
+    rate_limit_auth_strict: str = "3/minute"
+
+    #: Reads: list, get, search.
+    #:
+    #: Note this is the budget a *dashboard* spends: opening one screen fires a dozen
+    #: requests, so the sustained rate here is roughly "screens per minute times ten".
+    #: The bucket refills continuously, so a burst on page load is absorbed; sustained
+    #: navigation faster than the refill rate is what gets throttled.
+    rate_limit_read: str = "25/minute"
+
+    #: Writes: POST/PATCH/PUT/DELETE outside auth. Each one costs a transaction and
+    #: usually an audit row, so the budget is an order of magnitude below reads.
+    rate_limit_write: str = "15/minute"
+
+    #: Document uploads. Every one runs OCR inline, which is seconds of CPU - this is
+    #: the most expensive thing an authenticated user can ask for.
+    rate_limit_upload: str = "5/minute"
+
+    #: Report exports (xlsx/pdf/csv). Each renders a full statement in memory.
+    rate_limit_export: str = "5/minute"
+
+    #: Per-IP ceiling applied *in addition to* the tier above, whoever is calling.
+    #:
+    #: The tiers key on the authenticated user where there is one, which is the fair
+    #: unit for a shared office IP. This one bounds a single source regardless, so a
+    #: stolen token cannot be fanned out and an unauthenticated flood cannot walk
+    #: across cheap endpoints to stay under every individual tier.
+    #:
+    #: **It interacts with the tiers, and the interaction is easy to miss.** Both buckets
+    #: must have room, so setting this *below* the largest tier makes that tier
+    #: unreachable and this the only limit that actually binds - and because two users
+    #: behind one office NAT share this bucket while having their own tier buckets, the
+    #: symptom is intermittent 429s that correlate with how many colleagues are online
+    #: rather than with anything the user did. :meth:`_warn_on_rate_limit_shape` says so
+    #: at boot rather than leaving it to be discovered.
+    rate_limit_ip: str = "20/minute"
 
     # ---- Email (Gmail API) --------------------------------------------------
     #: Base64 of a pickled ``Credentials`` for the Gmail account that sends mail.
@@ -288,6 +466,19 @@ class Settings(BaseSettings):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def database_name(self) -> str:
+        """The database the app will actually connect to.
+
+        Parsed from whichever source won, because "which database is this?" is otherwise
+        two different questions depending on how the DSN was configured - and the answer
+        is what :meth:`_enforce_test_safety` checks before anything is allowed to drop a
+        table.
+        """
+        path = urlsplit(self.sqlalchemy_dsn).path.lstrip("/")
+        return path.split("?", 1)[0] or self.postgres_db
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def redis_dsn(self) -> str:
         if self.redis_url is not None:
             return str(self.redis_url)
@@ -302,13 +493,150 @@ class Settings(BaseSettings):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def docs_enabled(self) -> bool:
+        """Whether the interactive docs and the OpenAPI schema are served at all.
+
+        False in production, with no setting to override it. The schema is a complete
+        map of every route, parameter, and error shape in the system - the single most
+        useful document an attacker can be handed, and one nobody needs at runtime on a
+        live deployment. Generate it in CI (``python -m app.openapi``-style scripts, or
+        the staging deployment) where it costs nothing.
+
+        :mod:`app.core.middleware` enforces this a second time at the HTTP layer, so a
+        route re-added by hand cannot quietly reopen it.
+        """
+        return not self.environment.is_production
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def docs_url(self) -> str | None:
         """OpenAPI docs are never exposed in production."""
-        return None if self.environment.is_production else "/docs"
+        return "/docs" if self.docs_enabled else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def redoc_url(self) -> str | None:
+        return "/redoc" if self.docs_enabled else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def openapi_url(self) -> str | None:
+        return "/openapi.json" if self.docs_enabled else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def gateway_enforced(self) -> bool:
+        """Whether requests must arrive carrying :attr:`gateway_secret`.
+
+        Derived from whether a secret exists rather than from a separate switch: a
+        switch is a way for the two to disagree, and the failure mode of "enforcement
+        on, no secret configured" is a service that rejects every request.
+        """
+        return self.gateway_secret is not None and bool(self.gateway_secret.get_secret_value())
 
     # -------------------------------------------------------------------------
     # Guardrails
     # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def _validate_dsn_overrides(self) -> Self:
+        """Reject a malformed ``DATABASE_URL`` or ``REDIS_URL`` at boot.
+
+        These are plain strings so that blank can mean "not set" (see
+        :func:`_blank_to_none`), which means the scheme check pydantic's ``PostgresDsn``
+        used to perform has to happen here instead. A typo'd scheme is otherwise a
+        connection error on the first query rather than a message at startup.
+        """
+        if self.database_url is not None and not self.database_url.startswith(
+            ("postgresql://", "postgres://", "postgresql+asyncpg://", "postgresql+psycopg://")
+        ):
+            raise ValueError(
+                "DATABASE_URL must start with postgresql://, postgres://, "
+                "postgresql+asyncpg:// or postgresql+psycopg://"
+            )
+        if self.redis_url is not None and not self.redis_url.startswith(
+            ("redis://", "rediss://", "unix://")
+        ):
+            raise ValueError("REDIS_URL must start with redis://, rediss:// or unix://")
+        return self
+
+    @property
+    def rate_limit_tiers_eclipsed_by_ip(self) -> dict[str, str]:
+        """Tier budgets that :attr:`rate_limit_ip` has made unreachable.
+
+        Both buckets must have room for a request to pass, so a per-IP ceiling set below a
+        tier means that tier never binds and the per-IP number is the only real limit.
+        That is a legitimate choice - a deployment may want one hard per-source figure -
+        but it produces a system whose behaviour does not match what a reader of the
+        configuration would describe, and the symptom is intermittent 429s that track how
+        many colleagues are online rather than anything the user did.
+
+        A property rather than a validator that logs, because :mod:`app.core.logging`
+        imports this module to configure itself - so nothing here can acquire a logger
+        while the settings object is still being built. :mod:`app.main` reports it at
+        startup instead, where logging is up and an operator will actually see it.
+
+        Not a ``computed_field``: this is a diagnostic, and it has no business appearing in
+        a serialised dump of the configuration.
+
+        Compared as rates rather than counts so ``600/hour`` and ``10/minute`` are
+        equivalent, which is the comparison that matters.
+        """
+        ip_rate = _rate_per_second(self.rate_limit_ip)
+        if ip_rate is None:  # malformed; the limiter's own fallback reports it
+            return {}
+
+        tiers = {
+            "RATE_LIMIT_DEFAULT": self.rate_limit_default,
+            "RATE_LIMIT_AUTH": self.rate_limit_auth,
+            "RATE_LIMIT_AUTH_STRICT": self.rate_limit_auth_strict,
+            "RATE_LIMIT_READ": self.rate_limit_read,
+            "RATE_LIMIT_WRITE": self.rate_limit_write,
+            "RATE_LIMIT_UPLOAD": self.rate_limit_upload,
+            "RATE_LIMIT_EXPORT": self.rate_limit_export,
+        }
+        return {
+            name: spec
+            for name, spec in tiers.items()
+            if (rate := _rate_per_second(spec)) is not None and rate > ip_rate
+        }
+
+    @model_validator(mode="after")
+    def _enforce_test_safety(self) -> Self:
+        """Refuse to run the test suite against a database that is not a test database.
+
+        This exists because of a real, live near-miss rather than a hypothetical.
+
+        ``tests/conftest.py`` isolates itself by setting ``POSTGRES_DB=personalerp_test``
+        and ``REDIS_DB=15``. Both are silently ignored when ``DATABASE_URL`` or
+        ``REDIS_URL`` is set, because a full URL wins over the composed parts - and a
+        developer whose ``.env`` carries a managed-database URL for a deployment has both.
+        The suite then runs ``Base.metadata.drop_all`` and ``redis.flushdb()`` against
+        whatever that URL points at.
+
+        The failure is silent, total, and indistinguishable from a normal test run right
+        up to the moment the tables are gone. So a name check at boot is worth the two
+        lines: a database whose name does not end in ``_test`` is not a database this
+        process may be pointed at while ``ENVIRONMENT=test``.
+        """
+        if self.environment is not Environment.TEST:
+            return self
+
+        if not self.database_name.endswith("_test"):
+            raise ValueError(
+                f"Refusing to run tests against database '{self.database_name}': the test "
+                "suite drops every table, so the name must end in '_test'.\n"
+                "  DATABASE_URL overrides POSTGRES_DB, so unset it (DATABASE_URL= in the "
+                "environment) to fall back to the composed POSTGRES_* parts."
+            )
+        if self.redis_url is not None:
+            raise ValueError(
+                "Refusing to run tests with REDIS_URL set: it overrides REDIS_DB, which is "
+                "how the suite isolates itself, and the suite calls FLUSHDB.\n"
+                "  Unset it (REDIS_URL= in the environment) to fall back to REDIS_HOST/"
+                "REDIS_DB."
+            )
+        return self
+
     @model_validator(mode="after")
     def _enforce_production_safety(self) -> Self:
         """Fail fast on insecure production configuration.
@@ -340,6 +668,43 @@ class Settings(BaseSettings):
             problems.append("POSTGRES_PASSWORD is still the default")
         if "*" in self.allowed_hosts:
             problems.append("ALLOWED_HOSTS must list explicit hosts, not '*'")
+        if not self.allowed_hosts:
+            problems.append("ALLOWED_HOSTS must not be empty")
+        if not self.cors_origins:
+            problems.append("CORS_ORIGINS must not be empty")
+
+        # A credentialled session over plain HTTP is a session anyone on the path can
+        # read. The refresh cookie is set `Secure` outside local development, so an
+        # http:// origin here does not merely weaken the deployment - it produces a
+        # frontend that cannot stay signed in, and a confusing bug report instead of a
+        # clear boot failure.
+        insecure_origins = [
+            origin for origin in self.cors_origins if not origin.startswith("https://")
+        ]
+        if insecure_origins:
+            problems.append(f"CORS_ORIGINS must all be https:// - got {insecure_origins}")
+        if not self.frontend_url.startswith("https://"):
+            problems.append("FRONTEND_URL must be https:// (it is emailed to users)")
+
+        # The whole point of the exercise: in production the API is reachable only
+        # through an edge that knows the secret. Refusing to boot without one is what
+        # stops that guarantee from being lost to a forgotten environment variable,
+        # since nothing about the running service would look wrong.
+        if not self.gateway_enforced and not self.allow_direct_backend_access:
+            problems.append(
+                "GATEWAY_SECRET is required so only the edge proxy can reach the API. "
+                'Generate one with `python -c "import secrets; '
+                'print(secrets.token_urlsafe(48))"` and set the same value on the proxy. '
+                "Set ALLOW_DIRECT_BACKEND_ACCESS=true only if this service *is* the "
+                "public edge and you accept that anyone may call it directly."
+            )
+        if self.gateway_enforced and len(self.gateway_secret.get_secret_value()) < 32:  # type: ignore[union-attr]
+            problems.append("GATEWAY_SECRET must be at least 32 characters")
+
+        if not self.rate_limit_enabled:
+            problems.append("RATE_LIMIT_ENABLED must be true")
+        if not self.enforce_origin:
+            problems.append("ENFORCE_ORIGIN must be true")
 
         if problems:
             joined = "\n  - ".join(problems)

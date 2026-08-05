@@ -53,13 +53,20 @@ COPY . .
 
 EXPOSE 8000
 
-# `--reload` watches the bind-mounted source. `--proxy-headers` with a trusted
-# host list is what makes `request.client.host` the real client IP behind Nginx
-# rather than the proxy's - IP-based lockout depends on it.
+# `--reload` watches the bind-mounted source.
+#
+# `--no-proxy-headers`, deliberately. The application resolves the client address
+# itself, in `app.core.net.client_ip`, by counting `X-Forwarded-For` hops from the
+# right - the end our own proxy appends to. uvicorn's handling takes the *left-most*
+# entry whenever `--forwarded-allow-ips` includes the peer, and the left-most entry is
+# the one the caller writes: `curl -H 'X-Forwarded-For: 1.2.3.4'` and every IP-keyed
+# control in the system is looking at a fabricated address. Leaving `scope["client"]`
+# as the real socket peer keeps one unforgeable fact available underneath the
+# resolution rule.
 CMD ["uvicorn", "app.main:app", \
      "--host", "0.0.0.0", "--port", "8000", \
      "--reload", "--reload-dir", "app", \
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+     "--no-proxy-headers"]
 
 # ---- Production -------------------------------------------------------------
 FROM base AS production
@@ -90,8 +97,21 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # No `--reload` and no `--workers`: horizontal scaling is by container replica,
 # which keeps every instance stateless and independently restartable. Set
 # WEB_CONCURRENCY only if running a single container on a large host.
+#
+# `--no-proxy-headers` for the reason given on the development target above: the client
+# address is resolved by the application, from the trustworthy end of the header.
+#
+# `--no-server-header` and `--no-date-header` keep the response minimal - the first
+# because naming the server and its version is a free CVE shortlist, the second because
+# nothing depends on it and every byte is on every response.
+#
+# `--h11-max-incomplete-event-size` caps the request line and headers at 16 KiB. Without
+# a bound, a slowloris-style client can hold a connection open dribbling header bytes,
+# and the default is generous enough to be worth tightening for an API whose largest
+# legitimate header set is a bearer token.
 CMD ["uvicorn", "app.main:app", \
      "--host", "0.0.0.0", "--port", "8000", \
-     "--proxy-headers", "--forwarded-allow-ips", "*", \
-     "--no-server-header", \
+     "--no-proxy-headers", \
+     "--no-server-header", "--no-date-header", \
+     "--h11-max-incomplete-event-size", "16384", \
      "--timeout-keep-alive", "65"]

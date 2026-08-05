@@ -17,6 +17,7 @@ from fastapi import APIRouter, Body, Cookie, Request, Response, status
 
 from app.core.config import settings
 from app.core.exceptions import InvalidTokenError
+from app.core.limiter import limiter
 from app.core.logging import get_logger
 from app.core.schemas import MessageResponse
 from app.modules.auth.dependencies import (
@@ -65,6 +66,39 @@ from app.modules.auth.service import AuthResult, DeviceSignInApproved, TwoFactor
 log = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+# =============================================================================
+# Per-endpoint rate limits
+# =============================================================================
+# The budgets below are the *second* limiter, declared where a reader of the endpoint
+# will see them. The first is :class:`~app.core.middleware.RateLimitMiddleware`, which
+# limits every route by pattern-matched tier and needs no annotation here. Both are
+# enforced; the reasoning for having two, and why this one is not the blanket layer, is
+# in :mod:`app.core.limiter`.
+#
+# Deliberately at or below the corresponding middleware tier, so this layer is the one
+# that speaks first on the endpoints that matter. Where they differ it is because the
+# endpoint has a property the tier table cannot see:
+#
+# * `/login` and `/login/2fa` are password and second-factor guessing. Five per minute is
+#   above any human's typing speed and far below anything useful to an attacker; the
+#   per-account lockout in `LoginThrottle` handles the account side, and this handles the
+#   source side.
+# * `/register` is account-creation spam, which costs a row and an outbound email each.
+# * The reset, magic-link, OTP and resend endpoints all *send mail*. Abuse there spends
+#   someone else's inbox and this deployment's sending reputation, and the sending domain
+#   is the asset that does not recover quickly.
+# * `/refresh` rotates a long-lived credential and writes a session row. A client needs
+#   one call per 15-minute access token; twenty a minute is three orders of magnitude of
+#   headroom and still bounds a token-churning loop.
+#
+# `/auth/magic-link/device/poll` is deliberately absent: it is called every two seconds
+# by design from the desktop sign-in screen.
+LOGIN_LIMIT = "5/minute"
+REGISTER_LIMIT = "3/minute"
+MAIL_SENDING_LIMIT = "3/minute"
+TOKEN_EXCHANGE_LIMIT = "20/minute"
 
 
 # =============================================================================
@@ -118,7 +152,9 @@ def _clear_refresh_cookie(response: Response) -> None:
     status_code=status.HTTP_201_CREATED,
     summary="Create an account",
 )
+@limiter.limit(REGISTER_LIMIT)
 async def register(
+    request: Request,
     data: RegisterRequest,
     service: AuthServiceDep,
     ctx: RequestCtx,
@@ -152,7 +188,9 @@ async def verify_email(
     response_model=MessageResponse,
     summary="Resend the verification email",
 )
+@limiter.limit(MAIL_SENDING_LIMIT)
 async def resend_verification(
+    request: Request,
     data: ResendVerificationRequest,
     service: AuthServiceDep,
 ) -> MessageResponse:
@@ -172,7 +210,9 @@ async def resend_verification(
         423: {"description": "Account temporarily locked after repeated failures"},
     },
 )
+@limiter.limit(LOGIN_LIMIT)
 async def login(
+    request: Request,
     data: LoginRequest,
     response: Response,
     service: AuthServiceDep,
@@ -197,7 +237,9 @@ async def login(
     response_model=TokenResponse,
     summary="Complete sign-in with a two-factor code",
 )
+@limiter.limit(LOGIN_LIMIT)
 async def login_two_factor(
+    request: Request,
     data: TwoFactorLoginRequest,
     response: Response,
     service: AuthServiceDep,
@@ -214,7 +256,9 @@ async def login_two_factor(
     response_model=TokenResponse,
     summary="Exchange a refresh token for a new access token",
 )
+@limiter.limit(TOKEN_EXCHANGE_LIMIT)
 async def refresh(
+    request: Request,
     response: Response,
     service: AuthServiceDep,
     ctx: RequestCtx,
@@ -260,7 +304,9 @@ async def logout(
     response_model=MessageResponse,
     summary="Request a passwordless sign-in link",
 )
+@limiter.limit(MAIL_SENDING_LIMIT)
 async def request_magic_link(
+    request: Request,
     data: MagicLinkRequest,
     service: AuthServiceDep,
 ) -> MessageResponse:
@@ -350,12 +396,17 @@ async def poll_device_sign_in(
 
 
 @router.post("/otp", response_model=MessageResponse, summary="Request an email sign-in code")
-async def request_otp(data: OtpRequestBody, service: AuthServiceDep) -> MessageResponse:
+@limiter.limit(MAIL_SENDING_LIMIT)
+async def request_otp(
+    request: Request, data: OtpRequestBody, service: AuthServiceDep
+) -> MessageResponse:
     return MessageResponse(message=await service.request_otp(data.email))
 
 
 @router.post("/otp/verify", response_model=TokenResponse, summary="Sign in with an email code")
+@limiter.limit(LOGIN_LIMIT)
 async def verify_otp(
+    request: Request,
     data: OtpVerifyRequest,
     response: Response,
     service: AuthServiceDep,
@@ -384,7 +435,9 @@ async def password_policy() -> PasswordPolicyResponse:
     response_model=MessageResponse,
     summary="Request a password reset code by email",
 )
+@limiter.limit(MAIL_SENDING_LIMIT)
 async def forgot_password(
+    request: Request,
     data: ForgotPasswordRequest,
     service: AuthServiceDep,
 ) -> MessageResponse:
@@ -397,7 +450,9 @@ async def forgot_password(
     response_model=MessageResponse,
     summary="Set a new password using an emailed reset code",
 )
+@limiter.limit(MAIL_SENDING_LIMIT)
 async def reset_password(
+    request: Request,
     data: ResetPasswordRequest,
     response: Response,
     service: AuthServiceDep,

@@ -102,6 +102,16 @@ class RedisKey:
     def rate_limit(cls, scope: str, identifier: str, window: int) -> str:
         return f"{cls.PREFIX}:rl:{scope}:{identifier}:{window}"
 
+    @classmethod
+    def rate_limit_bucket(cls, scope: str, identifier: str) -> str:
+        """A token bucket's state - see :mod:`app.core.ratelimit`.
+
+        No window number in the key, unlike :meth:`rate_limit`: a bucket refills
+        continuously, so one key per ``(scope, identity)`` lives for as long as the
+        client keeps calling and expires on its own once they stop.
+        """
+        return f"{cls.PREFIX}:rlb:{scope}:{identifier}"
+
     # --- caching ---
     @classmethod
     def cache(cls, namespace: str, key: str) -> str:

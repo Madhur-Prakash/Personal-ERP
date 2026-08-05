@@ -512,15 +512,23 @@ class TestReads:
         script in a document a browser decides to render inline. A JSON endpoint is
         checked alongside it, so the app-wide default is not weakened in the process.
         """
+        from app.core.middleware import SecurityHeadersMiddleware
+
         document = (await upload(authed_client, api, invoice_pdf()))["document"]
 
         download = await authed_client.get(f"{api}/documents/{document['id']}/file")
         assert "sandbox" in download.headers["content-security-policy"]
+        # The route's own policy, not the app-wide one - and specifically the narrower of
+        # the two, since `default-src 'none'` here is scoped by `sandbox`.
+        assert download.headers["content-security-policy"] == "sandbox; default-src 'none'"
 
+        # Compared against the constant rather than a copy of its text. The literal
+        # spelling was duplicated here, so tightening the app-wide policy failed this
+        # test for no behavioural reason - which trains people to update the expectation
+        # without reading it.
         listing = await authed_client.get(f"{api}/documents")
-        assert listing.headers["content-security-policy"] == (
-            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
-        )
+        assert listing.headers["content-security-policy"] == SecurityHeadersMiddleware.API_CSP
+        assert "default-src 'none'" in listing.headers["content-security-policy"]
 
     async def test_a_filename_cannot_inject_a_header(
         self, authed_client: AsyncClient, api: str

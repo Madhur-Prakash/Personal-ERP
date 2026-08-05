@@ -4,6 +4,10 @@ Every control below exists for a stated reason. Where a common alternative was
 rejected, the reason is given - a control whose rationale nobody remembers is a
 control that gets removed in the next refactor.
 
+For the findings that produced the edge-gateway, rate-limiting and header controls
+described here - including one critical issue in the test harness and the reason a
+shipped client cannot authenticate itself - see [security-audit.md](security-audit.md).
+
 ---
 
 ## Threat model
@@ -12,7 +16,10 @@ What this system is actually defending against, in rough order of likelihood:
 
 | Threat | Primary control |
 | --- | --- |
+| Direct access to the API, bypassing our own edge | `GATEWAY_SECRET` stamped by the proxy; no published host port |
 | Credential stuffing from a breach elsewhere | Argon2id, per-account lockout, edge + app rate limiting, 2FA |
+| Spoofed client address defeating IP-based limits | Forwarding hops counted from the right, `--no-proxy-headers` |
+| API surface reconnaissance | No docs or OpenAPI schema in production, enforced in three places |
 | Account enumeration to build a target list | Identical responses *and timing* for existing/absent accounts |
 | XSS stealing a session | Access token in memory only; refresh token HttpOnly; strict CSP |
 | Stolen refresh token used indefinitely | Rotation with reuse detection; lineage revocation |
@@ -26,6 +33,103 @@ What this system is actually defending against, in rough order of likelihood:
 Explicitly **out of scope for Stage 1**: DDoS beyond basic rate limiting, insider
 threat at the infrastructure level, and supply-chain attestation. Those belong to
 Stage 10.
+
+---
+
+## Reaching the API at all
+
+Three independent checks run before any handler, in this order. They are independent on
+purpose: each one constrains a different caller, and none is sufficient alone.
+
+### The edge gateway - `GATEWAY_SECRET`
+
+The requirement "only our frontend may call the API" has an honest form and a wishful
+one, and the difference matters.
+
+**A shipped client cannot authenticate itself.** The React bundle is JavaScript the
+browser is handed on request. The desktop client's own template says of its config file
+that "anything in it ships to whoever has the binary". Any header, token or signature the
+*client* holds is readable by whoever holds the client and replayable from `curl`. There
+is no client-side version of this control.
+
+**The edge can.** nginx runs on the operator's machine, and a value it injects
+server-side never reaches a user, a page, or a decompiler. So the property enforced is
+*"this request arrived through our edge"*:
+
+- `infra/nginx/proxy-params.conf` stamps `X-Gateway-Key: $gateway_key` on every proxied
+  request.
+- `GatewayGuardMiddleware` compares it against `GATEWAY_SECRET` with
+  `hmac.compare_digest` - constant-time, because `==` on strings short-circuits at the
+  first differing byte and leaks the matching prefix length through response timing.
+- A request without it gets **404**. Not 403: a 403 confirms there is an API at this
+  address and that it is merely withholding something.
+- Health probes are exempt. A container healthcheck reaches the app directly on
+  localhost with no proxy to stamp anything, so gating it would make every deployment
+  fail its own healthcheck and roll back.
+
+Production **refuses to boot** without a secret, unless `ALLOW_DIRECT_BACKEND_ACCESS=true`
+is set deliberately - the documented escape hatch for a single-service PaaS deployment
+that genuinely is its own edge.
+
+Combined with `docker-compose.prod.yml`, where the API publishes no host port, reaching
+the backend requires both network access to the internal bridge *and* the secret.
+
+### Origin enforcement
+
+Every state-changing method (`POST`/`PUT`/`PATCH`/`DELETE`) must carry an `Origin` - or,
+failing that, a `Referer` - that reduces to one of `CORS_ORIGINS`. Browsers do not let
+page script forge either header, so a cross-site write from an attacker's page is
+identifiable and refused with 403.
+
+A request with **neither** header passes. That is the desktop app, `curl`, a backup
+script; refusing them would break every non-browser client while stopping no attacker,
+because an attacker simply omits both. This closes the browser-driven CSRF path - which
+`SameSite=Strict` already covers, making this the second layer - not scripted access. The
+gateway secret is what constrains scripted access.
+
+Comparison is on `scheme://host:port`, lowercased, so a trailing slash or a capitalised
+host does not decide the outcome. A check that fails on formatting rather than identity is
+worse than no check, because it looks like it is working.
+
+### Host, method and size
+
+- `TrustedHostMiddleware` in production, against `ALLOWED_HOSTS`. A forged `Host` poisons
+  the absolute URLs in password-reset mail.
+- `TRACE`, `TRACK` and `CONNECT` are refused with 405 before routing. `TRACE` reflects the
+  request verbatim, which is the Cross-Site Tracing technique for reading headers a page
+  otherwise cannot.
+- `BodySizeLimitMiddleware` rejects a body over `MAX_REQUEST_BYTES` (1 MiB) from
+  `Content-Length` before reading it, and counts bytes while streaming when no length is
+  declared - a chunked request has no `Content-Length`, so a header-only check is
+  bypassable by omitting it. Multipart bodies get `MAX_UPLOAD_BYTES` plus 1 MiB of framing
+  headroom, with the file itself still bounded by `read_within_limit`.
+
+---
+
+## Who is calling - client address resolution
+
+Every IP-based control is only as good as the answer to "what is this caller's address?",
+and behind a proxy that answer comes from a header the caller can write.
+
+`X-Forwarded-For` is a list each proxy **appends** to. A client can send
+`X-Forwarded-For: 1.2.3.4` and our nginx faithfully appends the real address after it:
+
+```
+X-Forwarded-For: 1.2.3.4, 203.0.113.7
+                 ^spoofed  ^appended by our proxy - the real client
+```
+
+So `app.core.net.client_ip` counts hops from the **right**, `TRUSTED_PROXY_HOPS` deep.
+The left-most entry - the conventional choice - is precisely the value an attacker
+controls.
+
+This is why both Dockerfile targets pass **`--no-proxy-headers`**. uvicorn's own handling
+takes the left-most entry when `--forwarded-allow-ips` includes the peer, so
+`request.client.host` under `'*'` is attacker-chosen; disabling it leaves `scope["client"]`
+as the real socket peer, one unforgeable fact underneath the resolution rule.
+
+Set `TRUSTED_PROXY_HOPS` to match the topology. Too high and the client controls its own
+apparent IP again: one nginx or one PaaS router is `1`, a CDN in front of nginx is `2`.
 
 ---
 
@@ -393,19 +497,155 @@ The protections that apply to the stored number:
 
 ---
 
+## Rate limiting
+
+Two limiters, both on Redis, both governed by `RATE_LIMIT_ENABLED`. They are not
+redundant.
+
+### The blanket layer - tiered token buckets
+
+`RateLimitMiddleware` classifies every request into one of seven tiers by method and path
+(`app.core.ratelimit.classify`) and enforces a **token bucket** per tier:
+
+| Tier | Default | Covers |
+| --- | --- | --- |
+| `auth-strict` | 3/min | forgot/reset password, magic link, OTP request, resend verification |
+| `auth` | 10/min | login, 2FA, register, refresh, verify-email, invitation preview |
+| `upload` | 5/min | `POST /documents` - OCR runs inline, seconds of CPU each |
+| `export` | 5/min | report exports and document downloads |
+| `write` | 15/min | POST/PATCH/PUT/DELETE |
+| `read` | 25/min | GET/HEAD/OPTIONS |
+| `default` | 15/min | anything unmatched |
+| *(per-IP)* | 20/min | applied **on top of** the above, whoever is calling |
+
+Tiers rather than one number, because a single budget has to be set for the loosest
+endpoint and therefore protects none of the others: a dashboard needs 300 reads a minute,
+and that is a preposterous budget for a login form.
+
+A **token bucket, not a fixed window.** A window keyed on `floor(now / 60)` lets a client
+spend its whole budget in the last instant of one window and the whole of the next in the
+first instant of the following one - twice the limit, back to back, straddling the
+boundary. On the auth tier that is 20 password guesses against a budget of 10. Tokens
+accrue continuously, so there is no boundary to straddle. It is a Lua script, so the read,
+the refill and the decrement are one atomic round trip.
+
+**Buckets key on the authenticated user** when a request carries a valid token, and on the
+resolved client IP otherwise. Pure IP keying puts an entire NAT'd office in one bucket,
+which is a denial of service users inflict on each other. The token's signature is
+verified before its `sub` is used - an unverified `sub` is attacker-chosen, so a flood
+could mint a fresh identity per request and never touch a limit. A revoked-but-unexpired
+token is fine to key on: it is rejected a layer later, and until then it is a stable,
+attributable identity.
+
+The per-IP ceiling exists so that authenticating is not a way out of source-based limits,
+and so an unauthenticated flood cannot walk across cheap endpoints staying under every
+individual tier.
+
+`OPTIONS` is classified as a read, so the preflight a browser sends before every
+cross-origin write does not consume the write budget.
+
+### The declarative layer - slowapi
+
+`app/core/limiter.py` wires slowapi to the same Redis with a `moving-window` strategy, and
+the auth handlers carry explicit budgets where a reader of the endpoint will see them:
+
+```python
+@router.post("/login", ...)
+@limiter.limit(LOGIN_LIMIT)          # 5/minute
+async def login(request: Request, ...): ...
+```
+
+**Why both.** The middleware is exhaustive - a route added tomorrow is limited without
+anyone remembering to limit it - at the cost of stating the budget in a pattern table in
+another module. The decorator is local and fires independently, so a pattern that stops
+matching after a path is renamed does not silently unprotect the endpoints that matter
+most.
+
+**Decorator order is load-bearing.** `@limiter.limit` must sit *below* `@router.post`, so
+that `limit()` wraps the handler and `post()` registers the wrapper. Reversed, the budget
+is still registered but the route mounts the bare function - the endpoint is unlimited,
+with nothing in the code or the logs to say so. Two tests assert on the mounted endpoint
+for exactly this reason.
+
+**slowapi is deliberately not the blanket layer.** Version 0.1.10 drives the *synchronous*
+`limits` storage, so each check is a blocking Redis call on the event loop. On login,
+already dominated by ~50 ms of Argon2, that is invisible; in front of every request it
+would serialise the worker. That is why the middleware limiter is hand-written against
+`redis.asyncio`.
+
+Its `RateLimitExceeded` is mapped into the application's error envelope. slowapi's own body
+is `{"error": "Rate limit exceeded: 5 per 1 minute"}`, and the frontend branches on
+`error.code` - the un-normalised shape would arrive as a blank failure on the login form.
+
+### Both fail open
+
+If Redis is unreachable the request proceeds, with an error in the log. Rate limiting is a
+protective layer, and turning a cache outage into a total outage is a strictly worse trade.
+The consequence is that **Redis availability is a security property**;
+`SWALLOW_STORAGE_ERRORS` in `app/core/limiter.py` is the switch if you want the credential
+endpoints to fail closed instead.
+
+The edge applies its own, looser `limit_req`/`limit_conn` budgets, whose job is shedding a
+volumetric flood before it reaches Python at all. Per-user fairness is the application's,
+where the caller's identity is actually known.
+
+---
+
 ## Transport and headers
 
-TLS 1.2/1.3 only, HSTS with a two-year max-age and preload, OCSP stapling,
-session tickets disabled (they weaken forward secrecy).
+TLS 1.2/1.3 only, AEAD cipher suites with forward secrecy only (no CBC, no RSA key
+exchange, no 3DES), OCSP stapling, and session tickets disabled - without key rotation a
+single stolen ticket key decrypts every session it ever issued.
 
-Response headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
-`Referrer-Policy: strict-origin-when-cross-origin`,
-`Cross-Origin-Opener-Policy: same-origin`, and a `Permissions-Policy` denying
-geolocation, microphone, and camera.
+HSTS carries a two-year `max-age` and `includeSubDomains`. `preload` is **opt-in**
+(`HSTS_PRELOAD`): submitting a domain to the preload list is effectively permanent and
+commits every subdomain to HTTPS forever, so it is not something to acquire by default.
 
-CSP on API responses is `default-src 'none'; frame-ancestors 'none'; base-uri
-'none'; form-action 'none'` - the API returns only JSON, so "load nothing, frame
-nothing" is both correct and maximally strict.
+### The response header set
+
+`SecurityHeadersMiddleware` is registered **last**, which makes it the *outermost* layer
+and the headers unconditional - present on a 429 from the limiter, a 404 from a guard, and
+a 500 from a handler alike. Registered first (the obvious reading of "applied last on the
+way out") it is innermost, and only decorates responses that reached the router: every
+rejection goes out bare, which is the majority of what an attacker sees.
+
+| Header | Closes |
+| --- | --- |
+| `X-Content-Type-Options: nosniff` | a browser reinterpreting JSON as HTML and executing it |
+| `X-Frame-Options: DENY` | clickjacking, for browsers predating CSP `frame-ancestors` |
+| `Referrer-Policy: strict-origin-when-cross-origin` | tokens in URLs leaking via `Referer` |
+| `Cross-Origin-Opener-Policy: same-origin` | an opener navigating or inspecting this response |
+| `Cross-Origin-Resource-Policy: same-origin` | another site embedding an API response as a subresource |
+| `Cross-Origin-Embedder-Policy: require-corp` | the response being a cross-origin leak vector |
+| `X-Permitted-Cross-Domain-Policies: none` | the `crossdomain.xml` mechanism, still honoured by PDF readers |
+| `X-DNS-Prefetch-Control: off` | speculative resolution of hostnames in a response body |
+| `Permissions-Policy` | 21 device capabilities, named explicitly rather than defaulted |
+| `Cache-Control: no-store, private` | a shared proxy retaining one user's invoices for the next |
+
+CSP on API responses loads nothing, frames nothing, submits nowhere, and adds `sandbox`:
+
+```
+default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none';
+object-src 'none'; script-src 'none'; style-src 'none'; img-src 'none';
+connect-src 'none'; font-src 'none'; media-src 'none'; worker-src 'none'; sandbox
+```
+
+The API returns only JSON, so every one of those capabilities is unused and denying them
+all is both correct and free.
+
+`Server` and `X-Powered-By` are stripped from application responses - naming the stack and
+its version is a free CVE shortlist - and uvicorn also runs with `--no-server-header`.
+
+One honest limit: the **edge** still emits `Server: nginx`. `server_tokens off` removes the
+*version*, which is the part that hands over a shortlist, but stock nginx offers no way to
+suppress the product name; that needs the third-party `headers-more` module. So a scanner
+learns "nginx" and nothing more specific.
+
+**A route that sets its own value keeps it.** The document-download endpoint returns bytes
+a stranger uploaded and sets a stricter `sandbox` CSP plus a deliberately private,
+cacheable `Cache-Control`; overwriting either would silently remove a hardening measure or
+turn every download into a fresh transfer. That is the regression a middleware assigning
+unconditionally causes, and it is invisible in testing - so there is a test for it.
 
 `Referrer-Policy` specifically protects magic-link, verification and invitation
 tokens, which appear in URLs and would otherwise leak to third parties through the
@@ -428,7 +668,7 @@ project on that port.
 | A02 Cryptographic failures | Argon2id, Fernet at rest, TLS 1.2+, HSTS, hashed tokens |
 | A03 Injection | Parameterised ORM queries, allow-listed sorts, Pydantic validation, Jinja autoescape |
 | A04 Insecure design | Staged delivery, threat model, lockout prevention, reversible migrations |
-| A05 Misconfiguration | Boot-time production validation, no docs in production, non-root containers, internal-only data network |
+| A05 Misconfiguration | Boot-time production validation (refuses to start without a gateway secret, https origins, rate limiting), no docs in production, non-root read-only containers with all capabilities dropped, internal-only data network |
 | A06 Vulnerable components | Pinned lockfiles, `--frozen` installs in CI, zero npm advisories |
 | A07 Auth failures | 2FA, lockout, rotation with reuse detection, no enumeration, session revocation |
 | A08 Integrity failures | Append-only audit, SHA-pinned image tags, migration drift check in CI |

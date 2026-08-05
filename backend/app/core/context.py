@@ -33,18 +33,25 @@ class RequestContext:
     def from_request(cls, request: Request) -> Self:
         """Extract context from a Starlette request.
 
-        The client IP comes from ``request.client``, which Starlette resolves
-        from ``X-Forwarded-For`` *only* when uvicorn runs with
-        ``--proxy-headers`` and a trusted-host list. Parsing the header directly
-        here would let any client spoof its own IP and defeat IP-based controls.
+        The client IP is whatever :func:`app.core.net.client_ip` resolved - counting
+        forwarding hops from the right, so a client cannot name its own address. It is
+        read from ``request.state`` where :class:`~app.core.middleware.RequestContextMiddleware`
+        put it, and re-derived only if this is called outside that middleware (a test
+        constructing a request by hand).
+
+        Not ``request.client.host``. That is uvicorn's answer, and under
+        ``--forwarded-allow-ips '*'`` uvicorn takes the *left-most* ``X-Forwarded-For``
+        entry, which is the one the caller wrote. Every audit row would then record an
+        address of the attacker's choosing - the opposite of what an audit trail is for.
         """
+        from app.core.net import client_ip
         from app.modules.auth.device import describe_device
 
         user_agent = request.headers.get("user-agent")
         label, device_type = describe_device(user_agent)
 
         return cls(
-            ip_address=request.client.host if request.client else None,
+            ip_address=getattr(request.state, "client_ip", None) or client_ip(request),
             user_agent=user_agent[:500] if user_agent else None,
             request_id=getattr(request.state, "request_id", None),
             device_label=label,
