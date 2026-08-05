@@ -1,5 +1,5 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { Eye, EyeOff, KeyRound, Mail } from 'lucide-react';
+import { Eye, EyeOff, Hash, Key, KeyIcon, KeyRound, KeyRoundIcon, LockKeyholeIcon, Mail } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -276,14 +276,26 @@ export function LoginPage() {
 
       {/* Passwordless is offered as an equal path, not a fallback: for an
           accountant who signs in monthly, a magic link is often the faster route.
-          Rendered as links, not buttons - they navigate, so they must be `<a>`. */}
-      <div className="grid gap-2">
+          So the two share one variant and one row. A `secondary` next to a `ghost`
+          reads as "this one, or that lesser thing", which is not the offer.
+
+          Rendered as links, not buttons - they navigate, so they must be `<a>`.
+          Labels are short because both now share a 400px card and `BASE` sets
+          `whitespace-nowrap`: a full sentence would overflow rather than wrap. Each
+          destination explains itself on arrival.
+
+          No `mr-2` on the icons - the `md` size already contributes `gap-2`, and
+          doubling it wastes width the two-up row does not have. */}
+      <div className="grid grid-cols-2 gap-2">
         <Link to="/magic-link" className={buttonClasses('secondary', 'md', 'w-full')}>
-          <Mail className="mr-2 h-4 w-4" aria-hidden />
-          Email me a sign-in link
+          <Mail className="h-4 w-4" aria-hidden />
+          Sign-in link
         </Link>
-        <Link to="/otp" className={buttonClasses('ghost', 'md', 'w-full')}>
-          Use a one-time code
+        <Link to="/otp" className={buttonClasses('secondary', 'md', 'w-full')}>
+          {/* `Key`, not `KeyRound` - that one is the 2FA code field's icon above, and
+              these are different flows. */}
+          <LockKeyholeIcon className="h-4 w-4" aria-hidden />
+          One-time code
         </Link>
       </div>
     </AuthLayout>

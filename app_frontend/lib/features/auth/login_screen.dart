@@ -321,20 +321,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           const AuthDivider(),
 
           // Passwordless is offered as an equal path, not a fallback: for an accountant
-          // who signs in monthly, a magic link is often the faster route.
-          AppButton(
-            onPressed: () => context.go('/magic-link'),
-            variant: AppButtonVariant.secondary,
-            fullWidth: true,
-            leftIcon: LucideIcons.mail,
-            label: 'Email me a sign-in link',
-          ),
-          const SizedBox(height: 8),
-          AppButton(
-            onPressed: () => context.go('/otp'),
-            variant: AppButtonVariant.ghost,
-            fullWidth: true,
-            label: 'Use a one-time code',
+          // who signs in monthly, a magic link is often the faster route. So the two
+          // share one variant and one row - a `secondary` beside a `ghost` reads as
+          // "this one, or that lesser thing", which is not the offer. Labels are short
+          // because they now sit two-up in a narrow card.
+          Row(
+            spacing: 8,
+            children: <Widget>[
+              Expanded(
+                child: AppButton(
+                  onPressed: () => context.go('/magic-link'),
+                  variant: AppButtonVariant.secondary,
+                  fullWidth: true,
+                  leftIcon: LucideIcons.mail,
+                  label: 'Sign-in link',
+                ),
+              ),
+              Expanded(
+                child: AppButton(
+                  onPressed: () => context.go('/otp'),
+                  variant: AppButtonVariant.secondary,
+                  fullWidth: true,
+                  // `key`, not `keyRound` - that one is the 2FA code field's icon, and
+                  // these are different flows.
+                  leftIcon: LucideIcons.lockKeyhole,
+                  label: 'One-time code',
+                ),
+              ),
+            ],
           ),
         ],
       ),
