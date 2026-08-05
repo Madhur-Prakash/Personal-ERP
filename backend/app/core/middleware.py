@@ -62,6 +62,23 @@ BLOCKED_METHODS: Final = frozenset({"TRACE", "TRACK", "CONNECT"})
 UNSAFE_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
+def is_cors_preflight(request: Request) -> bool:
+    """Whether this is a browser's CORS preflight, as opposed to a real ``OPTIONS``.
+
+    The same three-part test :class:`~starlette.middleware.cors.CORSMiddleware` uses, so
+    "what the guard lets through" and "what CORS answers" cannot drift apart: the method is
+    ``OPTIONS``, and both ``Origin`` and ``Access-Control-Request-Method`` are present.
+
+    Narrow on purpose. A bare ``OPTIONS`` with no ``Origin`` is not a preflight - it is a
+    caller asking what this endpoint supports - and it stays subject to every check.
+    """
+    return (
+        request.method == "OPTIONS"
+        and "origin" in request.headers
+        and "access-control-request-method" in request.headers
+    )
+
+
 def _error(
     request: Request,
     *,
@@ -356,9 +373,25 @@ class GatewayGuardMiddleware(BaseHTTPMiddleware):
     check is satisfied. Refusing it would break every legitimate non-browser client: the
     desktop app, a healthcheck, a backup script, ``curl`` in an operator's terminal.
 
-    Health probes are exempt from both. A container healthcheck reaches the app directly
-    on localhost, with no proxy to stamp anything, so gating it would make every
-    deployment roll back.
+    Two things are exempt from both checks, for the same underlying reason - the caller
+    physically cannot satisfy them:
+
+    * **Health probes.** A container healthcheck reaches the app directly on localhost, with
+      no proxy to stamp anything, so gating it would make every deployment roll back.
+    * **CORS preflights.** A preflight sends no custom headers by specification - it exists
+      to *ask* whether one may be sent - so requiring the gateway header on it is a condition
+      no browser can meet. See the comment at the check itself for why exempting it concedes
+      nothing, and what the symptom looks like when it is not exempt (a CORS error that sends
+      you looking at the CORS configuration, for a gateway problem).
+
+    **A browser cannot satisfy the gateway check on its own, and is not meant to.** The
+    secret lives server-side and the edge stamps it; a value shipped in a page's JavaScript
+    would be readable by anyone who opened devtools, which is exactly why this check is about
+    the *edge* rather than the client. The consequence is worth stating plainly because it
+    surfaces as a confusing 404: **serving the frontend from a dev server with no proxy in
+    front, while ``GATEWAY_SECRET`` is set, means every API call is refused.** Local
+    development leaves the secret blank - see the note on
+    :attr:`~app.core.config.Settings.gateway_secret`.
     """
 
     async def dispatch(
@@ -380,6 +413,9 @@ class GatewayGuardMiddleware(BaseHTTPMiddleware):
             )
 
         if path.startswith(PROBE_PREFIXES):
+            return await call_next(request)
+
+        if is_cors_preflight(request):
             return await call_next(request)
 
         if settings.gateway_enforced and not self._gateway_ok(request):

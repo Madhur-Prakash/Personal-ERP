@@ -28,11 +28,10 @@ so ``request_id`` / ``user_id`` / ``org_id`` ride along on every line.
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import MutableMapping
 from contextvars import ContextVar
 from typing import Any
-from app.core.config import settings
+
 from logifyx import (
     ContextLoggerAdapter,
     Logifyx,

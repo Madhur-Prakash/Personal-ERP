@@ -309,6 +309,127 @@ class TestGatewayGuard:
         assert response.json()["error"]["code"] == "method_not_allowed"
 
 
+class TestPreflightSurvivesTheGatewayGuard:
+    """A CORS preflight must reach CORSMiddleware even with the gateway enforced.
+
+    The regression these guard against took the whole frontend down while looking like a
+    CORS misconfiguration. A preflight sends no custom headers *by specification* - its job
+    is to ask whether ``X-Gateway-Key`` may be sent - so gating it on that header is a
+    condition no browser can satisfy. Worse, the guard sits outside CORSMiddleware, so the
+    rejection went out with no ``Access-Control-Allow-Origin`` and the browser reported a
+    CORS error for what was a gateway problem.
+
+    Not development-only: it breaks any edge that forwards ``OPTIONS`` without stamping the
+    header, which most proxy configurations do by default.
+    """
+
+    PREFLIGHT = {
+        "Origin": "http://localhost:5173",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+    }
+
+    async def test_preflight_passes_and_carries_the_cors_headers(
+        self, patch_settings: Any
+    ) -> None:
+        """The exact request the browser makes before POSTing to /auth/login."""
+        patch_settings(
+            gateway_secret=SecretStr(GATEWAY_SECRET),
+            cors_origins=["http://localhost:5173"],
+        )
+        async with await _client() as http:
+            response = await http.options("/api/v1/auth/login", headers=self.PREFLIGHT)
+
+        assert response.status_code == 200, response.text
+        # The header whose absence produced the original browser error.
+        assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+        assert response.headers["access-control-allow-credentials"] == "true"
+        assert "POST" in response.headers["access-control-allow-methods"]
+
+    async def test_preflight_for_refresh_passes(self, patch_settings: Any) -> None:
+        """`/auth/refresh` fires on page load, so it failed before login was even tried."""
+        patch_settings(
+            gateway_secret=SecretStr(GATEWAY_SECRET),
+            cors_origins=["http://localhost:5173"],
+        )
+        async with await _client() as http:
+            response = await http.options("/api/v1/auth/refresh", headers=self.PREFLIGHT)
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+    async def test_the_real_request_is_still_refused_without_the_header(
+        self, patch_settings: Any
+    ) -> None:
+        """The point of the exemption: it covers the question, never the action.
+
+        If this ever passes, exempting preflights has become a hole rather than a fix -
+        the guarantee is that nothing which *does* anything gets through unstamped.
+        """
+        patch_settings(
+            gateway_secret=SecretStr(GATEWAY_SECRET),
+            cors_origins=["http://localhost:5173"],
+        )
+        async with await _client(Origin="http://localhost:5173") as http:
+            response = await http.post(
+                "/api/v1/auth/login",
+                json={"email": "someone@example.com", "password": "irrelevant"},
+            )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "not_found"
+
+    async def test_a_bare_options_is_not_treated_as_a_preflight(
+        self, patch_settings: Any
+    ) -> None:
+        """No `Origin`, no `Access-Control-Request-Method` - so not a preflight.
+
+        Keeps the exemption narrow. `OPTIONS` on its own is a caller asking what an endpoint
+        supports, which is exactly the reconnaissance the guard exists to refuse.
+        """
+        patch_settings(gateway_secret=SecretStr(GATEWAY_SECRET))
+        async with await _client() as http:
+            assert (await http.options("/api/v1/auth/login")).status_code == 404
+
+    async def test_options_with_an_origin_but_no_requested_method_is_not_a_preflight(
+        self, patch_settings: Any
+    ) -> None:
+        """Both headers are required, so `Origin` alone cannot be used to slip past."""
+        patch_settings(gateway_secret=SecretStr(GATEWAY_SECRET))
+        async with await _client(Origin="http://localhost:5173") as http:
+            assert (await http.options("/api/v1/auth/login")).status_code == 404
+
+    async def test_a_foreign_origin_preflight_is_answered_but_not_allowed(
+        self, patch_settings: Any
+    ) -> None:
+        """Reaching CORSMiddleware is not the same as being permitted by it.
+
+        The guard stops filtering here; CORS decides. An origin outside `CORS_ORIGINS` gets
+        a response with no `Access-Control-Allow-Origin`, which is what makes the browser
+        block the request that would have followed.
+        """
+        patch_settings(
+            gateway_secret=SecretStr(GATEWAY_SECRET),
+            cors_origins=["http://localhost:5173"],
+        )
+        async with await _client() as http:
+            response = await http.options(
+                "/api/v1/auth/login",
+                headers={**self.PREFLIGHT, "Origin": "http://evil.example"},
+            )
+
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_preflight_passes_with_the_gateway_disabled_too(self) -> None:
+        """The ordinary local case, so the exemption is not silently secret-dependent."""
+        assert settings.gateway_enforced is False
+        async with await _client() as http:
+            response = await http.options("/api/v1/auth/login", headers=self.PREFLIGHT)
+
+        assert response.status_code == 200
+        assert "access-control-allow-origin" in response.headers
+
+
 class TestOriginEnforcement:
     async def test_write_from_a_foreign_origin_is_refused(self, probe: AsyncClient) -> None:
         response = await probe.post(
