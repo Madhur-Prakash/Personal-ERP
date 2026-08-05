@@ -170,9 +170,16 @@ which is a system package `pip` cannot install:
 | Windows | [UB-Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) |
 | Debian/Ubuntu | `apt install tesseract-ocr` |
 | macOS | `brew install tesseract` |
+| Docker | already in the image - `backend/Dockerfile` installs it |
 
 The Windows installer does not add itself to `PATH`, so set `TESSERACT_CMD` in
-`.env` if the app cannot find it. `GET /api/v1/documents/capabilities` reports what
+`.env` if the app cannot find it. That path is a *host* path: both compose files
+override it with `/usr/bin/tesseract` for the container, since `env_file` would
+otherwise hand a Windows path to a Linux image.
+
+`OCR_LANGUAGES` names Tesseract language packs, and each one has to be installed
+next to the binary - `eng+hin` needs `tesseract-ocr-hin` added to the `apt-get`
+line in `backend/Dockerfile`, or recognition fails instead of degrading. `GET /api/v1/documents/capabilities` reports what
 the server can actually read, and the Documents screen says so plainly rather than
 offering an upload button that fails.
 

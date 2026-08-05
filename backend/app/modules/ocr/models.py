@@ -269,6 +269,20 @@ class Document(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDe
         JSONB, nullable=False, server_default=text("'{}'::jsonb"), default=dict
     )
 
+    #: Field names a human has typed over, e.g. ``["invoice_number", "total_amount"]``.
+    #:
+    #: Separate from :attr:`field_confidence`, because a corrected field's confidence is
+    #: not a measurement: it is 1 because a person typed it, and without this list that is
+    #: indistinguishable from an engine that was certain. "Did this figure come from OCR
+    #: or from a human?" is precisely what an audit asks about a bill, and the answer
+    #: should not require reading the audit log to reconstruct.
+    #:
+    #: Emptied by a re-extract, which discards the corrections along with the values they
+    #: replaced - see :meth:`DocumentService._apply_extraction`.
+    corrected_fields: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list
+    )
+
     #: Mean confidence across the fields that were found. Indexed: the review queue
     #: is "show me the least trustworthy documents first".
     overall_confidence: Mapped[Rate | None] = mapped_column(default=None, index=True)

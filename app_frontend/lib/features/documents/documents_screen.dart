@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/api_error.dart';
 import '../../core/format.dart';
 import '../../core/locale_settings.dart';
 import '../../models/documents.dart';
@@ -905,6 +906,7 @@ class _FilePreview extends ConsumerStatefulWidget {
 
 class _FilePreviewState extends ConsumerState<_FilePreview> {
   Uint8List? _bytes;
+  ApiError? _failure;
   bool _showText = false;
   bool _opening = false;
 
@@ -922,8 +924,12 @@ class _FilePreviewState extends ConsumerState<_FilePreview> {
           .read(documentsApiProvider)
           .fileBytes(widget.document.id);
       if (mounted) setState(() => _bytes = bytes);
-    } catch (_) {
-      // The preview is a convenience; the extracted values and the text are the substance.
+    } catch (error) {
+      // Recorded, not swallowed. The preview is a convenience - the extracted values and
+      // the text are the substance - but "no bytes" and "still loading" are the same
+      // state to `_bytes == null`, so silence left a document whose file is gone showing
+      // a loading skeleton that would never resolve.
+      if (mounted) setState(() => _failure = ApiError.from(error));
     }
   }
 
@@ -1011,6 +1017,8 @@ class _FilePreviewState extends ConsumerState<_FilePreview> {
                       ),
                     ),
                   )
+                : _failure != null
+                ? _FileUnavailable(failure: _failure!)
                 : document.isPdf
                 ? _PdfPlaceholder(onOpen: _opening ? null : _openExternally)
                 : _bytes == null
@@ -1030,6 +1038,35 @@ class _FilePreviewState extends ConsumerState<_FilePreview> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The file could not be fetched - most often because its bytes are no longer in storage.
+///
+/// Worded around which half of the document survived. A `blob_missing` 410 means the row,
+/// the recognised text and every extracted value are intact and only the original file is
+/// gone, so the reviewer's next step is "read the text" rather than "report a bug" - and
+/// the file is recoverable only by uploading it again.
+class _FileUnavailable extends StatelessWidget {
+  const _FileUnavailable({required this.failure});
+
+  final ApiError failure;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool missing = failure.code == 'blob_missing';
+    return EmptyState(
+      icon: LucideIcons.triangleAlert,
+      title: missing
+          ? 'The original file is no longer in storage'
+          : 'The preview could not be loaded',
+      description: missing
+          ? '${failure.message} What was read out of it is still here - press Show text for '
+                'the recognised text, and the values beside it are unchanged. Upload the file '
+                'again if you need the original back.'
+          : failure.message,
+      verticalPadding: 48,
     );
   }
 }

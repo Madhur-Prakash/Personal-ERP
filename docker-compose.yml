@@ -105,9 +105,15 @@ services:
     container_name: personalerp-backend
     restart: unless-stopped
     env_file: [.env]
+    # Three host-shaped values from `.env` that are wrong inside this network, corrected
+    # here because `environment:` wins over `env_file:`. TESSERACT_CMD is the same kind of
+    # mistake as `localhost` for POSTGRES_HOST: the setting exists for Windows, where the
+    # installer leaves the binary off PATH, so a working developer `.env` names
+    # `C:/Program Files/...` - a path this container has no way to execute.
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+      TESSERACT_CMD: /usr/bin/tesseract
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:

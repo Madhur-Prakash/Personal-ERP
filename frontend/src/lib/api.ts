@@ -166,6 +166,41 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Replace a `Blob` error body with the parsed envelope, in place.
+ *
+ * **A `responseType: 'blob'` request gets a Blob body on failure too.** axios applies
+ * the response type it was asked for regardless of status, so a 410 from
+ * `/documents/{id}/file` arrives as a Blob containing the JSON envelope rather than as
+ * the envelope itself. `toApiError` then finds no `body.error`, falls through to its
+ * last branch, and the user is shown axios's own `"Request failed with status code
+ * 410"` instead of "The stored file is missing." The server said the right thing and
+ * the client threw it away.
+ *
+ * Every export in the app goes through `api.download`, which is also `responseType:
+ * 'blob'` - so this one function is the difference between a real message and a status
+ * code for file previews and every report download alike.
+ *
+ * Async, and therefore here rather than inside `toApiError`: reading a Blob is a
+ * promise, and the response interceptor is the only `await`-capable point both paths
+ * pass through. A body that is not JSON (an HTML error page from a proxy) is left
+ * exactly as it was, so the network-error branches still behave.
+ */
+async function unwrapBlobError(error: AxiosError): Promise<void> {
+  const response = error.response;
+  const data: unknown = response?.data;
+  if (!response || !(data instanceof Blob) || typeof data.text !== 'function') return;
+
+  try {
+    const parsed: unknown = JSON.parse(await data.text());
+    if (parsed !== null && typeof parsed === 'object' && 'error' in parsed) {
+      response.data = parsed;
+    }
+  } catch {
+    // Not JSON. The generic branches in `toApiError` are the correct answer then.
+  }
+}
+
 function toApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error;
 
@@ -259,7 +294,15 @@ async function refreshAccessToken(): Promise<string> {
 http.interceptors.response.use(
   (response) => response,
   async (error: unknown) => {
-    if (!axios.isAxiosError(error) || !error.config) {
+    if (!axios.isAxiosError(error)) {
+      return Promise.reject(toApiError(error));
+    }
+
+    // Before anything reads the body: a blob response carries its error envelope as a
+    // Blob, and every branch below (including the retry's) ends at `toApiError`.
+    await unwrapBlobError(error);
+
+    if (!error.config) {
       return Promise.reject(toApiError(error));
     }
 

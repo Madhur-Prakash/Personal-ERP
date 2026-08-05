@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from decimal import Decimal
+from typing import Any, Final
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -43,7 +45,13 @@ from app.core.pagination import PageParams
 from app.modules.audit.models import AuditAction
 from app.modules.audit.service import AuditService
 from app.modules.ocr.engines import UnsupportedDocumentError, recognise, sniff_format
-from app.modules.ocr.extraction import HIGH_CONFIDENCE, ExtractedDocument, extract_document
+from app.modules.ocr.extraction import (
+    HIGH_CONFIDENCE,
+    ExtractedDocument,
+    extract_document,
+    mean_confidence,
+    totals_reconcile,
+)
 from app.modules.ocr.models import Document, DocumentKind, DocumentStatus
 from app.modules.ocr.storage import (
     DocumentStore,
@@ -74,6 +82,38 @@ EXTRACTED_FIELDS: tuple[str, ...] = (
     "tax_amount",
     "total_amount",
 )
+
+
+#: The confidence recorded for a field a human typed. Not a measurement, and not a
+#: pretence of one - it is the number that stops the review UI flagging a value someone
+#: has already checked, which is the entire meaning of "corrected".
+CERTAIN: Final = Decimal("1")
+
+
+def _as_text(value: object) -> str | None:
+    """Render an extracted value for the audit log, which is JSON.
+
+    Decimals and dates have no JSON representation that survives a round trip unchanged -
+    a Decimal would become a float - and the audit trail's job is to still be readable
+    years later, so both go in as the strings they print as.
+    """
+    return None if value is None else str(value)
+
+
+def _scores(confidence: Mapping[str, Any]) -> dict[str, Decimal]:
+    """Parse the stored confidence map back into Decimals, skipping anything malformed.
+
+    Defensive on purpose: this is JSONB written by earlier versions of this code, and one
+    unparseable entry should cost that field's contribution to the mean rather than fail
+    a reviewer's edit.
+    """
+    parsed: dict[str, Decimal] = {}
+    for name, raw in confidence.items():
+        try:
+            parsed[name] = Decimal(str(raw))
+        except ArithmeticError:
+            continue
+    return parsed
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,6 +460,10 @@ class DocumentService:
                 confidence[name] = str(field.confidence)
 
         document.field_confidence = confidence
+        # Every value on the row now came from the parser, so no field is a human's any
+        # more. Leaving stale names here would mark a machine-read value as checked -
+        # the one claim this list exists to make truthfully.
+        document.corrected_fields = []
         document.overall_confidence = parsed.overall_confidence or None
         document.totals_reconcile = parsed.totals_reconcile
 
@@ -542,6 +586,109 @@ class DocumentService:
                 "after": {
                     "invoice_number": document.extracted_invoice_number,
                     "total_amount": str(document.extracted_total_amount),
+                },
+            },
+            ip_address=ctx.ip_address if ctx else None,
+            user_agent=ctx.user_agent if ctx else None,
+        )
+        await self.session.flush()
+        return await self._reload(organization_id, document.id)
+
+    # -----------------------------------------------------------------------
+    # Correct
+    # -----------------------------------------------------------------------
+    async def correct(
+        self,
+        organization_id: uuid.UUID,
+        document_id: uuid.UUID,
+        changes: Mapping[str, Any],
+        actor: User,
+        ctx: RequestContext | None = None,
+    ) -> Document:
+        """Replace what the engine read with what a human read.
+
+        **These values were always candidates, so a human may set them directly.** This
+        writes nothing to the ledger and changes nothing about the confirm path, which
+        still posts the values submitted on the confirm form through ``BillService``.
+        What it fixes is everything the row is used for in between: duplicate detection
+        and supplier matching both key off fields OCR can misread, the review queue
+        orders by a confidence that a corrected field should no longer drag down, and the
+        next person to open the document should see the checked values rather than the
+        machine's guess at them.
+
+        ``changes`` carries only the fields the caller actually sent - see
+        ``exclude_unset`` in the router. That distinction is the whole contract: omitting
+        a field leaves it alone, and sending ``null`` clears it. Without it, correcting
+        one field would blank the other six.
+
+        **Refused on a terminal document**, exactly as :meth:`reextract` is. A confirmed
+        document's figures sit behind a posted bill, and editing the record of what was
+        read after the fact makes the audit trail describe something that never happened.
+        """
+        document = await self.get(organization_id, document_id)
+
+        if document.status.is_terminal:
+            raise BusinessRuleError(
+                f"This document is {document.status.value} and can no longer be edited.",
+                code="document_terminal",
+            )
+        if not changes:
+            return document
+
+        before = {name: _as_text(getattr(document, f"extracted_{name}")) for name in changes}
+
+        confidence = dict(document.field_confidence)
+        corrected = set(document.corrected_fields)
+
+        for name, value in changes.items():
+            setattr(document, f"extracted_{name}", value)
+            corrected.add(name)
+            if value is None:
+                # Nothing left to be confident about. Dropping the key rather than
+                # storing a zero also keeps it out of the mean below, which is right: a
+                # field the invoice does not carry should not score the document down.
+                confidence.pop(name, None)
+            else:
+                confidence[name] = str(CERTAIN)
+
+        document.field_confidence = confidence
+        document.corrected_fields = sorted(corrected)
+        document.overall_confidence = mean_confidence(_scores(confidence)) or None
+        document.totals_reconcile = totals_reconcile(
+            document.extracted_subtotal,
+            document.extracted_tax_amount,
+            document.extracted_total_amount,
+        )
+
+        if "supplier_gstin" in changes:
+            await self._match_supplier(document)
+
+        if "supplier_gstin" in changes or "invoice_number" in changes:
+            # Cleared before re-checking, because `_flag_duplicate` only ever *sets* the
+            # link. The pair identifying this invoice has just changed, so the existing
+            # warning was made against values that no longer exist - and correcting a
+            # misread digit has to be able to withdraw a duplicate flag, not only raise
+            # one. A stale "already uploaded" on a genuine invoice is how a real bill
+            # goes unpaid.
+            document.duplicate_of_id = None
+            await self._flag_duplicate(document)
+
+        await self.audit.record(
+            AuditAction.DOCUMENT_CORRECTED,
+            actor=actor,
+            organization_id=organization_id,
+            resource_type="document",
+            resource_id=document.id,
+            summary=(
+                f"Corrected {', '.join(sorted(changes))} on {document.original_filename}"
+            ),
+            changes={
+                # Both halves, because the question this row answers later is not "what
+                # does it say now" - the document itself says that - but "what did the
+                # machine read, and what did a person change it to".
+                "before": before,
+                "after": {
+                    name: _as_text(getattr(document, f"extracted_{name}")) for name in changes
                 },
             },
             ip_address=ctx.ip_address if ctx else None,

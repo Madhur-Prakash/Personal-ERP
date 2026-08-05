@@ -596,6 +596,7 @@ function ExtractedFields({ document }: { document: Document }) {
  */
 function FilePreview({ document }: { document: Document }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ApiError | null>(null);
   const [showText, setShowText] = useState(false);
 
   const { data: text } = useQuery({
@@ -608,6 +609,11 @@ function FilePreview({ document }: { document: Document }) {
     let objectUrl: string | null = null;
     let cancelled = false;
 
+    // Reset both, or switching documents shows the previous one's outcome until this
+    // fetch lands - a stale "file is missing" against a document that is perfectly fine.
+    setUrl(null);
+    setFailure(null);
+
     void documentsApi
       .fileUrl(document.id)
       .then((created) => {
@@ -619,7 +625,19 @@ function FilePreview({ document }: { document: Document }) {
         }
         setUrl(created);
       })
-      .catch(() => setUrl(null));
+      .catch((error: unknown) => {
+        // Recorded, not swallowed. This used to `setUrl(null)`, which is the same state
+        // as "still loading" - so a document whose bytes are gone (a 410 `blob_missing`,
+        // the documented outcome for blobs uploaded before the database backend) sat on
+        // "Loading preview…" forever, with nothing to tell the reviewer whether to wait,
+        // retry, or go and find the paper copy.
+        if (cancelled) return;
+        setFailure(
+          error instanceof ApiError
+            ? error
+            : new ApiError('The preview could not be loaded.', { code: 'preview_failed' }),
+        );
+      });
 
     return () => {
       cancelled = true;
@@ -658,6 +676,35 @@ function FilePreview({ document }: { document: Document }) {
           <pre className="bg-surface-sunken text-content-secondary max-h-96 overflow-auto rounded-lg p-3 font-mono text-[11px] whitespace-pre-wrap">
             {text?.text ?? 'Loading…'}
           </pre>
+        ) : failure !== null ? (
+          // Not a toast, and not a retry button. The bytes being gone is a fact about
+          // this document rather than a transient failure, so it belongs in the panel
+          // that was going to show them - and the useful thing to say is which half of
+          // the document survived, because the extracted values and the recognised text
+          // live on the row and are completely unaffected.
+          <div className="border-warning/30 bg-warning-bg flex gap-3 rounded-lg border p-3 text-[13px]">
+            <AlertTriangle className="text-warning h-4 w-4 shrink-0" aria-hidden />
+            <div>
+              <p className="text-content font-medium">
+                {failure.code === 'blob_missing'
+                  ? 'The original file is no longer in storage'
+                  : 'The preview could not be loaded'}
+              </p>
+              <p className="text-content-secondary mt-0.5">{failure.message}</p>
+              {failure.code === 'blob_missing' && (
+                <p className="text-content-muted mt-1">
+                  What was read out of it is still here - press <strong>Show text</strong> for the
+                  recognised text, and the values beside it are unchanged. Upload the file again if
+                  you need the original back.
+                </p>
+              )}
+              {failure.requestId !== undefined && (
+                <p className="text-content-muted mt-1 font-mono text-[11px]">
+                  Reference: {failure.requestId}
+                </p>
+              )}
+            </div>
+          </div>
         ) : url === null ? (
           <p className="text-content-muted text-[13px]">Loading preview…</p>
         ) : document.content_type === 'application/pdf' ? (

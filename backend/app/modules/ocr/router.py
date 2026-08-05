@@ -23,6 +23,7 @@ from app.modules.ocr.models import Document, DocumentKind, DocumentStatus
 from app.modules.ocr.schemas import (
     ConfirmDocumentRequest,
     ConfirmResult,
+    DocumentFieldsUpdate,
     DocumentRead,
     DocumentSummary,
     DocumentText,
@@ -296,6 +297,46 @@ async def reextract_document(
     original files have been archived.
     """
     document = await service.reextract(organization_id, document_id, user, ctx)
+    return _detail(document)
+
+
+@router.patch(
+    "/{document_id}/extracted",
+    response_model=DocumentRead,
+    summary="Correct what was read",
+)
+async def correct_document(
+    document_id: uuid.UUID,
+    data: DocumentFieldsUpdate,
+    organization_id: ActiveOrganizationId,
+    user: CurrentUser,
+    service: DocumentsDep,
+    ctx: RequestCtx,
+    _: Annotated[None, Depends(require_permission(Permission.DOCUMENT_WRITE))],
+) -> DocumentRead:
+    """Overwrite machine-read fields with values a human checked.
+
+    OCR misreads: a smudged ``8`` becomes ``3``, a GSTIN loses a character, a total is
+    read off the wrong line. The extracted values are candidates, so the fix is to let
+    the reviewer correct them rather than to make them re-upload a better scan.
+
+    **`exclude_unset` is what makes this a PATCH.** Only the fields the client actually
+    sent are forwarded, so omitting a field leaves it untouched while sending it as
+    `null` clears it - two requests that a plain `model_dump()` would render identical,
+    silently blanking every field the caller did not mention.
+
+    `document:write`, the same permission as re-reading and rejecting. Notably *not*
+    `document:confirm`: correcting what a scan says is clerical work, and nothing here
+    reaches the ledger - the corrected values still have to be submitted, in full, on the
+    confirm form that creates the bill.
+    """
+    document = await service.correct(
+        organization_id,
+        document_id,
+        data.model_dump(exclude_unset=True),
+        user,
+        ctx,
+    )
     return _detail(document)
 
 

@@ -240,8 +240,14 @@ _LAYOUT: Final = """<!doctype html>
 <body><div class="wrap"><div class="card">
   <p class="brand">Personal <span>ERP</span></p>
   {{ body }}
+  {# `true` as the second argument, and it is load-bearing: Jinja's `default` filter
+     substitutes only for an *undefined* variable, and `_render` always passes `footer`
+     - as `None` when the caller omitted it. Without the flag, every email that does not
+     name its own footer rendered the literal word "None" where the footer belongs.
+     The flag widens it to any falsy value, which also covers an empty string. #}
   <p class="foot">{{ footer|default("You are receiving this because someone used this
-    address to sign in to Personal ERP. If that was not you, you can ignore this email.") }}</p>
+    address to sign in to Personal ERP. If that was not you, you can ignore this email.",
+    true) }}</p>
 </div></div></body></html>
 """
 

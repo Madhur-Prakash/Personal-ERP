@@ -164,6 +164,14 @@ services:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
       LOG_JSON: 'true' # structured output for the aggregator
+      # Overrides whatever `.env` carries. That file is edited on a workstation, where
+      # this setting has to name a Windows install path for OCR to work at all, and
+      # `env_file` beats the image's own ENV - so the deployed container would inherit a
+      # path it cannot execute and report OCR as unavailable.
+      TESSERACT_CMD: /usr/bin/tesseract
+    # Longer than uvicorn's own 25s graceful timeout (see the Dockerfile), so a replica
+    # being replaced always exits by finishing its requests rather than by SIGKILL.
+    stop_grace_period: 30s
     volumes:
       - ./logs:/app/logs
       # No documents volume, and none needed. Uploaded files are compressed into

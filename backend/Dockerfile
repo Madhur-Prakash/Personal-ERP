@@ -24,9 +24,33 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH"
 
 # curl is for the container healthcheck; libpq5 is asyncpg's runtime library.
+#
+# `tesseract-ocr` is the binary `pytesseract` shells out to. The wheel is already a
+# core dependency and installs from the lockfile below, but it is a subprocess wrapper
+# and nothing more: without this package the image imports it happily and fails on the
+# first scanned upload with `TesseractNotFoundError` - which is precisely the failure
+# `app/modules/ocr/engines.py` probes for rather than assumes away.
+#
+# The language data is named explicitly. `tesseract-ocr` depends on `-eng`, so it
+# arrives either way, but writing it down is what ties the image to `OCR_LANGUAGES`:
+# a language named in that setting and missing from here fails recognition outright
+# rather than degrading, so `eng+hin` means adding `tesseract-ocr-hin` on this line.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl libpq5 \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        libpq5 \
+        tesseract-ocr \
+        tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
+
+# Where apt put the binary. Not strictly required - it is on `PATH`, which is what the
+# blank default in `Settings.tesseract_cmd` means - but the same `.env` is read by a
+# developer's Windows machine and by this container, and there the setting has to hold
+# `C:/Program Files/Tesseract-OCR/tesseract.exe`. Handing that path to a Linux
+# container is the "installed but unreachable" case the setting exists to fix, pointed
+# the wrong way. Compose's `env_file` still beats an image `ENV`, so both compose files
+# also pin this in the backend's `environment:` block, next to POSTGRES_HOST.
+ENV TESSERACT_CMD=/usr/bin/tesseract
 
 WORKDIR /app
 
@@ -82,6 +106,15 @@ COPY --chown=personalerp:personalerp app ./app
 COPY --chown=personalerp:personalerp migrations ./migrations
 COPY --chown=personalerp:personalerp alembic.ini pyproject.toml README.md ./
 
+# The operational scripts, not only the application.
+#
+# `migrate_document_blobs.py` is the documented recovery for a document whose bytes
+# predate the database backend - the `blob_missing` 410 - and `check_schema_drift.py`
+# answers "does the deployed schema still match the models", which is a question about
+# production and can only be asked from inside it. A recovery procedure that exists
+# solely on a developer's laptop is not a recovery procedure.
+COPY --chown=personalerp:personalerp scripts ./scripts
+
 # logifyx writes here; it must be writable by the unprivileged user.
 RUN mkdir -p /app/logs && chown -R personalerp:personalerp /app/logs
 
@@ -109,9 +142,17 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # a bound, a slowloris-style client can hold a connection open dribbling header bytes,
 # and the default is generous enough to be worth tightening for an API whose largest
 # legitimate header set is a bearer token.
+#
+# `--timeout-graceful-shutdown` bounds what happens on SIGTERM, which is every deploy.
+# uvicorn's default is to wait indefinitely for in-flight requests: with `order:
+# start-first` replacing one replica at a time, a single stuck connection stalls the
+# rollout until Docker's own grace period expires and SIGKILLs the process mid-request.
+# 25s is under the 30s `stop_grace_period` the compose file sets, so the ordering is
+# always "finish the work, then exit" rather than "get killed".
 CMD ["uvicorn", "app.main:app", \
      "--host", "0.0.0.0", "--port", "8000", \
      "--no-proxy-headers", \
      "--no-server-header", "--no-date-header", \
      "--h11-max-incomplete-event-size", "16384", \
-     "--timeout-keep-alive", "65"]
+     "--timeout-keep-alive", "65", \
+     "--timeout-graceful-shutdown", "25"]

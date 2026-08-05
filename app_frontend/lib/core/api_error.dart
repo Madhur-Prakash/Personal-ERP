@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 /// A normalised API failure.
@@ -90,13 +92,34 @@ class ApiError implements Exception {
         'minute${minutes == 1 ? '' : 's'}.';
   }
 
+  /// The error envelope, whatever response type the failed request asked for.
+  ///
+  /// **A `ResponseType.bytes` request gets its *error* body as bytes too.** Dio applies
+  /// the response type it was given regardless of status, so a 410 from
+  /// `/documents/{id}/file` arrives as a `List<int>` holding the JSON envelope rather
+  /// than as the decoded map. Without this, the envelope check in [from] fails, and the
+  /// user is shown Dio's own "The request returned an invalid status code of 410"
+  /// instead of "The stored file is missing." - the server said the right thing and the
+  /// client discarded it.
+  ///
+  /// Anything that is not UTF-8 JSON is returned untouched, so a proxy's HTML error page
+  /// still falls through to the generic branches rather than being misread.
+  static Object? _decodeBody(Object? body) {
+    if (body is! List<int>) return body;
+    try {
+      return jsonDecode(utf8.decode(body));
+    } catch (_) {
+      return body;
+    }
+  }
+
   /// Normalise anything thrown by Dio, or by us, into one of these.
   static ApiError from(Object error) {
     if (error is ApiError) return error;
 
     if (error is DioException) {
       final Response<dynamic>? response = error.response;
-      final Object? body = response?.data;
+      final Object? body = _decodeBody(response?.data);
 
       if (body is Map && body['error'] is Map) {
         final Map<Object?, Object?> envelope =

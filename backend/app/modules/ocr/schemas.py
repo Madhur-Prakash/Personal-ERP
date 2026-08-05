@@ -7,12 +7,13 @@ import uuid
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, StringConstraints
 
 from app.core.schemas import BaseSchema, ResponseSchema, TimestampedSchema
 from app.modules.ocr.engines import DocumentFormat
 from app.modules.ocr.models import DocumentKind, DocumentStatus
 from app.modules.purchasing.schemas import BillCreate, BillRead
+from app.modules.sales.schemas import Amount, Gstin, PartyName
 
 Confidence = Annotated[Decimal, Field(ge=0, le=1, max_digits=9, decimal_places=4)]
 
@@ -84,6 +85,10 @@ class DocumentRead(DocumentSummary):
     #: confidence would round-trip through binary floating point for no reason.
     field_confidence: dict[str, str]
     low_confidence_fields: list[str]
+    #: Fields a human has typed over. Their confidence is 1, so the UI must read this to
+    #: tell "a person checked it" from "the engine was sure" - two very different claims
+    #: that would otherwise render identically.
+    corrected_fields: list[str]
 
     failure_code: str | None
     failure_message: str | None
@@ -156,6 +161,34 @@ class ConfirmDocumentRequest(BaseSchema):
     """
 
     bill: BillCreate
+
+
+class DocumentFieldsUpdate(BaseSchema):
+    """Reviewer corrections to what the engine read.
+
+    **Every field is optional twice over**, and the two mean different things: omit a
+    field to leave it as it is, or send it as ``null`` to clear it. The route reads
+    ``model_fields_set`` to tell them apart - without that, a request correcting one
+    misread total would blank the six fields it did not mention.
+
+    The constraints are the same ones the database columns carry, so an invalid GSTIN is
+    a 422 naming the field rather than a ``DataError`` from the driver. Note that these
+    values are still *candidates* after this call: nothing here posts anything, and
+    confirming continues to submit a full :class:`BillCreate` that a human approved.
+    """
+
+    supplier_name: PartyName | None = None
+    supplier_gstin: Gstin | None = None
+    invoice_number: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)] | None
+    ) = None
+    invoice_date: dt.date | None = None
+    #: `Amount` is `ge=0`: a negative subtotal on a purchase invoice is a credit note,
+    #: which is a different document with a different sign convention, not a value to be
+    #: typed in here.
+    subtotal: Amount | None = None
+    tax_amount: Amount | None = None
+    total_amount: Amount | None = None
 
 
 class RejectDocumentRequest(BaseSchema):

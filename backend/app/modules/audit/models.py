@@ -172,6 +172,10 @@ class AuditAction(StrEnum):
     #: Recorded because it rewrites the candidate values a reviewer may already
     #: have been looking at.
     DOCUMENT_REEXTRACTED = "document.reextracted"
+    #: A human typed over one or more of the machine-read fields. Recorded with both the
+    #: old and new values: "was this figure read or corrected, and by whom" is the
+    #: question asked of a bill whose total is later disputed.
+    DOCUMENT_CORRECTED = "document.corrected"
     #: A human accepted machine-read values and a bill was created from them.
     #: Warning severity: this is the moment an OCR result becomes money owed, and
     #: it is the entry an auditor traces back when a payment is questioned.

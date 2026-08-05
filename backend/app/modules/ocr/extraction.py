@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -32,6 +33,59 @@ HIGH_CONFIDENCE: Final = Decimal("0.85")
 #: Below this, the field is presented blank rather than pre-filled - a wrong
 #: default is worse than none, because a reviewer skims past a plausible value.
 LOW_CONFIDENCE: Final = Decimal("0.50")
+
+#: The fields the headline score is averaged over: the ones that identify an invoice.
+#: Subtotal and tax are deliberately absent - they are checked against the total by
+#: :attr:`ExtractedDocument.totals_reconcile`, which is a far stronger signal than
+#: averaging their scores in.
+#:
+#: Named once because two callers average over it. The other is
+#: ``DocumentService.correct``, which recomputes the score after a human edits a field;
+#: had it kept its own copy of this list, a document's headline number would have meant
+#: one thing before an edit and another after.
+SUMMARY_FIELDS: Final[tuple[str, ...]] = (
+    "supplier_name",
+    "supplier_gstin",
+    "invoice_number",
+    "invoice_date",
+    "total_amount",
+)
+
+
+#: A rupee, absorbing the supplier's own rounding when checking the arithmetic.
+TOTALS_TOLERANCE: Final = Decimal("1")
+
+
+def totals_reconcile(
+    subtotal: Decimal | None, tax_amount: Decimal | None, total_amount: Decimal | None
+) -> bool:
+    """Whether ``subtotal + tax`` equals the stated total, within a rupee.
+
+    The single most useful signal in the whole pipeline: if the three numbers agree, all
+    three were almost certainly read correctly, because a misrecognised digit would break
+    the arithmetic. Used to *raise* confidence rather than to reject anything.
+
+    A free function rather than a method, because two callers need it on two different
+    shapes: :class:`ExtractedDocument`, holding scored candidates, and a ``Document`` row
+    whose amounts a reviewer has just corrected by hand. The same three numbers must
+    reconcile identically however they were arrived at.
+    """
+    if subtotal is None or tax_amount is None or total_amount is None:
+        return False
+    return abs((subtotal + tax_amount) - total_amount) <= TOTALS_TOLERANCE
+
+
+def mean_confidence(scores: Mapping[str, Decimal]) -> Decimal:
+    """Mean of the :data:`SUMMARY_FIELDS` present in ``scores``.
+
+    Absent fields are skipped rather than counted as zero. Scoring a document down for
+    a field its supplier never printed would bury a perfectly-read invoice under the
+    documents that actually need attention.
+    """
+    found = [scores[name] for name in SUMMARY_FIELDS if name in scores]
+    if not found:
+        return Decimal("0")
+    return sum(found, Decimal("0")) / Decimal(len(found))
 
 
 class FieldSource(StrEnum):
@@ -87,46 +141,30 @@ class ExtractedDocument:
         A summary for sorting a review queue - never a substitute for the per-field
         scores, which are what the reviewer actually acts on.
         """
-        found = [
-            f.confidence
-            for f in (
-                self.supplier_name,
-                self.supplier_gstin,
-                self.invoice_number,
-                self.invoice_date,
-                self.total_amount,
-            )
-            if f is not None
-        ]
-        if not found:
-            return Decimal("0")
-        return sum(found, Decimal("0")) / Decimal(len(found))
+        found: dict[str, Decimal] = {}
+        for name in SUMMARY_FIELDS:
+            candidate: ExtractedField[object] | None = getattr(self, name)
+            if candidate is not None:
+                found[name] = candidate.confidence
+        return mean_confidence(found)
 
     @property
     def fields_needing_review(self) -> list[str]:
-        named = {
-            "supplier_name": self.supplier_name,
-            "supplier_gstin": self.supplier_gstin,
-            "invoice_number": self.invoice_number,
-            "invoice_date": self.invoice_date,
-            "total_amount": self.total_amount,
-        }
-        return [name for name, value in named.items() if value is None or value.needs_review]
+        flagged: list[str] = []
+        for name in SUMMARY_FIELDS:
+            candidate: ExtractedField[object] | None = getattr(self, name)
+            if candidate is None or candidate.needs_review:
+                flagged.append(name)
+        return flagged
 
     @property
     def totals_reconcile(self) -> bool:
-        """Whether subtotal + tax equals the stated total.
-
-        The single most useful signal in the whole pipeline: if the three numbers
-        agree, all three were almost certainly read correctly, because a
-        misrecognised digit would break the arithmetic. Used to *raise* confidence
-        rather than to reject anything.
-        """
-        if self.subtotal is None or self.tax_amount is None or self.total_amount is None:
-            return False
-        expected = self.subtotal.value + self.tax_amount.value
-        # A rupee of tolerance absorbs the supplier's own rounding.
-        return abs(expected - self.total_amount.value) <= Decimal("1")
+        """Whether subtotal + tax equals the stated total."""
+        return totals_reconcile(
+            None if self.subtotal is None else self.subtotal.value,
+            None if self.tax_amount is None else self.tax_amount.value,
+            None if self.total_amount is None else self.total_amount.value,
+        )
 
 
 @dataclass(frozen=True, slots=True)
