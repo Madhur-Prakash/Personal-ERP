@@ -184,8 +184,11 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         response.headers[REQUEST_ID_HEADER] = request_id
         response.headers["Server-Timing"] = f"app;dur={duration_ms:.1f}"
 
-        # Health probes fire every few seconds; logging them buries real traffic.
-        if not request.url.path.startswith(PROBE_PREFIXES):
+        # Health probes fire every few seconds against a live deployment, and those lines
+        # bury the real traffic they sit between - so they are logged everywhere except
+        # production, where a probe you are debugging can be turned back on with
+        # ``LOG_HEALTH_PROBES``. See :attr:`~app.core.config.Settings.log_health_probes`.
+        if settings.log_health_probes_enabled or not request.url.path.startswith(PROBE_PREFIXES):
             log.info(
                 "request completed",
                 extra={

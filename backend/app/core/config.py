@@ -359,6 +359,26 @@ class Settings(BaseSettings):
     #: is looking for what they changed about the database.
     log_file: str = "personalerp.log"
 
+    #: Whether ``/health*`` requests get the same "request completed" line as everything
+    #: else (:class:`~app.core.middleware.RequestContextMiddleware`).
+    #:
+    #: Tri-state on purpose. Unset resolves to :attr:`log_health_probes_enabled` - on
+    #: everywhere but production - because the two situations are genuinely different: in
+    #: development the probe is something you just typed and want to see answered, while in
+    #: production it is an orchestrator firing every few seconds, and those lines bury the
+    #: real traffic they sit between. Set it explicitly to force either behaviour, which is
+    #: what you want when a probe is failing on a live deployment and the silence is the
+    #: thing making it hard to diagnose.
+    log_health_probes: bool | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def log_health_probes_enabled(self) -> bool:
+        """Resolved value of :attr:`log_health_probes`; quiet in production by default."""
+        if self.log_health_probes is not None:
+            return self.log_health_probes
+        return not self.environment.is_production
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def document_storage(self) -> Literal["object", "database"]:
