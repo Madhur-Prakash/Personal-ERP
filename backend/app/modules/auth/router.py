@@ -95,10 +95,24 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 #
 # `/auth/magic-link/device/poll` is deliberately absent: it is called every two seconds
 # by design from the desktop sign-in screen.
-LOGIN_LIMIT = "5/minute"
-REGISTER_LIMIT = "3/minute"
-MAIL_SENDING_LIMIT = "3/minute"
-TOKEN_EXCHANGE_LIMIT = "20/minute"
+#
+# **The values come from configuration, not from here.** They were literals in this file,
+# which meant loosening a limit for one deployment required editing and redeploying Python -
+# and, worse, that the number a 429 was actually enforcing appeared nowhere an operator would
+# look. `RATE_LIMIT_AUTH_STRICT=5/minute` in `.env` next to a hard-coded `3/minute` here is
+# how "/forgot-password says 429 after three tries" becomes a mystery.
+#
+# Aliased rather than used inline at each decorator so the mapping from endpoint group to
+# setting stays visible in one place, and so the names below still read as intent
+# (`MAIL_SENDING_LIMIT`) rather than as plumbing.
+#
+# **Bound at import time**, because that is when a decorator is applied. Changing these needs
+# a restart, exactly as the literals did - see the note on
+# :attr:`app.core.config.Settings.rate_limit_login`.
+LOGIN_LIMIT = settings.rate_limit_login
+REGISTER_LIMIT = settings.rate_limit_register
+MAIL_SENDING_LIMIT = settings.rate_limit_mail_sending
+TOKEN_EXCHANGE_LIMIT = settings.rate_limit_token_exchange
 
 
 # =============================================================================

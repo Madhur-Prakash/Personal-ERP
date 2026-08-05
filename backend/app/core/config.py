@@ -120,6 +120,7 @@ def _rate_per_second(spec: str) -> float | None:
     except (ValueError, KeyError, ZeroDivisionError):
         return None
 
+
 class Settings(BaseSettings):
     """Typed, validated application settings."""
 
@@ -199,9 +200,9 @@ class Settings(BaseSettings):
     postgres_db: str = "personalerp"
 
     #: Full DSN override. Ignores all ``POSTGRES_*`` settings when set.
-#:
-#: Blank values are treated as unset. The DSN is validated at startup so
-#: configuration errors fail fast.
+    #:
+    #: Blank values are treated as unset. The DSN is validated at startup so
+    #: configuration errors fail fast.
     database_url: OptionalDsn = None
     db_pool_size: int = Field(default=10, ge=1)
     db_max_overflow: int = Field(default=20, ge=0)
@@ -209,10 +210,10 @@ class Settings(BaseSettings):
     db_echo: bool = False
 
     #: Run ``alembic upgrade head`` before serving requests.
-#:
-#: Useful for single-instance deployments to automatically initialize or
-#: update the database. Disabled by default for staged or multi-instance
-#: deployments.
+    #:
+    #: Useful for single-instance deployments to automatically initialize or
+    #: update the database. Disabled by default for staged or multi-instance
+    #: deployments.
     run_migrations_on_startup: bool = False
 
     # ---- Redis --------------------------------------------------------------
@@ -248,44 +249,64 @@ class Settings(BaseSettings):
 
     # ---- Rate limiting ------------------------------------------------------
     #: Budgets use the ``"<count>/<period>"`` format (e.g. ``10/minute``).
-#:
-#: Each limit uses a token bucket, allowing bursts up to ``count`` while
-#: maintaining the configured average rate.
+    #:
+    #: Each limit uses a token bucket, allowing bursts up to ``count`` while
+    #: maintaining the configured average rate.
     rate_limit_enabled: bool = True
 
     #: Anything not matched by a more specific tier.
-    rate_limit_default: str = "15/minute"
+    rate_limit_default: str 
 
     #: Credential and enumeration surfaces: login, register, 2FA, token exchange.
-    rate_limit_auth: str = "10/minute"
+    rate_limit_auth: str 
 
     #: Rate limit for auth endpoints that send email or issue one-time secrets.
-#:
-#: Stricter to prevent inbox spam and abuse.
-    rate_limit_auth_strict: str = "3/minute"
+    #:
+    #: Stricter to prevent inbox spam and abuse.
+    rate_limit_auth_strict: str 
 
     #: Rate limit for read operations (list, get, search).
-#:
-#: Tuned for dashboard traffic, allowing page-load bursts while limiting
-#: sustained request rates.
-    rate_limit_read: str = "25/minute"
+    #:
+    #: Tuned for dashboard traffic, allowing page-load bursts while limiting
+    #: sustained request rates.
+    rate_limit_read: str 
 
     #: Writes: POST/PATCH/PUT/DELETE outside auth. Each one costs a transaction and
     #: usually an audit row, so the budget is an order of magnitude below reads.
-    rate_limit_write: str = "15/minute"
+    rate_limit_write: str 
 
     #: Document uploads. Every one runs OCR inline, which is seconds of CPU - this is
     #: the most expensive thing an authenticated user can ask for.
-    rate_limit_upload: str = "5/minute"
+    rate_limit_upload: str
 
     #: Report exports (xlsx/pdf/csv). Each renders a full statement in memory.
-    rate_limit_export: str = "5/minute"
+    rate_limit_export: str
 
     #: Global per-IP limit applied alongside user-based rate limits.
-#:
-#: Prevents abuse from a single source, even with multiple users or stolen
-#: tokens. Should normally be higher than per-user limits.
-    rate_limit_ip: str = "250/minute"
+    #:
+    #: Prevents abuse from a single source, even with multiple users or stolen
+    #: tokens. Should normally be higher than per-user limits.
+    rate_limit_ip: str
+
+    # ---- Per-endpoint budgets ------------------------------------------------
+    #: ``/login`` and the 2FA + recovery-code endpoints. Five a minute is above any human's
+    #: typing speed and far below anything useful for guessing. Bounds one *source*; the
+    #: per-account side is :attr:`max_login_attempts`.
+    rate_limit_login: str
+
+    #: ``/register``. Account-creation spam costs a row and an outbound email each.
+    rate_limit_register: str
+
+    #: Every endpoint that **sends mail**: ``/forgot-password``, ``/magic-link``, ``/otp``,
+    #: ``/resend-verification``. Tightest here on purpose - abuse spends someone else's inbox
+    #: and this deployment's sending reputation, and a burned sending domain does not recover
+    #: quickly. Raise this one if reset codes are being refused too eagerly.
+    rate_limit_mail_sending: str
+
+    #: ``/refresh``. A client needs one call per access-token lifetime (15 minutes by
+    #: default), so this is three orders of magnitude of headroom and still bounds a
+    #: token-churning loop.
+    rate_limit_token_exchange: str
 
     # ---- Email (Gmail API) --------------------------------------------------
     gmail_credentials_b64: str | None = None
@@ -516,6 +537,56 @@ class Settings(BaseSettings):
             for name, spec in tiers.items()
             if (rate := _rate_per_second(spec)) is not None and rate > ip_rate
         }
+
+    @model_validator(mode="after")
+    def _validate_rate_limit_budgets(self) -> Self:
+        """Reject a malformed budget spec at boot, in every environment.
+
+        Newly load-bearing. While these were hard-coded constants, a typo was a syntax-adjacent
+        mistake caught in review; now that they come from ``.env``, ``"5/min"`` or ``"5 per
+        minute"`` is a plausible thing for an operator to write. Both are wrong -
+        :func:`_rate_per_second` wants ``"<count>/<period>"`` with a full period name.
+
+        What made this worth a validator rather than a comment is that the two limiters fail
+        *differently* on a bad value, and neither failure names the variable:
+
+        * A **tier** spec that will not parse falls back to
+          :data:`app.core.ratelimit.FALLBACK_BUDGET`, so the deployment runs on a limit
+          nobody chose - and silently drops out of
+          :attr:`rate_limit_tiers_eclipsed_by_ip`, because that skips what it cannot parse.
+        * A **per-endpoint** spec is parsed by slowapi when the decorator is applied, so it
+          raises during import, from inside a third-party library, before logging is up.
+
+        Not restricted to production: a limit that is silently not the configured one is
+        just as misleading on a laptop, and this is the cheapest possible check.
+        """
+        budgets = {
+            "RATE_LIMIT_DEFAULT": self.rate_limit_default,
+            "RATE_LIMIT_AUTH": self.rate_limit_auth,
+            "RATE_LIMIT_AUTH_STRICT": self.rate_limit_auth_strict,
+            "RATE_LIMIT_READ": self.rate_limit_read,
+            "RATE_LIMIT_WRITE": self.rate_limit_write,
+            "RATE_LIMIT_UPLOAD": self.rate_limit_upload,
+            "RATE_LIMIT_EXPORT": self.rate_limit_export,
+            "RATE_LIMIT_IP": self.rate_limit_ip,
+            "RATE_LIMIT_LOGIN": self.rate_limit_login,
+            "RATE_LIMIT_REGISTER": self.rate_limit_register,
+            "RATE_LIMIT_MAIL_SENDING": self.rate_limit_mail_sending,
+            "RATE_LIMIT_TOKEN_EXCHANGE": self.rate_limit_token_exchange,
+        }
+        problems = [
+            f"{name}={spec!r} is not a valid budget"
+            for name, spec in budgets.items()
+            if _rate_per_second(spec) is None
+        ]
+        if problems:
+            joined = "\n  - ".join(problems)
+            raise ValueError(
+                f"Invalid rate-limit configuration:\n  - {joined}\n"
+                'Write budgets as "<count>/<period>", where period is one of '
+                'second, minute, hour, day - for example "10/minute".'
+            )
+        return self
 
     @model_validator(mode="after")
     def _enforce_test_safety(self) -> Self:

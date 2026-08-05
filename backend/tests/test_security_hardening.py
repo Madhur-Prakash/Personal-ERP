@@ -306,9 +306,7 @@ class TestPreflightReachesCors:
         "Access-Control-Request-Headers": "content-type",
     }
 
-    async def test_preflight_passes_and_carries_the_cors_headers(
-        self, patch_settings: Any
-    ) -> None:
+    async def test_preflight_passes_and_carries_the_cors_headers(self, patch_settings: Any) -> None:
         """The exact request the browser makes before POSTing to /auth/login."""
         patch_settings(cors_origins=["http://localhost:5173"])
         async with await _client() as http:
@@ -1043,6 +1041,85 @@ class TestEndpointLimiterWiring:
             f"{path} mounts the undecorated handler - @limiter.limit is above "
             f"@router.post instead of below it, so the budget is never enforced"
         )
+
+    def test_the_budgets_come_from_settings(self) -> None:
+        """The decorators read configuration rather than literals.
+
+        They were hard-coded, which meant the number a 429 enforced appeared nowhere an
+        operator would look - and `RATE_LIMIT_AUTH_STRICT=5/minute` sitting next to a
+        hard-coded `3/minute` is how "/forgot-password refuses after three tries" became a
+        mystery. Asserted on identity with the settings values so a future edit that pastes a
+        literal back in fails here.
+        """
+        from app.modules.auth import router as auth_router
+
+        assert settings.rate_limit_login == auth_router.LOGIN_LIMIT
+        assert settings.rate_limit_register == auth_router.REGISTER_LIMIT
+        assert settings.rate_limit_mail_sending == auth_router.MAIL_SENDING_LIMIT
+        assert settings.rate_limit_token_exchange == auth_router.TOKEN_EXCHANGE_LIMIT
+
+    def test_mail_sending_is_not_looser_than_the_auth_strict_tier(self) -> None:
+        """The tighter limiter binds, so this one has to be the tighter one.
+
+        Both apply to /forgot-password. If the decorator were ever configured *above*
+        `RATE_LIMIT_AUTH_STRICT`, the tier would silently become the effective limit and this
+        budget would be decoration - the same class of mistake as `RATE_LIMIT_IP` eclipsing a
+        tier, and just as invisible.
+        """
+        from app.core.config import _rate_per_second
+
+        mail = _rate_per_second(settings.rate_limit_mail_sending)
+        strict = _rate_per_second(settings.rate_limit_auth_strict)
+        assert mail is not None and strict is not None
+        assert mail <= strict, (
+            f"RATE_LIMIT_MAIL_SENDING ({settings.rate_limit_mail_sending}) is looser than "
+            f"RATE_LIMIT_AUTH_STRICT ({settings.rate_limit_auth_strict}), so the tier binds "
+            f"first and the per-endpoint budget never applies"
+        )
+
+
+class TestRateLimitBudgetValidation:
+    """A malformed budget is refused at boot, in every environment.
+
+    Newly load-bearing: while these were literals in Python, a typo was caught in review.
+    Now they arrive from `.env`, where `"5/min"` is a very plausible thing to write - and the
+    two limiters fail *differently* on one, neither naming the variable. A tier silently
+    falls back to `FALLBACK_BUDGET`; a per-endpoint spec raises from inside slowapi during
+    import, before logging exists.
+    """
+
+    @staticmethod
+    def _build(**overrides: Any) -> Any:
+        from app.core.config import Settings
+
+        return Settings(_env_file=None, environment="development", **overrides)
+
+    @pytest.mark.parametrize(
+        "spec",
+        ["5/min", "5 per minute", "5", "minute/5", "", "5/fortnight", "abc/minute"],
+    )
+    def test_malformed_specs_are_refused(self, spec: str) -> None:
+        with pytest.raises(ValueError, match="not a valid budget"):
+            self._build(rate_limit_mail_sending=spec)
+
+    @pytest.mark.parametrize("spec", ["5/minute", "10/second", "600/hour", "1000/day", "5/minutes"])
+    def test_valid_specs_are_accepted(self, spec: str) -> None:
+        """Plural period names too - `_rate_per_second` strips the trailing `s`."""
+        assert self._build(rate_limit_mail_sending=spec).rate_limit_mail_sending == spec
+
+    def test_the_error_names_every_offender_at_once(self) -> None:
+        """One boot, one complete list - not a fix-and-retry loop per variable."""
+        with pytest.raises(ValueError) as caught:
+            self._build(rate_limit_login="nope", rate_limit_register="also-nope")
+
+        message = str(caught.value)
+        assert "RATE_LIMIT_LOGIN" in message
+        assert "RATE_LIMIT_REGISTER" in message
+
+    def test_tier_budgets_are_validated_too(self) -> None:
+        """Not just the new per-endpoint ones - the tiers had the silent-fallback failure."""
+        with pytest.raises(ValueError, match="RATE_LIMIT_READ"):
+            self._build(rate_limit_read="25 per minute")
 
 
 def _api_routes(app: Any) -> list[tuple[str, Any]]:
