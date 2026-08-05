@@ -29,6 +29,7 @@ from app.core.middleware import (
     SecurityHeadersMiddleware,
 )
 from app.core.redis import close_redis, get_redis
+from app.db.migrate import run_migrations
 from app.db.session import dispose_engine
 from app.modules.health.router import router as health_router
 
@@ -43,9 +44,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Startup and shutdown.
 
     Redis is touched at startup deliberately: a connection failure should surface
-    here, in the logs, at boot - not as the first user's failed login. The
-    database is not probed, because migrations may legitimately be running
-    against it while the app starts; ``/health/ready`` covers that.
+    here, in the logs, at boot - not as the first user's failed login.
+
+    The database is not *probed*, because migrations may legitimately be running against
+    it while the app starts; ``/health/ready`` covers that. It may be *migrated*, when
+    ``RUN_MIGRATIONS_ON_STARTUP`` is set - which is how a deployment with nowhere to put a
+    release step gets a usable schema. Unlike Redis, that one is fatal on failure: see
+    :func:`app.db.migrate.run_migrations`.
     """
     log.info(
         "starting %s v%s",
@@ -69,6 +74,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             ),
         },
     )
+
+    # Before Redis and before the first request: a missing schema is fatal in a way an
+    # unreachable Redis is not. No-op unless RUN_MIGRATIONS_ON_STARTUP is set.
+    await run_migrations()
 
     try:
         await get_redis().ping()

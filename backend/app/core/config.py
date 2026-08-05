@@ -114,6 +114,19 @@ class Settings(BaseSettings):
     db_pool_recycle: int = Field(default=1800, ge=60)
     db_echo: bool = False
 
+    #: Run ``alembic upgrade head`` at startup, before serving anything.
+    #:
+    #: For a deployment where there is nowhere else to put a release step - a single
+    #: Render service, a bare `docker run` - this is what makes a fresh database usable
+    #: without a manual migrate. It is idempotent: an up-to-date database does nothing,
+    #: an empty one gets every migration.
+    #:
+    #: Off by default because it is wrong for anything that deploys in stages. Two
+    #: instances rolling out together would both run DDL (serialised by an advisory
+    #: lock, so one waits rather than fails), and a migration that takes minutes holds
+    #: up the boot of every replica. See :mod:`app.db.migrate`.
+    run_migrations_on_startup: bool = False
+
     # ---- Redis --------------------------------------------------------------
     redis_host: str = "localhost"
     redis_port: int = 6379
