@@ -201,6 +201,49 @@ async function unwrapBlobError(error: AxiosError): Promise<void> {
   }
 }
 
+/**
+ * A readable message for a response that carried no error envelope.
+ *
+ * The status is always named, because this class of failure is a deployment problem - a
+ * misrouted request, a hostname missing from the allow-list - and the number is the first
+ * thing anyone diagnosing it will ask for.
+ *
+ * A short plain-text body is appended when there is one. `Invalid host header` is eleven
+ * characters that say exactly what is wrong, and swallowing it in favour of a generic
+ * sentence would be throwing away the answer. Markup and JSON are not appended: a proxy's
+ * error page is kilobytes of HTML, and JSON that got this far is some other service's
+ * shape - readable to a developer, noise to everyone else.
+ *
+ * Kept worded in step with `app_frontend/lib/core/api_error.dart`, so one deployment fault
+ * does not read as two different problems depending on which client is in hand.
+ */
+function withoutEnvelope(status: number, body: unknown): string {
+  const base =
+    status === 400
+      ? 'The server rejected that request'
+      : status === 401
+        ? 'Your session has expired. Sign in again'
+        : status === 403
+          ? 'You do not have permission to do that'
+          : status === 404
+            ? 'That address does not exist on this server'
+            : status === 408 || status === 504
+              ? 'The server took too long to respond'
+              : status === 413
+                ? 'That upload is too large'
+                : status === 429
+                  ? 'Too many requests. Wait a moment and try again'
+                  : status >= 500
+                    ? 'The server ran into a problem. Try again in a moment'
+                    : 'The request failed';
+
+  const text = typeof body === 'string' ? body.trim() : '';
+  const usable =
+    text !== '' && text.length <= 200 && !/^[<[{]/.test(text) ? `: ${text}` : '';
+
+  return `${base}${usable} (HTTP ${status}).`;
+}
+
 function toApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error;
 
@@ -228,7 +271,12 @@ function toApiError(error: unknown): ApiError {
       );
     }
 
-    return new ApiError(axiosError.message, {
+    // A response, but not one of ours. Something between the browser and the API
+    // answered: a proxy, a load balancer, the host guard in front of the router. Never
+    // `axiosError.message` here - "Request failed with status code 400" tells a user
+    // nothing they can act on, and its Dio equivalent in the mobile client was four
+    // paragraphs of developer prose ending in a link to MDN.
+    return new ApiError(withoutEnvelope(axiosError.response.status, axiosError.response.data), {
       code: 'http_error',
       status: axiosError.response.status,
     });

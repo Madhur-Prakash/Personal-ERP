@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Response, status, Request
 
 from app.core.config import settings
 from app.core.logging import get_logger

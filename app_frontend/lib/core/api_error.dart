@@ -154,14 +154,81 @@ class ApiError implements Exception {
         );
       }
 
+      // A response, but not one of ours. Something between the app and the API answered:
+      // a proxy, a load balancer, the host guard in front of the router. Never
+      // `error.message` here - Dio's is four paragraphs of developer prose ending in a
+      // link to MDN, and it went straight under the password field on the sign-in screen.
       return ApiError(
-        error.message ?? 'Request failed',
+        _withoutEnvelope(response.statusCode ?? 0, response.data),
         code: 'http_error',
         status: response.statusCode ?? 0,
       );
     }
 
     return ApiError(error is Exception ? '$error' : 'Something went wrong');
+  }
+
+  /// A readable message for a response that carried no error envelope.
+  ///
+  /// The status is always named, because this class of failure is a deployment problem -
+  /// a misrouted request, a missing hostname on the allow-list - and the number is the
+  /// first thing anyone diagnosing it will ask for.
+  ///
+  /// A short plain-text body is appended when there is one. `Invalid host header` is
+  /// eleven characters that say exactly what is wrong, and swallowing it in favour of a
+  /// generic sentence would be throwing away the answer. HTML is not appended: a proxy's
+  /// error page is kilobytes of markup, and none of it belongs on screen.
+  ///
+  /// Kept worded in step with `frontend/src/lib/api.ts`, so one deployment fault does not
+  /// read as two different problems depending on which client is in hand.
+  static String _withoutEnvelope(int status, Object? body) {
+    final String base = switch (status) {
+      400 => 'The server rejected that request',
+      401 => 'Your session has expired. Sign in again',
+      403 => 'You do not have permission to do that',
+      404 => 'That address does not exist on this server',
+      408 || 504 => 'The server took too long to respond',
+      413 => 'That upload is too large',
+      429 => 'Too many requests. Wait a moment and try again',
+      >= 500 => 'The server ran into a problem. Try again in a moment',
+      _ => 'The request failed',
+    };
+
+    final String detail = _shortText(body);
+    return detail.isEmpty ? '$base (HTTP $status).' : '$base: $detail (HTTP $status).';
+  }
+
+  /// A body worth showing: short, present, and neither markup nor JSON.
+  ///
+  /// Bytes are decoded here rather than through [_decodeBody], which answers a different
+  /// question - it parses JSON and hands the original bytes back when that fails, which is
+  /// precisely the case this method is reached in.
+  static String _shortText(Object? body) {
+    String text;
+    if (body is String) {
+      text = body;
+    } else if (body is List<int>) {
+      try {
+        text = utf8.decode(body);
+      } catch (_) {
+        return '';
+      }
+    } else {
+      return '';
+    }
+
+    text = text.trim();
+    // JSON reaching this point has no `error` envelope, so it is some other service's
+    // shape: readable to a developer, noise to everyone else. Markup is a proxy's error
+    // page - kilobytes of it, and none of it belongs on screen.
+    if (text.isEmpty ||
+        text.length > 200 ||
+        text.startsWith('<') ||
+        text.startsWith('{') ||
+        text.startsWith('[')) {
+      return '';
+    }
+    return text;
   }
 
   @override
