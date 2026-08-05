@@ -16,6 +16,28 @@ import {
 } from '@/features/auth/passwordPolicy';
 import { ApiError } from '@/lib/api';
 
+function reportableFailure(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null;
+
+  if (error.status === 429) {
+    const raw = Number(error.details['retry_after_seconds']);
+    if (!Number.isFinite(raw) || raw <= 0) {
+      return 'Too many attempts. Please wait a moment and try again.';
+    }
+    const seconds = Math.ceil(raw);
+    if (seconds < 60) {
+      return `Too many attempts. Please try again in ${seconds} second${seconds === 1 ? '' : 's'}.`;
+    }
+    const minutes = Math.ceil(seconds / 60);
+    return `Too many attempts. Please try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+  }
+
+  if (error.status === 0 || error.status >= 500) {
+    return 'We could not reach the server just now. Please try again in a moment.';
+  }
+  return null;
+}
+
 // =============================================================================
 // Forgot password
 // =============================================================================
@@ -42,28 +64,16 @@ export function ForgotPasswordPage() {
     try {
       await authApi.forgotPassword(parsed.data.email);
     } catch (error) {
-      // Rate limits and server failures are reported; nothing else is.
-      //
-      // The distinction is what keeps the enumeration guarantee intact. The API answers
-      // 200 identically whether or not the address has an account, so a 429 or a 5xx
-      // cannot be *about* the address - a 429 is about how often this client has asked,
-      // and a 5xx is about the server. Neither reveals anything, so hiding them buys no
-      // privacy and costs the user everything: this used to swallow all of it and advance
-      // anyway, leaving someone waiting on the next screen for an email that was never
-      // sent, with a rate-limit warning visible only in the server log.
-      //
-      // Anything else still falls through to the navigation below, so an unexpected
-      // status cannot become an oracle by accident.
-      if (error instanceof ApiError && (error.isRateLimited || error.isRetryable)) {
-        const message = error.isRateLimited
-          ? error.rateLimitMessage
-          : 'We could not send the code just now. Please try again in a moment.';
+      const message = reportableFailure(error);
+      if (message !== null) {
         setError('email', { message });
         toast.error(message);
         // Deliberately no navigation: the code was not sent, so the code-entry screen
         // has nothing to offer, and landing there is what made this failure invisible.
         return;
       }
+      // Anything else falls through to the navigation below, so an unexpected status
+      // cannot become an enumeration oracle by accident.
     }
     // Straight to code entry, always - carrying the address so it does not have
     // to be retyped. Advancing unconditionally is what keeps the flow silent
@@ -166,23 +176,13 @@ export function ResetPasswordPage() {
       });
       void navigate({ to: '/login', replace: true });
     } catch (error) {
-      if (error instanceof ApiError) {
-        // Rate limiting first, and as a toast rather than a field error. It is not a
-        // complaint about any input - the code and the password may both be perfect - so
-        // pinning it under one of them tells the user to go and fix something that is not
-        // broken. This previously fell through to the catch-all below and appeared under
-        // "New password" as "Too many requests. Slow down.", with no wait time.
-        if (error.isRateLimited) {
-          toast.error('Too many attempts', { description: error.rateLimitMessage });
-          return;
-        }
-        if (error.isRetryable) {
-          toast.error('Could not reach the server', {
-            description: 'Your code is still valid. Please try again in a moment.',
-          });
-          return;
-        }
+      const transportProblem = reportableFailure(error);
+      if (transportProblem !== null) {
+        toast.error(transportProblem, { description: 'Your reset code is still valid.' });
+        return;
+      }
 
+      if (error instanceof ApiError) {
         const fieldErrors = error.fieldErrors;
         if (fieldErrors['password']) {
           setError('new_password', { message: fieldErrors['password'] });
