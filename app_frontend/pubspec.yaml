@@ -48,6 +48,11 @@ dependencies:
   lucide_icons_flutter: ^3.1.15
   path: ^1.9.1
   timezone: ^0.11.1
+  # Runtime configuration from `.env`, replacing the `--dart-define` values that used
+  # to be compiled in. Same keys, but changing one no longer means a rebuild - and it
+  # sidesteps a real bug: Git Bash's MSYS layer rewrote `--dart-define=/api/v1` into
+  # `C:/Program Files/Git/api/v1` and baked that into the binary.
+  flutter_dotenv: ^5.2.1
 
 dev_dependencies:
   flutter_test:
@@ -71,10 +76,19 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  # `.env` is bundled as an asset because that is the only thing flutter_dotenv can
+  # read - it loads through `rootBundle`, not the filesystem.
+  #
+  # Consequences worth knowing:
+  #   * The file must exist at build time or the build fails on a missing asset.
+  #     `make setup` copies `.env.sample` for exactly this reason.
+  #   * It is listed as a single file, not a directory: Flutter's asset bundler skips
+  #     dotfiles when it walks a directory entry.
+  #   * Being an asset means it ships inside the application bundle. Keep secrets out
+  #     of it - these three values are a host, a path and a display name, all of which
+  #     the client reveals in its first request anyway.
+  assets:
+    - .env
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -36,19 +36,33 @@ The output lands in `build/<platform>/…/Release/`.
 
 ### Configuration
 
-Three settings, all compiled in:
+Three settings, read from `app_frontend/.env` at start-up by
+[flutter_dotenv](https://pub.dev/packages/flutter_dotenv):
 
-| Define | Default | Meaning |
+| Key | Default | Meaning |
 | --- | --- | --- |
 | `API_BASE_URL` | `http://127.0.0.1:8000` | Where the API lives |
 | `API_V1_PREFIX` | `/api/v1` | The versioned path prefix |
-| `APP_NAME` | `Personal ERP` | Shown in the footer |
+| `APP_NAME` | `Personal ERP` | Window title and footer |
 
-They are `--dart-define` values rather than a `.env` file, because Flutter has no runtime
-environment: the web app's `VITE_*` variables are inlined by Vite at build time, and this is
-the same idea with a different spelling. They are **validated at start-up** and the app
-refuses to run on a bad one, for exactly the reason the web app parses its own env with Zod -
-a missing base URL otherwise surfaces much later as a request to `null/api/v1/auth/login`.
+```bash
+cp .env.sample .env    # `make setup` does this for you
+```
+
+They are **validated on first read** and the app refuses to start on a bad one, for exactly
+the reason the web app parses its own env with Zod - a missing base URL otherwise surfaces
+much later as a request to `null/api/v1/auth/login`. A missing `.env` is not fatal: the
+defaults above apply and a warning is printed, so a fresh checkout runs against localhost.
+
+Two consequences of how flutter_dotenv works, both worth knowing:
+
+- **`.env` is a bundled asset**, not a file read from disk - it loads through `rootBundle`.
+  So it must exist before `flutter build` runs, or the build fails on a missing asset, and
+  it is declared in `pubspec.yaml` as a single file rather than a directory because
+  Flutter's asset bundler skips dotfiles when walking a directory entry.
+- **It ships inside the application bundle.** Keep secrets out of it. These three values
+  are a host, a path and a display name - all of which the client discloses in its first
+  request anyway.
 
 > **`127.0.0.1`, not `localhost`.** `docker compose` can publish the API on IPv4 only, and
 > `localhost` on Windows resolves to `::1` first. A client that takes the first answer gets
@@ -56,12 +70,12 @@ a missing base URL otherwise surfaces much later as a request to `null/api/v1/au
 > session restore is indistinguishable from "not signed in", it presents as the sign-in
 > screen with no explanation. Naming the address family removes the guess.
 
-> **On Windows, use `make`, or run raw Flutter commands from PowerShell.** Git Bash's MSYS
-> layer rewrites arguments that look like Unix paths, so
-> `--dart-define=API_V1_PREFIX=/api/v1` reaches the compiler as
-> `C:/Program Files/Git/api/v1` and gets baked into the binary. The Makefile sets
-> `MSYS2_ARG_CONV_EXCL` to switch that off - the same trick it already uses for the
-> backend's environment. This is the desktop counterpart of the warning in the root README.
+> **This replaced `--dart-define`, and fixed a Windows bug in the process.** The settings
+> used to be compiled in, so changing a host meant a rebuild. Worse, Git Bash's MSYS layer
+> rewrites arguments that look like Unix paths: `--dart-define=API_V1_PREFIX=/api/v1`
+> reached the compiler as `C:/Program Files/Git/api/v1` and got baked into the binary, where
+> the app's own validation caught it - correctly, but only after a two-minute build. A file
+> has no argument parsing to survive.
 
 ---
 

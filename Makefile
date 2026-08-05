@@ -52,12 +52,11 @@ ifeq ($(OS),Windows_NT)
   # find `uv`, `npm`, and `docker` normally. Verified, not assumed.
   export MSYS2_ENV_CONV_EXCL := *
 
-  # The same translation applies to command-line *arguments*, and that bites the desktop
-  # client specifically: `flutter build --dart-define=API_V1_PREFIX=/api/v1` reaches the
-  # compiler as `C:/Program Files/Git/api/v1`, and the value is then baked into the binary.
-  # The app's own environment validation catches it and refuses to start - which is the
-  # validation working, but only after a two-minute build. Switched off here so the target
-  # is correct from either shell.
+  # The same translation applies to command-line *arguments*. That used to bite the desktop
+  # client, whose config arrived as `--dart-define=API_V1_PREFIX=/api/v1` and reached the
+  # compiler as `C:/Program Files/Git/api/v1`, baked into the binary. It now reads
+  # `app_frontend/.env` instead, so no path-shaped argument crosses this boundary - but the
+  # exclusion stays, because any argument in any future recipe would hit the same rewrite.
   export MSYS2_ARG_CONV_EXCL := *
 endif
 
@@ -67,25 +66,15 @@ BACKEND      := cd backend &&
 FRONTEND     := cd frontend &&
 DESKTOP      := cd app_frontend &&
 
-# Where the desktop client points.
+# Where the desktop client points: `app_frontend/.env`, read at start-up.
 #
-# The web app reads `VITE_API_BASE_URL` from `.env` at build time; Flutter has no such
-# mechanism, so the equivalent is `--dart-define` and it has to be passed on every `run`
-# and `build`. Overridable for a real deployment:
+# It used to be `--dart-define` on every run and build, which meant a rebuild to change a
+# host and - on Windows - a silently corrupted value: Git Bash's MSYS layer rewrote
+# `--dart-define=API_V1_PREFIX=/api/v1` into `C:/Program Files/Git/api/v1` and baked that
+# into the binary. A file has no argument parsing to survive, so there is nothing left for
+# these recipes to pass.
 #
-#   make desktop API_BASE_URL=https://erp.example.com
-#
-# `127.0.0.1` rather than `localhost`, matching the default compiled into the client:
-# `docker compose` may publish the port on IPv4 only, and a name that resolves to `::1`
-# first then fails with "connection refused" against a server that is running.
-API_BASE_URL   ?= http://127.0.0.1:8000
-API_V1_PREFIX  ?= /api/v1
-
-# `=` rather than `:=` on purpose. An immediately-expanded assignment would capture these
-# two variables before the defaults above are set - and because the values then arrive
-# empty, the build succeeds and produces a binary that refuses to start. Recursive
-# expansion resolves them at use, which also lets an override on the command line win.
-DESKTOP_ENV   = --dart-define=API_BASE_URL=$(API_BASE_URL)                 --dart-define=API_V1_PREFIX=$(API_V1_PREFIX)
+# To point a build somewhere else, edit `app_frontend/.env` - see its `.env.sample`.
 
 # The desktop target to run. Defaults to whichever this machine is.
 ifeq ($(OS),Windows_NT)
@@ -108,8 +97,12 @@ help: ## Show this help
 # Setup
 # -----------------------------------------------------------------------------
 .PHONY: setup
-setup: ## First-time setup: env file, dependencies, database
+setup: ## First-time setup: env files, dependencies, database
 	@test -f .env || { cp .env.sample .env; echo "Created .env - review it before continuing."; }
+	# The desktop client's `.env` is bundled as an asset, so `flutter build` fails on a
+	# missing file rather than falling back to defaults. Created here so it always exists.
+	@test -f app_frontend/.env || { cp app_frontend/.env.sample app_frontend/.env; \
+		echo "Created app_frontend/.env - review it before continuing."; }
 	$(MAKE) install
 	$(COMPOSE) up -d postgres redis
 	@echo "Waiting for PostgreSQL..."
@@ -156,7 +149,7 @@ dev-web: ## Run the Vite dev server on the host
 
 .PHONY: desktop
 desktop: ## Run the Flutter desktop client on the host
-	$(DESKTOP) flutter run -d $(DESKTOP_DEVICE) $(DESKTOP_ENV)
+	$(DESKTOP) flutter run -d $(DESKTOP_DEVICE)
 
 .PHONY: logs
 logs: ## Tail all container logs
@@ -251,7 +244,7 @@ build: ## Build the web frontend for production
 
 .PHONY: build-desktop
 build-desktop: ## Build a release desktop binary for this platform
-	$(DESKTOP) flutter build $(DESKTOP_DEVICE) --release $(DESKTOP_ENV)
+	$(DESKTOP) flutter build $(DESKTOP_DEVICE) --release
 
 # -----------------------------------------------------------------------------
 # Production

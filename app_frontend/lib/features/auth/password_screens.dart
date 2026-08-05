@@ -167,11 +167,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     try {
       await ref
           .read(authApiProvider)
-          .resetPassword(
-            email: email,
-            code: code,
-            newPassword: _password.text,
-          );
+          .resetPassword(email: email, code: code, newPassword: _password.text);
       if (!mounted) return;
       context.toastSuccess(
         'Password updated',

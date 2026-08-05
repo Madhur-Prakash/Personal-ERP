@@ -78,7 +78,9 @@ class _MagicLinkScreenState extends ConsumerState<MagicLinkScreen> {
     } catch (_) {
       // Neutral outcome regardless - see ForgotPasswordScreen. There is nothing to
       // poll, so the screen stays on the form rather than lying about a sent link.
-      if (mounted) setState(() => _error = 'Could not send the link. Try again.');
+      if (mounted) {
+        setState(() => _error = 'Could not send the link. Try again.');
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -107,7 +109,9 @@ class _MagicLinkScreenState extends ConsumerState<MagicLinkScreen> {
           ref.read(authControllerProvider.notifier).applySession(tokens);
           context.toastSuccess('Welcome back, ${tokens.user.firstName}');
           context.go('/');
-        case DeviceSignInChallenge(challenge: final TwoFactorChallenge challenge):
+        case DeviceSignInChallenge(
+          challenge: final TwoFactorChallenge challenge,
+        ):
           _poll?.cancel();
           setState(() => _challengeId = challenge.challengeId);
       }
@@ -123,7 +127,9 @@ class _MagicLinkScreenState extends ConsumerState<MagicLinkScreen> {
   Future<void> _completeTwoFactor() async {
     final String code = _twoFactorCode.text.trim();
     if (code.isEmpty) {
-      setState(() => _twoFactorError = 'Enter the code from your authenticator app');
+      setState(
+        () => _twoFactorError = 'Enter the code from your authenticator app',
+      );
       return;
     }
 
@@ -228,7 +234,8 @@ class _MagicLinkScreenState extends ConsumerState<MagicLinkScreen> {
               style: TextStyle(color: t.content, fontWeight: FontWeight.w600),
             ),
             const TextSpan(
-              text: ', we have sent a sign-in link. Open it and this app signs in '
+              text:
+                  ', we have sent a sign-in link. Open it and this app signs in '
                   'by itself - you can leave this window as it is.',
             ),
           ],
@@ -440,7 +447,11 @@ class _MagicLinkVerifyScreenState extends ConsumerState<MagicLinkVerifyScreen> {
               'It should be showing this code. If it is not, change your password - '
               'the link was not requested by you.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: t.contentMuted, height: 1.6),
+              style: TextStyle(
+                fontSize: 13,
+                color: t.contentMuted,
+                height: 1.6,
+              ),
             ),
             Container(
               padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),

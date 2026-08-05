@@ -210,7 +210,10 @@ class MagicLinkSignedIn extends MagicLinkVerifyResult {
 
 /// The link belonged to another client. Nothing is signed in here.
 class MagicLinkDeviceApproved extends MagicLinkVerifyResult {
-  const MagicLinkDeviceApproved({required this.userCode, required this.message});
+  const MagicLinkDeviceApproved({
+    required this.userCode,
+    required this.message,
+  });
   final String userCode;
   final String message;
 }
