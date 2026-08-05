@@ -58,3 +58,5 @@ desktop.ini
 # supporting evidence for ledger entries, so they belong in the backup story
 # (rsync the directory) rather than in version control.
 backend/var/
+credentials.json
+token.pickle

@@ -1,7 +1,7 @@
 """Transactional email through the Gmail API.
 
 **One transport, in one file.** Everything here - loading the credential, minting
-access tokens, posting the message, and the six message templates - is the single
+access tokens, posting the message, and the five message templates - is the single
 path an email takes out of this application. There is no SMTP fallback and no
 local mail catcher: a second transport means two code paths that can render the
 same email differently, and the one that is not exercised is the one that breaks.
@@ -10,9 +10,9 @@ Two behaviours, chosen by whether ``GMAIL_CREDENTIALS_B64`` is configured:
 
 * **Configured** - sends through the Gmail API.
 * **Not configured** - renders the message and writes it to the logifyx log,
-  including the verification/reset link. This is not a transport; it is what makes
-  the test suite and a fresh checkout work with no credentials at all, and it is
-  the only way to click a verification link without them.
+  including the verification link and the sign-in and password-reset codes. This is
+  not a transport; it is what makes the test suite and a fresh checkout work with no
+  credentials at all, and it is the only way to complete either flow without them.
 
 **Why the Gmail API rather than SMTP.** Google refuses plain passwords, and app
 passwords require 2FA plus a per-account secret that any Workspace admin can
@@ -47,7 +47,19 @@ another verification email, but a rolled-back registration is unrecoverable. A
 transient failure is retried a few times and logged as a warning; a permanent one,
 or the last attempt, is logged at error level for alerting.
 
-Templates are inline Jinja2 rather than files: Stage 1 has six emails, and a
+**Codes, not sign-in links.** Both flows a user can start from the sign-in screen -
+an email sign-in code and a password reset - deliver a short numeric code that is
+typed back into the page that asked for it. There is no magic link, and adding one
+back would reintroduce what got it removed: a link is a bearer credential sitting in
+an inbox, it authenticates whoever opens it (including a mail scanner that prefetches
+URLs), and it has to survive being mangled by clients that rewrite links. A code is
+useless without the session that requested it.
+
+The two codes are *not* interchangeable - see
+:mod:`app.modules.auth.token_store`, where each purpose gets its own namespace, so a
+sign-in code cannot be replayed to reset a password.
+
+Templates are inline Jinja2 rather than files: Stage 1 has five emails, and a
 template directory plus loader configuration is machinery for a problem that does
 not exist yet. Extracting them is mechanical when the count grows.
 """
@@ -56,7 +68,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import binascii
 import logging
 import pickle
 import threading
@@ -81,18 +92,7 @@ log = get_logger(__name__)
 
 #: The scope the refresh token must carry. Not requested here - it is fixed when the
 #: token is minted - but named so the error path can say what is missing.
-SEND_SCOPE: Final = "https://www.googleapis.com/auth/gmail.send"
-
-#: How ``scripts/mint_gmail_token.py`` is invoked. In every "your credential is
-#: broken" message, because the fix is always to run it.
-_MINT_HINT: Final = "uv run python scripts/mint_gmail_token.py"
-
-#: Opening bytes of a pickle stream, protocols 2 through 5.
-#:
-#: Checked before unpickling so the common deployment mistakes - a base64'd
-#: ``token.json``, a bare token string, a truncated paste - are named as
-#: configuration errors instead of being handed to ``pickle.loads``.
-_PICKLE_PREFIXES: Final = (b"\x80\x02", b"\x80\x03", b"\x80\x04", b"\x80\x05")
+SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 #: Attempts per message, and the waits between them.
 #:
@@ -116,93 +116,23 @@ class GmailConfigurationError(RuntimeError):
 # =============================================================================
 # Credentials
 # =============================================================================
-def _load_credentials(blob: str) -> Credentials:
+def _load_credentials() -> Credentials:
     """Decode and unpickle the configured credential.
 
     Every failure here is a deployment mistake, and the difference between "not
     valid base64" and "no refresh token in it" is the difference between a
     five-second fix and an hour of guessing - so each is reported separately.
     """
-    # Whitespace is stripped rather than rejected: `base64` without `-w0` wraps at
-    # 76 columns, and pasting that in is a mistake worth absorbing rather than
-    # bouncing.
-    packed = "".join(blob.split())
-    if not packed:
-        raise GmailConfigurationError("GMAIL_CREDENTIALS_B64 is empty")
+    b64 = settings.gmail_credentials_b64
+    if not b64:
+        raise ValueError("GMAIL_TOKEN_B64 environment variable is not set.")
+    creds = pickle.loads(base64.b64decode(b64))
 
-    try:
-        raw = base64.b64decode(packed, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise GmailConfigurationError(
-            f"GMAIL_CREDENTIALS_B64 is not valid base64. Mint a fresh value: {_MINT_HINT}"
-        ) from exc
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
 
-    if not raw.startswith(_PICKLE_PREFIXES):
-        # Named specifically, because this is the shape of the *previous* credential
-        # format for this project. A generic "not a pickle" sends you looking for a
-        # typo in a blob that is, in fact, a perfectly good token.json.
-        if raw.lstrip()[:1] in (b"{", b"["):
-            raise GmailConfigurationError(
-                "GMAIL_CREDENTIALS_B64 holds base64 of JSON (a token.json). This "
-                f"transport expects a pickled Credentials object - re-mint it: {_MINT_HINT}"
-            )
-        raise GmailConfigurationError(
-            "GMAIL_CREDENTIALS_B64 did not decode to a pickled Credentials object. It "
-            "should be the base64 of the whole pickle, not of a bare token string: "
-            f"{_MINT_HINT}"
-        )
+    return build("gmail", "v1", credentials=creds)
 
-    try:
-        # Trusted by construction - see the module docstring. S301 is the right rule
-        # in general and cannot see where this blob came from, so it is silenced here
-        # and only here, with the `isinstance` check below as the backstop.
-        credentials = pickle.loads(raw)  # noqa: S301
-    except Exception as exc:  # unpickling fails in unbounded ways, all of them fatal here
-        raise GmailConfigurationError(
-            f"GMAIL_CREDENTIALS_B64 could not be unpickled ({type(exc).__name__}: {exc}). "
-            "A pickle is only readable by a compatible google-auth; if that library was "
-            f"upgraded since the value was produced, re-mint it: {_MINT_HINT}"
-        ) from exc
-
-    if not isinstance(credentials, Credentials):
-        raise GmailConfigurationError(
-            f"GMAIL_CREDENTIALS_B64 unpickled to {type(credentials).__name__}, not a "
-            f"google.oauth2.credentials.Credentials: {_MINT_HINT}"
-        )
-
-    if not credentials.refresh_token:
-        # An access token alone expires within the hour and cannot be renewed, so this
-        # would appear to work once and then fail permanently.
-        raise GmailConfigurationError(
-            "GMAIL_CREDENTIALS_B64 carries no refresh token, so it cannot be renewed. "
-            f"Google only issues one on a consent prompt - re-mint it: {_MINT_HINT}"
-        )
-
-    scopes = credentials.scopes
-    if scopes and SEND_SCOPE not in scopes:
-        # Checked rather than trusted: a token minted for the wrong scope fails at
-        # the send with a bare 403 that says nothing about which scope was missing.
-        raise GmailConfigurationError(
-            f"GMAIL_CREDENTIALS_B64 was granted {', '.join(scopes)} but sending needs "
-            f"{SEND_SCOPE}: {_MINT_HINT}"
-        )
-
-    return credentials
-
-
-# =============================================================================
-# Transport
-# =============================================================================
-#: The live credential and the Gmail client built from it, with the blob they came
-#: from.
-#:
-#: Cached because ``Credentials`` refreshes in place: holding it means a run of
-#: emails costs one token request rather than one per message, where reloading the
-#: pickle each time re-authenticates on every send. Rebuilt only if the configured
-#: blob changes.
-_credentials: Credentials | None = None
-_service: Any = None
-_credentials_blob: str | None = None
 
 #: Sends are serialised.
 #:
@@ -213,49 +143,6 @@ _credentials_blob: str | None = None
 #: whole class of problem.
 _send_lock = threading.Lock()
 
-
-def reset_credentials_cache() -> None:
-    """Forget the loaded credential and client. For tests and after a config change."""
-    global _credentials, _service, _credentials_blob
-    with _send_lock:
-        _credentials = None
-        _service = None
-        _credentials_blob = None
-
-
-def _authenticate_gmail() -> Any:
-    """Return an authorised Gmail client.
-
-    Blocking: called only from a worker thread, and only under :data:`_send_lock`.
-    """
-    global _credentials, _service, _credentials_blob
-
-    blob = settings.gmail_credentials_b64
-    if not blob:
-        raise GmailConfigurationError("GMAIL_CREDENTIALS_B64 is not set")
-
-    if _service is None or _credentials_blob != blob:
-        _credentials = _load_credentials(blob)
-        # `cache_discovery=False` silences a warning about an oauth2client file cache
-        # this project does not use. The discovery document is the one bundled with
-        # the library, so building a service makes no network call of its own.
-        _service = build("gmail", "v1", credentials=_credentials, cache_discovery=False)
-        _credentials_blob = blob
-
-    # `Credentials.valid` is false both when the access token has expired and when
-    # the pickle never carried one, which is the usual case. Refreshing here rather
-    # than leaving it to the request means a rejected refresh token surfaces as a
-    # `RefreshError` from a known place, where `_describe` can explain it - instead
-    # of as an opaque failure inside the send.
-    if _credentials is not None and not _credentials.valid:
-        # The ignore is google-auth's own doing: it ships `py.typed` but leaves
-        # `refresh` unannotated, so strict mode sees an untyped call into a library it
-        # otherwise types. Narrower than exempting the whole module.
-        _credentials.refresh(Request())  # type: ignore[no-untyped-call]
-
-    return _service
-
-
 def _send_sync(message: EmailMessage) -> None:
     """Post one message. Blocking - the whole reason this runs in a thread."""
     # `raw` is a complete RFC 5322 message, so it is serialised with the SMTP
@@ -263,7 +150,7 @@ def _send_sync(message: EmailMessage) -> None:
     # transport would put on the wire.
     raw = base64.urlsafe_b64encode(message.as_bytes(policy=SMTP_POLICY)).decode("ascii")
     with _send_lock:
-        service = _authenticate_gmail()
+        service = _load_credentials()
         service.users().messages().send(userId="me", body={"raw": raw}).execute()
 
 
@@ -303,8 +190,7 @@ def _describe(exc: BaseException) -> str:
                 "consent screen is still in Testing (Google expires those refresh "
                 "tokens after 7 days - publish the app to stop it), the token was "
                 "revoked from the Google account's third-party access, the account "
-                "password changed, the OAuth client was deleted or recreated, or this "
-                f"machine's clock is badly skewed. Mint a new token: {_MINT_HINT}"
+                "password changed, the OAuth client was deleted or recreated."
             )
         return detail
     if isinstance(exc, HttpError):
@@ -487,58 +373,36 @@ async def send_verification_email(*, to: str, name: str, token: str) -> bool:
     )
 
 
-async def send_password_reset_email(*, to: str, name: str, token: str) -> bool:
-    link = _frontend_url("/reset-password", token=token)
+async def send_password_reset_email(*, to: str, name: str, code: str) -> bool:
+    """The reset code. Deliberately not a link - see the module docstring.
+
+    The subject leads with the code so it is readable from a notification, which is
+    what stops people opening the mail client at all.
+    """
     minutes = settings.password_reset_ttl_minutes
+    subject = f"{code} is your password reset code"
 
     html = _render(
         """
         <h1>Reset your password</h1>
-        <p>Hi {{ name }}, use the link below to choose a new password.</p>
-        <a class="btn" href="{{ link }}">Reset password</a>
-        <p class="fallback">Or paste this into your browser:<br>{{ link }}</p>
-        <p>This link expires in {{ minutes }} minutes and can be used once.
-           If you did not request it, no action is needed.</p>
+        <p>Hi {{ name }}, enter this code on the reset page to choose a new
+           password.</p>
+        <div class="code">{{ code }}</div>
+        <p>This code expires in {{ minutes }} minutes and can be used once. If you
+           did not request it, no action is needed - your password has not changed.</p>
         """,
-        subject="Reset your password",
+        subject=subject,
         name=name,
-        link=link,
+        code=code,
         minutes=minutes,
     )
     text = (
-        f"Hi {name},\n\nReset your Personal ERP password:\n{link}\n\n"
-        f"This link expires in {minutes} minutes and can be used once.\n"
-        "If you did not request it, ignore this email.\n"
+        f"Hi {name},\n\nYour Personal ERP password reset code is: {code}\n\n"
+        f"Enter it on the reset page. It expires in {minutes} minutes and can be used "
+        "once.\n\nIf you did not request it, ignore this email - your password has not "
+        "changed.\n"
     )
-    return await send_email(
-        to=to, subject="Reset your password", html=html, text=text, category="password_reset"
-    )
-
-
-async def send_magic_link_email(*, to: str, name: str, token: str) -> bool:
-    link = _frontend_url("/magic-link", token=token)
-    minutes = settings.magic_link_ttl_minutes
-
-    html = _render(
-        """
-        <h1>Your sign-in link</h1>
-        <p>Hi {{ name }}, tap below to sign in. No password needed.</p>
-        <a class="btn" href="{{ link }}">Sign in to Personal ERP</a>
-        <p class="fallback">Or paste this into your browser:<br>{{ link }}</p>
-        <p>This link expires in {{ minutes }} minutes and can be used once.</p>
-        """,
-        subject="Your sign-in link",
-        name=name,
-        link=link,
-        minutes=minutes,
-    )
-    text = (
-        f"Hi {name},\n\nSign in to Personal ERP:\n{link}\n\n"
-        f"This link expires in {minutes} minutes and can be used once.\n"
-    )
-    return await send_email(
-        to=to, subject="Your sign-in link", html=html, text=text, category="magic_link"
-    )
+    return await send_email(to=to, subject=subject, html=html, text=text, category="password_reset")
 
 
 async def send_otp_email(*, to: str, name: str, code: str) -> bool:
