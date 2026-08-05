@@ -255,25 +255,25 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
 
     #: Anything not matched by a more specific tier.
-    rate_limit_default: str 
+    rate_limit_default: str
 
     #: Credential and enumeration surfaces: login, register, 2FA, token exchange.
-    rate_limit_auth: str 
+    rate_limit_auth: str
 
     #: Rate limit for auth endpoints that send email or issue one-time secrets.
     #:
     #: Stricter to prevent inbox spam and abuse.
-    rate_limit_auth_strict: str 
+    rate_limit_auth_strict: str
 
     #: Rate limit for read operations (list, get, search).
     #:
     #: Tuned for dashboard traffic, allowing page-load bursts while limiting
     #: sustained request rates.
-    rate_limit_read: str 
+    rate_limit_read: str
 
     #: Writes: POST/PATCH/PUT/DELETE outside auth. Each one costs a transaction and
     #: usually an audit row, so the budget is an order of magnitude below reads.
-    rate_limit_write: str 
+    rate_limit_write: str
 
     #: Document uploads. Every one runs OCR inline, which is seconds of CPU - this is
     #: the most expensive thing an authenticated user can ask for.
@@ -307,6 +307,9 @@ class Settings(BaseSettings):
     #: default), so this is three orders of magnitude of headroom and still bounds a
     #: token-churning loop.
     rate_limit_token_exchange: str
+
+   # rate limit for health endpoints. The only budget here with a working default
+    rate_limit_health: str 
 
     # ---- Email (Gmail API) --------------------------------------------------
     gmail_credentials_b64: str | None = None
@@ -573,6 +576,7 @@ class Settings(BaseSettings):
             "RATE_LIMIT_REGISTER": self.rate_limit_register,
             "RATE_LIMIT_MAIL_SENDING": self.rate_limit_mail_sending,
             "RATE_LIMIT_TOKEN_EXCHANGE": self.rate_limit_token_exchange,
+            "RATE_LIMIT_HEALTH": self.rate_limit_health,
         }
         problems = [
             f"{name}={spec!r} is not a valid budget"

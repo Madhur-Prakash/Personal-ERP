@@ -13,34 +13,54 @@ Three endpoints, because orchestrators ask three different questions:
 
 None of them require authentication, and none leak version or configuration
 detail beyond what is already public.
+
+**They are rate limited, and the two details below are both load-bearing.**
+:class:`~app.core.middleware.RateLimitMiddleware` skips everything under ``/health``
+(:data:`~app.core.middleware.PROBE_PREFIXES`), so without a decorator these are the only
+unmetered endpoints in the application - and ``/ready`` pings PostgreSQL and Redis on
+every call, which makes it the cheapest way to make this deployment do real work.
+
+* **The decorator goes below the route decorator.** Decorators apply bottom-up, so
+  ``@router.get`` must be the outer one to register the *limited* function. Written the
+  other way round, the route is registered first and the limit wraps an object nothing
+  calls - a limiter that reads as configured and enforces nothing.
+* **Every handler takes ``request: Request``**, even where it goes unused. slowapi
+  inspects the signature and raises ``No "request" or "websocket" argument`` at import
+  time otherwise, which fails the process at startup rather than at the endpoint.
+
+The budget is :attr:`~app.core.config.Settings.rate_limit_health`, which is defaulted
+rather than required, for the reason given where it is declared: an orchestrator's
+liveness probe is a poor thing to gate on an environment variable being present.
 """
 
 from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Response, status, Request
+from fastapi import APIRouter, Request, Response, status
 
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.logging import get_logger
 from app.core.redis import check_redis_health
 from app.core.schemas import HealthStatus
 from app.db.session import check_database_health
-from app.core.limiter import limiter
 
 log = get_logger(__name__)
 
 router = APIRouter(prefix="/health", tags=["Health"])
 
-@limiter.limit("3/minute")
+
 @router.get("/live", summary="Liveness probe", status_code=status.HTTP_200_OK)
-async def liveness() -> dict[str, str]:
+@limiter.limit(settings.rate_limit_health)
+async def liveness(request: Request) -> dict[str, str]:
     """Is the process alive? No dependency checks - see the module docstring."""
     return {"status": "alive"}
 
-@limiter.limit("3/minute")
+
 @router.get("/ready", summary="Readiness probe")
-async def readiness(response: Response) -> dict[str, object]:
+@limiter.limit(settings.rate_limit_health)
+async def readiness(request: Request, response: Response) -> dict[str, object]:
     """Can this instance serve traffic?
 
     PostgreSQL and Redis are probed concurrently: sequential checks would make
@@ -70,7 +90,8 @@ async def readiness(response: Response) -> dict[str, object]:
 
 
 @router.get("", response_model=HealthStatus, summary="Service status summary")
-async def health(response: Response) -> HealthStatus:
+@limiter.limit(settings.rate_limit_health)
+async def health(request: Request, response: Response) -> HealthStatus:
     """Human-readable status for dashboards and smoke tests."""
     database_ok, redis_ok = await asyncio.gather(
         check_database_health(),
