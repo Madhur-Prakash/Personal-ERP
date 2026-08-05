@@ -329,7 +329,14 @@ class Settings(BaseSettings):
             problems.append("CORS_ORIGINS must list explicit origins, not '*'")
         if not self.encryption_key:
             problems.append("ENCRYPTION_KEY is required (2FA secrets are encrypted at rest)")
-        if self.postgres_password in ("personalerp", "postgres", "change-me-in-production"):
+        # Only meaningful when the DSN is composed from the parts. With an
+        # explicit DATABASE_URL the password lives in that URL and this field is
+        # never read, so checking it would reject a perfectly good deployment.
+        if self.database_url is None and self.postgres_password in (
+            "personalerp",
+            "postgres",
+            "change-me-in-production",
+        ):
             problems.append("POSTGRES_PASSWORD is still the default")
         if "*" in self.allowed_hosts:
             problems.append("ALLOWED_HOSTS must list explicit hosts, not '*'")
