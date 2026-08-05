@@ -176,6 +176,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         "/auth/2fa",
     )
 
+    #: Paths that :data:`AUTH_PATH_MARKERS` matches by prefix but must not take the
+    #: tighter budget.
+    #:
+    #: The device sign-in poll is called every couple of seconds *by design*, so the
+    #: credential-guessing budget would fail it within seconds of the screen opening.
+    #: It is not a guessing surface: the handle is 256 bits, the record expires on its
+    #: own, and it is destroyed on first success. It takes the default budget, which a
+    #: 2-second cadence sits comfortably inside.
+    AUTH_PATH_EXCEPTIONS: Final = ("/auth/magic-link/device/poll",)
+
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
         self._default_limit, self._default_window = _parse_rate(settings.rate_limit_default)
@@ -187,7 +197,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if not settings.rate_limit_enabled or request.url.path.startswith(self.EXEMPT_PATHS):
             return await call_next(request)
 
-        is_auth_path = any(marker in request.url.path for marker in self.AUTH_PATH_MARKERS)
+        is_auth_path = any(
+            marker in request.url.path for marker in self.AUTH_PATH_MARKERS
+        ) and not request.url.path.endswith(self.AUTH_PATH_EXCEPTIONS)
         limit = self._auth_limit if is_auth_path else self._default_limit
         window = self._auth_window if is_auth_path else self._default_window
         scope = "auth" if is_auth_path else "default"

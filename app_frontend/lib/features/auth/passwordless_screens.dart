@@ -29,13 +29,28 @@ class MagicLinkScreen extends ConsumerStatefulWidget {
 
 class _MagicLinkScreenState extends ConsumerState<MagicLinkScreen> {
   final TextEditingController _email = TextEditingController();
+  final TextEditingController _twoFactorCode = TextEditingController();
+
   bool _sending = false;
-  bool _sent = false;
   String? _error;
+
+  /// Non-null once the link has been sent: what this app polls with, plus the code
+  /// it shows so the email can be matched to this screen.
+  DeviceSignInStarted? _started;
+  Timer? _poll;
+  bool _expired = false;
+
+  /// Set when the account has 2FA. The link proved the mailbox; the code is owed
+  /// here, in the app that is about to get the session.
+  String? _challengeId;
+  bool _completingTwoFactor = false;
+  String? _twoFactorError;
 
   @override
   void dispose() {
+    _poll?.cancel();
     _email.dispose();
+    _twoFactorCode.dispose();
     super.dispose();
   }
 
@@ -52,73 +67,112 @@ class _MagicLinkScreenState extends ConsumerState<MagicLinkScreen> {
     });
 
     try {
-      await ref.read(authApiProvider).requestMagicLink(email);
+      // Not `requestMagicLink`: that one sends a link this app never hears about
+      // again, which is why sending from here used to sign in only the browser.
+      final DeviceSignInStarted started = await ref
+          .read(authApiProvider)
+          .startDeviceSignIn(email);
+      if (!mounted) return;
+      setState(() => _started = started);
+      _startPolling(started);
     } catch (_) {
-      // Neutral outcome regardless - see ForgotPasswordScreen.
+      // Neutral outcome regardless - see ForgotPasswordScreen. There is nothing to
+      // poll, so the screen stays on the form rather than lying about a sent link.
+      if (mounted) setState(() => _error = 'Could not send the link. Try again.');
     } finally {
-      if (mounted) {
-        setState(() {
-          _sending = false;
-          _sent = true;
-        });
-      }
+      if (mounted) setState(() => _sending = false);
     }
+  }
+
+  void _startPolling(DeviceSignInStarted started) {
+    _poll?.cancel();
+    _poll = Timer.periodic(
+      Duration(seconds: started.pollIntervalSeconds),
+      (_) => _tick(started),
+    );
+  }
+
+  Future<void> _tick(DeviceSignInStarted started) async {
+    try {
+      final DeviceSignInPoll result = await ref
+          .read(authApiProvider)
+          .pollDeviceSignIn(started.deviceHandle);
+      if (!mounted) return;
+
+      switch (result) {
+        case DeviceSignInPending():
+          return; // Nobody has opened the link yet.
+        case DeviceSignInTokens(tokens: final TokenResponse tokens):
+          _poll?.cancel();
+          ref.read(authControllerProvider.notifier).applySession(tokens);
+          context.toastSuccess('Welcome back, ${tokens.user.firstName}');
+          context.go('/');
+        case DeviceSignInChallenge(challenge: final TwoFactorChallenge challenge):
+          _poll?.cancel();
+          setState(() => _challengeId = challenge.challengeId);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      // A 401 means the handle is spent or the window closed - the signal to stop,
+      // not an error to keep retrying against.
+      _poll?.cancel();
+      setState(() => _expired = true);
+    }
+  }
+
+  Future<void> _completeTwoFactor() async {
+    final String code = _twoFactorCode.text.trim();
+    if (code.isEmpty) {
+      setState(() => _twoFactorError = 'Enter the code from your authenticator app');
+      return;
+    }
+
+    setState(() {
+      _twoFactorError = null;
+      _completingTwoFactor = true;
+    });
+
+    try {
+      final TokenResponse tokens = await ref
+          .read(authApiProvider)
+          .loginTwoFactor(challengeId: _challengeId!, code: code);
+      if (!mounted) return;
+      ref.read(authControllerProvider.notifier).applySession(tokens);
+      context.toastSuccess('Welcome back, ${tokens.user.firstName}');
+      context.go('/');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _twoFactorError = ApiError.from(error).message);
+    } finally {
+      if (mounted) setState(() => _completingTwoFactor = false);
+    }
+  }
+
+  void _restart() {
+    _poll?.cancel();
+    setState(() {
+      _started = null;
+      _expired = false;
+      _challengeId = null;
+      _twoFactorError = null;
+      _twoFactorCode.clear();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final AppTokens t = context.tokens;
+    if (_challengeId != null) return _buildTwoFactorStep();
+    if (_started != null) return _buildWaitingStep(_started!);
+    return _buildEmailStep();
+  }
 
-    if (_sent) {
-      return AuthLayout(
-        title: 'Check your email',
-        subtitle: Text.rich(
-          TextSpan(
-            children: <InlineSpan>[
-              const TextSpan(text: 'If an account exists for '),
-              TextSpan(
-                text: _email.text.trim(),
-                style: TextStyle(color: t.content, fontWeight: FontWeight.w600),
-              ),
-              const TextSpan(text: ', we have sent a sign-in link.'),
-            ],
-          ),
-        ),
-        footer: AuthFooterPrompt(
-          prompt: '',
-          actionLabel: 'Back to sign in',
-          onAction: () => context.go('/login'),
-        ),
-        child: Column(
-          spacing: 16,
-          children: <Widget>[
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: t.primary.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(Radii.xl),
-              ),
-              alignment: Alignment.center,
-              child: Icon(LucideIcons.mail, size: 24, color: t.primary),
-            ),
-            Text(
-              'The link expires in 15 minutes and can be used once.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: t.contentMuted,
-                height: 1.6,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
+  // ---------------------------------------------------------------------------
+  Widget _buildEmailStep() {
     return AuthLayout(
       title: 'Sign in without a password',
-      subtitle: const Text('We will email you a link that signs you in.'),
+      subtitle: const Text(
+        'We will email you a link. Opening it signs in this app.',
+      ),
       footer: const BackToSignIn(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -145,6 +199,134 @@ class _MagicLinkScreenState extends ConsumerState<MagicLinkScreen> {
       ),
     );
   }
+
+  Widget _buildWaitingStep(DeviceSignInStarted started) {
+    final AppTokens t = context.tokens;
+
+    if (_expired) {
+      return AuthLayout(
+        title: 'That link has expired',
+        subtitle: const Text('Sign-in links last 15 minutes and work once.'),
+        footer: const BackToSignIn(),
+        child: AppButton(
+          onPressed: _restart,
+          variant: AppButtonVariant.secondary,
+          fullWidth: true,
+          label: 'Send a new link',
+        ),
+      );
+    }
+
+    return AuthLayout(
+      title: 'Check your email',
+      subtitle: Text.rich(
+        TextSpan(
+          children: <InlineSpan>[
+            const TextSpan(text: 'If an account exists for '),
+            TextSpan(
+              text: _email.text.trim(),
+              style: TextStyle(color: t.content, fontWeight: FontWeight.w600),
+            ),
+            const TextSpan(
+              text: ', we have sent a sign-in link. Open it and this app signs in '
+                  'by itself - you can leave this window as it is.',
+            ),
+          ],
+        ),
+      ),
+      footer: AuthFooterPrompt(
+        prompt: '',
+        actionLabel: 'Back to sign in',
+        onAction: () {
+          _poll?.cancel();
+          context.go('/login');
+        },
+      ),
+      child: Column(
+        spacing: 16,
+        children: <Widget>[
+          Text(
+            'The email shows this code. Only open the link if it matches.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: t.contentMuted, height: 1.6),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+            decoration: BoxDecoration(
+              color: t.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(Radii.xl),
+            ),
+            child: Text(
+              started.userCode,
+              style: TextStyle(
+                fontSize: 30,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 8,
+                color: t.primary,
+                fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            spacing: 10,
+            children: <Widget>[
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: t.contentMuted,
+                ),
+              ),
+              Text(
+                'Waiting for you to open it',
+                style: TextStyle(fontSize: 13, color: t.contentMuted),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTwoFactorStep() {
+    return AuthLayout(
+      title: 'One more step',
+      subtitle: const Text(
+        'The link checked out. Enter the code from your authenticator app to '
+        'finish signing in here.',
+      ),
+      footer: AuthFooterPrompt(
+        prompt: '',
+        actionLabel: 'Start again',
+        onAction: _restart,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: 16,
+        children: <Widget>[
+          AppInput(
+            label: 'Authentication code',
+            controller: _twoFactorCode,
+            placeholder: '000000',
+            leftIcon: LucideIcons.keyRound,
+            error: _twoFactorError,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            onSubmitted: (_) => _completeTwoFactor(),
+          ),
+          AppButton(
+            onPressed: _completeTwoFactor,
+            loading: _completingTwoFactor,
+            fullWidth: true,
+            size: AppButtonSize.lg,
+            label: 'Sign in',
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // =============================================================================
@@ -165,16 +347,33 @@ class _MagicLinkVerifyScreenState extends ConsumerState<MagicLinkVerifyScreen> {
   bool _failed = false;
   String _message = '';
 
+  /// Set when the link turned out to belong to a *different* client, which had
+  /// already been waiting on it. Nothing is signed in here.
+  String? _approvedUserCode;
+
   Future<void> _consume() async {
     setState(() => _verifying = true);
     try {
-      final TokenResponse tokens = await ref
+      final MagicLinkVerifyResult result = await ref
           .read(authApiProvider)
           .verifyMagicLink(widget.token!);
-      ref.read(authControllerProvider.notifier).applySession(tokens);
       if (!mounted) return;
-      context.toastSuccess('Welcome back, ${tokens.user.firstName}');
-      context.go('/');
+
+      switch (result) {
+        case MagicLinkSignedIn(tokens: final TokenResponse tokens):
+          ref.read(authControllerProvider.notifier).applySession(tokens);
+          context.toastSuccess('Welcome back, ${tokens.user.firstName}');
+          context.go('/');
+        case MagicLinkDeviceApproved(
+          userCode: final String code,
+          message: final String message,
+        ):
+          setState(() {
+            _verifying = false;
+            _approvedUserCode = code;
+            _message = message;
+          });
+      }
     } catch (error) {
       if (!mounted) return;
       final ApiError apiError = ApiError.from(error);
@@ -219,6 +418,47 @@ class _MagicLinkVerifyScreenState extends ConsumerState<MagicLinkVerifyScreen> {
           variant: AppButtonVariant.secondary,
           fullWidth: true,
           label: 'Request a new link',
+        ),
+      );
+    }
+
+    // The link was another client's. It has been approved and that client is signing
+    // itself in - nothing happens here, deliberately.
+    if (_approvedUserCode != null) {
+      return AuthLayout(
+        title: 'That app is signing in',
+        subtitle: Text(_message),
+        footer: AuthFooterPrompt(
+          prompt: '',
+          actionLabel: 'Sign in here instead',
+          onAction: () => context.go('/login'),
+        ),
+        child: Column(
+          spacing: 16,
+          children: <Widget>[
+            Text(
+              'It should be showing this code. If it is not, change your password - '
+              'the link was not requested by you.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: t.contentMuted, height: 1.6),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+              decoration: BoxDecoration(
+                color: t.primary.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(Radii.xl),
+              ),
+              child: Text(
+                _approvedUserCode!,
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 8,
+                  color: t.primary,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }

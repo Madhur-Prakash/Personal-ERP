@@ -182,6 +182,99 @@ class LoginChallenge extends LoginResult {
   final TwoFactorChallenge challenge;
 }
 
+/// `/auth/magic-link/verify` answers with one of two shapes.
+///
+/// Sealed so the approval branch cannot be dropped: a link another client requested
+/// signs *that* client in, and treating the approval as tokens would crash on a
+/// missing `access_token`.
+sealed class MagicLinkVerifyResult {
+  const MagicLinkVerifyResult();
+
+  static MagicLinkVerifyResult fromJson(Json json) {
+    if (json['device_approved'] == true) {
+      return MagicLinkDeviceApproved(
+        userCode: str(json, 'user_code'),
+        message:
+            strOrNull(json, 'message') ??
+            'Your app is signing in now. You can close this tab.',
+      );
+    }
+    return MagicLinkSignedIn(TokenResponse.fromJson(json));
+  }
+}
+
+class MagicLinkSignedIn extends MagicLinkVerifyResult {
+  const MagicLinkSignedIn(this.tokens);
+  final TokenResponse tokens;
+}
+
+/// The link belonged to another client. Nothing is signed in here.
+class MagicLinkDeviceApproved extends MagicLinkVerifyResult {
+  const MagicLinkDeviceApproved({required this.userCode, required this.message});
+  final String userCode;
+  final String message;
+}
+
+/// A sign-in this app started but cannot finish on its own.
+///
+/// The emailed link opens in a browser, so the app holds [deviceHandle] and polls
+/// until the link is opened - see `DeviceSignInStore` on the backend. [userCode] is
+/// shown on screen so the person reading the mail can tell it refers to this device.
+class DeviceSignInStarted {
+  const DeviceSignInStarted({
+    required this.deviceHandle,
+    required this.userCode,
+    required this.expiresInSeconds,
+    required this.pollIntervalSeconds,
+  });
+
+  /// A credential. Held in memory for the life of the screen and never persisted.
+  final String deviceHandle;
+  final String userCode;
+  final int expiresInSeconds;
+  final int pollIntervalSeconds;
+
+  factory DeviceSignInStarted.fromJson(Json json) => DeviceSignInStarted(
+    deviceHandle: str(json, 'device_handle'),
+    userCode: str(json, 'user_code'),
+    expiresInSeconds: intOf(json, 'expires_in_seconds'),
+    // Served by the backend rather than hard-coded, so the cadence can change
+    // without shipping a new build. Floor of 1s in case of a bad value.
+    pollIntervalSeconds: intOf(json, 'poll_interval_seconds').clamp(1, 60),
+  );
+}
+
+/// `/auth/magic-link/device/poll` answers with one of three shapes.
+///
+/// Sealed for the same reason as [LoginResult]: the pending branch is the common
+/// one, and a call site that forgot the challenge branch would strand every 2FA user
+/// on a spinner that never resolves.
+sealed class DeviceSignInPoll {
+  const DeviceSignInPoll();
+
+  static DeviceSignInPoll fromJson(Json json) {
+    if (json['status'] == 'pending') return const DeviceSignInPending();
+    if (json['two_factor_required'] == true) {
+      return DeviceSignInChallenge(TwoFactorChallenge.fromJson(json));
+    }
+    return DeviceSignInTokens(TokenResponse.fromJson(json));
+  }
+}
+
+class DeviceSignInPending extends DeviceSignInPoll {
+  const DeviceSignInPending();
+}
+
+class DeviceSignInTokens extends DeviceSignInPoll {
+  const DeviceSignInTokens(this.tokens);
+  final TokenResponse tokens;
+}
+
+class DeviceSignInChallenge extends DeviceSignInPoll {
+  const DeviceSignInChallenge(this.challenge);
+  final TwoFactorChallenge challenge;
+}
+
 class RegisterResponse {
   const RegisterResponse({
     required this.email,

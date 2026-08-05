@@ -69,6 +69,10 @@ class ApiClient {
     '/auth/logout',
     '/auth/otp/verify',
     '/auth/magic-link/verify',
+    // A 401 here means the handle is spent or expired, not that the access token
+    // needs refreshing - and this one is polled, so a retry per tick would double
+    // every request on the screen.
+    '/auth/magic-link/device/poll',
   ];
 
   /// Build the client.

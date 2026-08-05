@@ -125,8 +125,10 @@ drift from the implementation the way a hand-written table does.
 | POST | `/forgot-password` | - | Emails a 6-digit code. Neutral response |
 | POST | `/reset-password` | - | `{email, code, new_password}`. 5 attempts, then the code is destroyed. Revokes all sessions |
 | POST | `/change-password` | Bearer | Requires the current password; revokes all sessions |
-| POST | `/magic-link` | - | Neutral response |
-| POST | `/magic-link/verify` | - | Single-use |
+| POST | `/magic-link` | - | Neutral response. The browser flow |
+| POST | `/magic-link/verify` | - | Single-use. Returns tokens for a browser-requested link, or `{device_approved:true, user_code}` for an app's - whoever asked is who signs in |
+| POST | `/magic-link/device` | - | For clients that cannot receive the link (the desktop app). Returns `{device_handle, user_code, …}`, neutral |
+| POST | `/magic-link/device/poll` | - | `{status:"pending"}`, a 2FA challenge, or the tokens. 401 once spent or expired |
 | POST | `/otp` | - | Neutral response |
 | POST | `/otp/verify` | - | 5 attempts, then the code is destroyed |
 | POST | `/2fa/setup` | Bearer | Returns secret, URI, QR data URI |

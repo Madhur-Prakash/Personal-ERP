@@ -39,6 +39,12 @@ class RedisKey:
     def magic_link(cls, token: str) -> str:
         return f"{cls.PREFIX}:auth:magic:{token}"
 
+    #: A sign-in started on a client that cannot receive the emailed link - the
+    #: desktop app. Keyed by the digest of the handle the client polls with.
+    @classmethod
+    def device_sign_in(cls, handle_digest: str) -> str:
+        return f"{cls.PREFIX}:auth:device-signin:{handle_digest}"
+
     # --- auth: emailed codes (value -> code digest) ---
     #: ``purpose`` separates the code namespaces, and it is load-bearing rather than
     #: tidiness: signing in and resetting a password both mail a 6-digit code to the

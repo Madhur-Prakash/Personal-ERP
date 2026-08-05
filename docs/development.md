@@ -44,6 +44,13 @@ with no credentials.
 password-reset code are 6 digits in the body, not URL parameters, so nothing masks
 them. Request one, read it from the console, type it in.
 
+**Signing in from the desktop app** does not need the link to be opened *in* the app.
+The app sends it, shows a four-character code, and polls; opening the link in any
+browser signs **only the app** in - the browser gets a "your app is signing in" page,
+because the client that requested the link is the one that gets the session. To
+exercise it locally, request the link in the app, read it out of the log (see below),
+open it in a browser, and watch the app come to life on its own.
+
 **Links are not.** Verification and magic-link mails carry a `token=` parameter, and
 **logifyx's masking redacts it from the logged URL**:
 

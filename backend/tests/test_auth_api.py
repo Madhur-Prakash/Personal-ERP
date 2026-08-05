@@ -9,6 +9,7 @@ mock-based test cannot see.
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -919,6 +920,227 @@ class TestPasswordless:
             json={"email": user.email, "redirect_path": "//evil.test/steal"},
         )
         assert response.status_code == 422
+
+    # -------------------------------------------------------------------------
+    # Device sign-in: the app sends the link but never receives it
+    # -------------------------------------------------------------------------
+    @pytest.fixture
+    def sent_magic_links(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+        """Captures what would have been emailed.
+
+        The token cannot be read back out of Redis - only its digest is stored - so
+        intercepting the send is the only way to hold the link a real user would click,
+        and it also proves the endpoint put the device handle *into* that link.
+        """
+        from app.modules.notifications import email as mailer
+
+        calls: list[dict[str, Any]] = []
+
+        async def fake_send_magic_link_email(**kwargs: Any) -> bool:
+            calls.append(kwargs)
+            return True
+
+        monkeypatch.setattr(mailer, "send_magic_link_email", fake_send_magic_link_email)
+        return calls
+
+    async def test_device_sign_in_completes_when_the_link_is_opened(
+        self, client: AsyncClient, api: str, user: User, sent_magic_links: list[dict[str, Any]]
+    ) -> None:
+        """The whole point: the app that asked ends up signed in, not just the browser.
+
+        One client stands in for two here - `started` is the desktop app, and the
+        verify call is whatever browser opens the mail.
+        """
+        started = await client.post(f"{api}/auth/magic-link/device", json={"email": user.email})
+        assert started.status_code == 200, started.text
+        handle = started.json()["device_handle"]
+        assert started.json()["user_code"]
+
+        # Nothing has opened the link yet.
+        pending = await client.post(
+            f"{api}/auth/magic-link/device/poll", json={"device_handle": handle}
+        )
+        assert pending.status_code == 200
+        assert pending.json()["status"] == "pending"
+
+        # The browser opens it. The code in the mail is the one the app is showing.
+        assert sent_magic_links[-1]["user_code"] == started.json()["user_code"]
+        opened = await client.post(
+            f"{api}/auth/magic-link/verify", json={"token": sent_magic_links[-1]["token"]}
+        )
+        assert opened.status_code == 200, opened.text
+        # ...and the browser is told to expect nothing, rather than being signed in.
+        assert opened.json()["device_approved"] is True
+        assert opened.json()["user_code"] == started.json()["user_code"]
+        assert "access_token" not in opened.json()
+
+        # ...and now the app's poll returns a real session.
+        claimed = await client.post(
+            f"{api}/auth/magic-link/device/poll", json={"device_handle": handle}
+        )
+        assert claimed.status_code == 200, claimed.text
+        assert claimed.json()["access_token"]
+        assert claimed.json()["user"]["email"] == user.email
+
+    async def test_device_handle_is_single_use(
+        self, client: AsyncClient, api: str, user: User, sent_magic_links: list[dict[str, Any]]
+    ) -> None:
+        """A claimed handle must not mint a second session."""
+        started = await client.post(f"{api}/auth/magic-link/device", json={"email": user.email})
+        handle = started.json()["device_handle"]
+
+        await client.post(
+            f"{api}/auth/magic-link/verify", json={"token": sent_magic_links[-1]["token"]}
+        )
+
+        assert (
+            await client.post(f"{api}/auth/magic-link/device/poll", json={"device_handle": handle})
+        ).status_code == 200
+        second = await client.post(
+            f"{api}/auth/magic-link/device/poll", json={"device_handle": handle}
+        )
+        assert second.status_code == 401
+
+    async def test_an_ordinary_magic_link_approves_no_device(
+        self, client: AsyncClient, api: str, user: User, sent_magic_links: list[dict[str, Any]]
+    ) -> None:
+        """The browser flow must not carry a device handle at all."""
+        await client.post(f"{api}/auth/magic-link", json={"email": user.email})
+        assert sent_magic_links[-1].get("user_code") is None
+
+    async def test_opening_an_apps_link_does_not_sign_the_browser_in(
+        self, client: AsyncClient, api: str, user: User, sent_magic_links: list[dict[str, Any]]
+    ) -> None:
+        """Whoever requested the link is the only one who signs in.
+
+        One click used to leave sessions on two machines - the app it was meant for and
+        whatever browser happened to open the mail. Only the first was asked for.
+        """
+        await client.post(f"{api}/auth/magic-link/device", json={"email": user.email})
+        await client.post(
+            f"{api}/auth/magic-link/verify", json={"token": sent_magic_links[-1]["token"]}
+        )
+
+        # No refresh cookie was set, so the browser cannot mint an access token either.
+        assert REFRESH_COOKIE_NAME not in client.cookies
+        assert (await client.post(f"{api}/auth/refresh")).status_code == 401
+
+    async def test_a_browser_requested_link_still_signs_the_browser_in(
+        self, client: AsyncClient, api: str, user: User, sent_magic_links: list[dict[str, Any]]
+    ) -> None:
+        """The other half of the rule - the browser flow is untouched."""
+        await client.post(f"{api}/auth/magic-link", json={"email": user.email})
+
+        signed_in = await client.post(
+            f"{api}/auth/magic-link/verify", json={"token": sent_magic_links[-1]["token"]}
+        )
+        assert signed_in.status_code == 200, signed_in.text
+        assert signed_in.json()["access_token"]
+        assert REFRESH_COOKIE_NAME in client.cookies
+
+    async def test_unknown_device_handle_is_rejected_not_left_pending(
+        self, client: AsyncClient, api: str
+    ) -> None:
+        """Expired and pending are different answers - see poll_device_sign_in."""
+        response = await client.post(
+            f"{api}/auth/magic-link/device/poll", json={"device_handle": "not-a-real-handle"}
+        )
+        assert response.status_code == 401
+
+    async def test_device_sign_in_is_neutral_about_unknown_addresses(
+        self, client: AsyncClient, api: str, user: User
+    ) -> None:
+        """A handle only for real accounts would be an enumeration oracle."""
+        real = await client.post(f"{api}/auth/magic-link/device", json={"email": user.email})
+        fake = await client.post(
+            f"{api}/auth/magic-link/device", json={"email": "nobody@example.com"}
+        )
+
+        assert real.status_code == fake.status_code == 200
+        assert fake.json()["device_handle"]
+        assert real.json().keys() == fake.json().keys()
+
+        # And the unknown one can never be approved, so it stays pending.
+        pending = await client.post(
+            f"{api}/auth/magic-link/device/poll",
+            json={"device_handle": fake.json()["device_handle"]},
+        )
+        assert pending.json()["status"] == "pending"
+
+    async def test_device_sign_in_still_requires_the_second_factor(
+        self,
+        authed_client: AsyncClient,
+        api: str,
+        user: User,
+        sent_magic_links: list[dict[str, Any]],
+    ) -> None:
+        """Opening the link is one factor. 2FA is owed in the app, not the browser.
+
+        Without this, the device flow would be a way onto a 2FA-protected account with
+        nothing but mailbox access.
+        """
+        import pyotp
+
+        secret = (await authed_client.post(f"{api}/auth/2fa/setup")).json()["secret"]
+        assert (
+            await authed_client.post(
+                f"{api}/auth/2fa/enable", json={"code": pyotp.TOTP(secret).now()}
+            )
+        ).status_code == 200
+        authed_client.headers.pop("Authorization", None)
+        authed_client.cookies.clear()
+
+        started = await authed_client.post(
+            f"{api}/auth/magic-link/device", json={"email": user.email}
+        )
+        handle = started.json()["device_handle"]
+
+        # Opening the link approves the app and signs nothing in here, so the
+        # browser is never asked for a second factor it does not need.
+        opened = await authed_client.post(
+            f"{api}/auth/magic-link/verify", json={"token": sent_magic_links[-1]["token"]}
+        )
+        assert opened.status_code == 200, opened.text
+        assert opened.json()["device_approved"] is True
+
+        challenged = await authed_client.post(
+            f"{api}/auth/magic-link/device/poll", json={"device_handle": handle}
+        )
+        assert challenged.status_code == 200, challenged.text
+        assert challenged.json()["two_factor_required"] is True
+
+        # The app finishes with a TOTP code, through the ordinary endpoint.
+        finished = await authed_client.post(
+            f"{api}/auth/login/2fa",
+            json={
+                "challenge_id": challenged.json()["challenge_id"],
+                "code": pyotp.TOTP(secret).now(),
+            },
+        )
+        assert finished.status_code == 200, finished.text
+        assert finished.json()["access_token"]
+
+    async def test_device_sign_in_email_carries_the_user_code(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The code is the only way the reader can spot a link they did not ask for."""
+        from app.modules.notifications import email as mailer
+
+        captured: dict[str, str] = {}
+
+        async def fake_send_email(**kwargs: str) -> bool:
+            captured.update(kwargs)
+            return True
+
+        monkeypatch.setattr(mailer, "send_email", fake_send_email)
+
+        assert await mailer.send_magic_link_email(
+            to="someone@example.com", name="Ada", token="tok-123", user_code="4F2K"
+        )
+        assert "4F2K" in captured["text"]
+        assert "4F2K" in captured["html"]
+        # And the warning that makes the code actionable.
+        assert "do not open the link" in captured["text"].lower()
 
     async def test_otp_signs_user_in(self, client: AsyncClient, api: str, user: User) -> None:
         code = await otp_store.issue(user.email)

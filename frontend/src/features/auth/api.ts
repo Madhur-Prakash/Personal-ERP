@@ -2,6 +2,7 @@ import { api } from '@/lib/api';
 import type {
   AuthenticatedUser,
   LoginResult,
+  MagicLinkDeviceApproved,
   MessageResponse,
   PasswordPolicy,
   RegisterResponse,
@@ -54,7 +55,10 @@ export const authApi = {
   requestMagicLink: (body: { email: string; redirect_path?: string }) =>
     api.post<MessageResponse>('/auth/magic-link', body),
 
-  verifyMagicLink: (token: string) => api.post<TokenResponse>('/auth/magic-link/verify', { token }),
+  // Two shapes: tokens when this browser asked for the link, or an approval when an
+  // app did. The client that requested it is the one that gets signed in.
+  verifyMagicLink: (token: string) =>
+    api.post<TokenResponse | MagicLinkDeviceApproved>('/auth/magic-link/verify', { token }),
 
   requestOtp: (email: string) => api.post<MessageResponse>('/auth/otp', { email }),
 

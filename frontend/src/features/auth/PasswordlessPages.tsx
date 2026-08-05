@@ -1,5 +1,5 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { ArrowLeft, KeyRound, Mail, Sparkles } from 'lucide-react';
+import { ArrowLeft, Check, KeyRound, Mail } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -10,6 +10,7 @@ import { authApi } from '@/features/auth/api';
 import { AuthLayout } from '@/features/auth/AuthLayout';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { ApiError } from '@/lib/api';
+import { isDeviceApproved } from '@/types/api';
 
 const emailSchema = z.string().min(1, 'Email is required').email('Enter a valid email address');
 
@@ -120,16 +121,27 @@ export function MagicLinkVerifyPage() {
   const navigate = useNavigate();
   const search = useSearch({ strict: false });
   const { applySession } = useAuth();
-  const [state, setState] = useState<'idle' | 'verifying' | 'failed'>('idle');
+  const [state, setState] = useState<'idle' | 'verifying' | 'approved' | 'failed'>('idle');
   const [message, setMessage] = useState('');
+  const [userCode, setUserCode] = useState('');
 
   async function consume() {
     if (!search.token) return;
     setState('verifying');
     try {
-      const tokens = await authApi.verifyMagicLink(search.token);
-      applySession(tokens);
-      toast.success(`Welcome back, ${tokens.user.full_name.split(' ')[0]}`);
+      const result = await authApi.verifyMagicLink(search.token);
+
+      // The link belonged to an app, so this browser gets nothing - by design. See
+      // MagicLinkDeviceApproved: whoever asked for the link is who signs in.
+      if (isDeviceApproved(result)) {
+        setUserCode(result.user_code);
+        setMessage(result.message);
+        setState('approved');
+        return;
+      }
+
+      applySession(result);
+      toast.success(`Welcome back, ${result.user.full_name.split(' ')[0]}`);
       void navigate({ to: '/', replace: true });
     } catch (error) {
       setState('failed');
@@ -157,6 +169,36 @@ export function MagicLinkVerifyPage() {
         <p className="text-content-muted text-center text-[13px]">
           Sign-in links expire after 15 minutes.
         </p>
+      </AuthLayout>
+    );
+  }
+
+  if (state === 'approved') {
+    return (
+      <AuthLayout
+        title="Your app is signing in"
+        subtitle={message}
+        footer={
+          <Link to="/login" className="text-primary font-medium hover:underline">
+            Sign in here instead
+          </Link>
+        }
+      >
+        <div className="space-y-4 text-center">
+          <div
+            className="bg-success-bg text-success mx-auto flex h-12 w-12 items-center justify-center rounded-xl"
+            aria-hidden
+          >
+            <Check className="h-6 w-6" />
+          </div>
+          <p className="text-content-muted text-[13px] leading-relaxed">
+            The app should be showing this code. If it is not, close this tab and change
+            your password - the link was not requested by you.
+          </p>
+          <div className="bg-primary/10 text-primary rounded-xl px-6 py-4 text-center font-mono text-3xl font-semibold tracking-[0.3em]">
+            {userCode}
+          </div>
+        </div>
       </AuthLayout>
     );
   }

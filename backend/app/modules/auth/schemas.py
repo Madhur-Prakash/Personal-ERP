@@ -181,6 +181,52 @@ class MagicLinkVerifyRequest(BaseSchema):
     token: str
 
 
+class MagicLinkDeviceApprovedResponse(ResponseSchema):
+    """The opened link belonged to an app. Nothing is signed in here.
+
+    Returned instead of tokens so that one click cannot leave sessions on two
+    machines: the client that *asked* for the link is the one that gets signed in.
+    """
+
+    device_approved: Literal[True] = True
+    #: The code the waiting app is showing, so the reader can confirm it matches.
+    user_code: str
+    message: str = "Your app is signing in now. You can close this tab."
+
+
+class DeviceSignInRequest(BaseSchema):
+    """Start a sign-in from a client that cannot receive the emailed link."""
+
+    email: Email
+
+
+class DeviceSignInResponse(ResponseSchema):
+    """What the requesting client needs to wait for its own sign-in.
+
+    Returned whether or not the address has an account: a handle withheld for unknown
+    addresses would be an enumeration oracle.
+    """
+
+    #: The secret to poll with. Belongs in memory for the life of the screen - it is a
+    #: credential, and it is never emailed, logged, or put in a URL.
+    device_handle: str
+    #: Shown to the user so they can check the email refers to *this* device.
+    user_code: str
+    expires_in_seconds: int
+    poll_interval_seconds: int
+
+
+class DeviceSignInPollRequest(BaseSchema):
+    device_handle: str
+
+
+class DeviceSignInPendingResponse(ResponseSchema):
+    """The link has not been opened yet. Keep polling."""
+
+    status: Literal["pending"] = "pending"
+    message: str = "Waiting for the link in your email to be opened"
+
+
 class OtpRequestBody(BaseSchema):
     email: Email
 

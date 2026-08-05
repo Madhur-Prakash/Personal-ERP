@@ -123,8 +123,37 @@ class AuthApi {
     body: <String, dynamic>{'email': email},
   );
 
-  Future<TokenResponse> verifyMagicLink(String token) async =>
-      TokenResponse.fromJson(
+  /// Start a sign-in that finishes *here*, not in whatever browser opens the mail.
+  ///
+  /// [requestMagicLink] is the browser's endpoint: it sends a link and this app never
+  /// hears about it again. This one returns a handle to poll, so opening the link
+  /// signs this app in too.
+  Future<DeviceSignInStarted> startDeviceSignIn(String email) async =>
+      DeviceSignInStarted.fromJson(
+        await _client.post<Json>(
+          '/auth/magic-link/device',
+          body: <String, dynamic>{'email': email},
+        ),
+      );
+
+  /// Ask whether the emailed link has been opened yet.
+  ///
+  /// Throws [ApiError] with a 401 once the handle has expired or been claimed, which
+  /// is the signal to stop polling rather than a failure to report as one.
+  Future<DeviceSignInPoll> pollDeviceSignIn(String deviceHandle) async =>
+      DeviceSignInPoll.fromJson(
+        await _client.post<Json>(
+          '/auth/magic-link/device/poll',
+          body: <String, dynamic>{'device_handle': deviceHandle},
+        ),
+      );
+
+  /// Consume a sign-in link.
+  ///
+  /// Two shapes: tokens when *this* client asked for the link, or an approval when
+  /// another client did - whoever requested it is who gets signed in.
+  Future<MagicLinkVerifyResult> verifyMagicLink(String token) async =>
+      MagicLinkVerifyResult.fromJson(
         await _client.post<Json>(
           '/auth/magic-link/verify',
           body: <String, dynamic>{'token': token},

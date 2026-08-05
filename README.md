@@ -30,7 +30,7 @@ sales, purchasing and inventory, document intelligence, and analytics; see
 | FastAPI backend, PostgreSQL 17, Redis 7 | Done |
 | React 19 + TypeScript + Vite frontend | Done |
 | Flutter desktop client - Windows, macOS, Linux; the same screens against the same API, staying signed in across restarts | Done |
-| Authentication - password, email verification, magic link, email OTP, password reset, TOTP 2FA with recovery codes | Done |
+| Authentication - password, email verification, magic link (signs in the desktop app too, not just the browser), email OTP, password reset by emailed code, TOTP 2FA with recovery codes | Done |
 | Sessions - refresh-token rotation with reuse detection, device history, remote revocation | Done |
 | Multi-tenancy - organizations, members, invitations | Done |
 | RBAC - 42 permissions, 5 seeded roles, custom roles, per-member overrides | Done |

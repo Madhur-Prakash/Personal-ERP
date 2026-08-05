@@ -84,7 +84,7 @@ deploys safe.
 | --- | --- | --- |
 | Users, organizations, roles, memberships, invitations, audit | PostgreSQL | Must be durable, relational, and queryable |
 | Session rows (refresh-token digests, device history) | PostgreSQL | Must survive restarts; users audit their own devices |
-| One-time tokens (verification, magic link) and emailed codes (sign-in, password reset) | Redis | Naturally TTL'd - expiry as a feature, no cleanup job |
+| One-time tokens (verification, magic link), emailed codes (sign-in, password reset), pending device sign-ins | Redis | Naturally TTL'd - expiry as a feature, no cleanup job |
 | Failed-login counters and lockouts | Redis | Ephemeral by definition; losing them fails safe |
 | Token epoch counters | Redis | Read on every request; must be a single fast GET |
 | Revoked-session markers | Redis | Same - a per-request check cannot be a SQL query |

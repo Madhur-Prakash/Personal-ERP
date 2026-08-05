@@ -31,9 +31,14 @@ from app.modules.auth.password_policy import describe_policy
 from app.modules.auth.schemas import (
     AuthenticatedUser,
     ChangePasswordRequest,
+    DeviceSignInPendingResponse,
+    DeviceSignInPollRequest,
+    DeviceSignInRequest,
+    DeviceSignInResponse,
     ForgotPasswordRequest,
     LoginRequest,
     LogoutRequest,
+    MagicLinkDeviceApprovedResponse,
     MagicLinkRequest,
     MagicLinkVerifyRequest,
     OtpRequestBody,
@@ -55,7 +60,7 @@ from app.modules.auth.schemas import (
     TwoFactorSetupResponse,
     VerifyEmailRequest,
 )
-from app.modules.auth.service import AuthResult, TwoFactorPending
+from app.modules.auth.service import AuthResult, DeviceSignInApproved, TwoFactorPending
 
 log = get_logger(__name__)
 
@@ -265,7 +270,7 @@ async def request_magic_link(
 
 @router.post(
     "/magic-link/verify",
-    response_model=TokenResponse,
+    response_model=TokenResponse | MagicLinkDeviceApprovedResponse,
     summary="Sign in with a magic link token",
 )
 async def verify_magic_link(
@@ -273,8 +278,73 @@ async def verify_magic_link(
     response: Response,
     service: AuthServiceDep,
     ctx: RequestCtx,
-) -> TokenResponse:
+) -> TokenResponse | MagicLinkDeviceApprovedResponse:
+    """Signs in *this* client, or approves the app that asked for the link.
+
+    Which one depends on where the link came from - see
+    :meth:`~app.modules.auth.service.AuthService.verify_magic_link`. A link an app
+    requested approves that app and leaves this client signed out, so opening it in a
+    browser does not create a second session nobody asked for.
+    """
     result = await service.verify_magic_link(data.token, ctx)
+
+    if isinstance(result, DeviceSignInApproved):
+        return MagicLinkDeviceApprovedResponse(user_code=result.user_code)
+
+    _set_refresh_cookie(response, result)
+    return result.tokens
+
+
+@router.post(
+    "/magic-link/device",
+    response_model=DeviceSignInResponse,
+    summary="Start a sign-in that completes on this device",
+)
+async def start_device_sign_in(
+    data: DeviceSignInRequest,
+    service: AuthServiceDep,
+    ctx: RequestCtx,
+) -> DeviceSignInResponse:
+    """Send a magic link and return a handle to poll while it is opened.
+
+    For clients that cannot receive the link themselves - the desktop app sends it,
+    but it opens in a browser. Poll :func:`poll_device_sign_in` with the handle.
+    """
+    opened = await service.open_device_sign_in(data.email, ctx)
+    return DeviceSignInResponse(
+        device_handle=opened.handle,
+        user_code=opened.user_code,
+        expires_in_seconds=opened.expires_in_seconds,
+        poll_interval_seconds=opened.poll_interval_seconds,
+    )
+
+
+@router.post(
+    "/magic-link/device/poll",
+    response_model=TokenResponse | TwoFactorChallengeResponse | DeviceSignInPendingResponse,
+    summary="Claim the session once the emailed link has been opened",
+    responses={
+        401: {"description": "The handle is unknown or has expired - start again"},
+    },
+)
+async def poll_device_sign_in(
+    data: DeviceSignInPollRequest,
+    response: Response,
+    service: AuthServiceDep,
+    ctx: RequestCtx,
+) -> TokenResponse | TwoFactorChallengeResponse | DeviceSignInPendingResponse:
+    """Three answers: still waiting, a 2FA challenge, or the tokens.
+
+    The session is established in *this* request, so it records this client's IP,
+    user agent and device label rather than the browser's.
+    """
+    result = await service.poll_device_sign_in(data.device_handle, ctx)
+
+    if result is None:
+        return DeviceSignInPendingResponse()
+    if isinstance(result, TwoFactorPending):
+        return TwoFactorChallengeResponse(challenge_id=result.challenge_id)
+
     _set_refresh_cookie(response, result)
     return result.tokens
 

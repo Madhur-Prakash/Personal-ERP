@@ -72,6 +72,25 @@ export function isTwoFactorChallenge(result: LoginResult): result is TwoFactorCh
   return 'two_factor_required' in result && result.two_factor_required === true;
 }
 
+/**
+ * Returned by `/auth/magic-link/verify` when the link belonged to an app.
+ *
+ * Nothing is signed in here: the client that *requested* the link is the one that
+ * gets the session, so opening an app's link in a browser approves the app and leaves
+ * the browser signed out.
+ */
+export interface MagicLinkDeviceApproved {
+  device_approved: true;
+  user_code: string;
+  message: string;
+}
+
+export function isDeviceApproved(
+  result: TokenResponse | MagicLinkDeviceApproved,
+): result is MagicLinkDeviceApproved {
+  return 'device_approved' in result && result.device_approved === true;
+}
+
 export interface RegisterResponse {
   user_id: string;
   email: string;

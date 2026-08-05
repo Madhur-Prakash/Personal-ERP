@@ -94,6 +94,39 @@ through one shared module
 ([`features/auth/passwordPolicy.ts`](../frontend/src/features/auth/passwordPolicy.ts))
 rather than restating the rules per form.
 
+### Device sign-in (the desktop app)
+
+The app can send a magic link but never receives one: the link opens in a browser.
+So it opens a pending record, holds a 256-bit **handle**, and polls until the link is
+opened - on that machine or any other. The browser click approves the handle; the
+next poll establishes a session in the *app's* own request, so device history records
+the app's IP and user agent rather than the browser's.
+
+**One click, one session, on the client that asked.** The token records which flow
+minted it - an app's link carries a device handle, a browser's does not - so opening
+an app's link approves the app and signs the browser out of the story entirely. The
+alternative left sessions on two machines when the user had asked for one, and the
+extra one was on whatever device happened to open the mail.
+
+What holds it together:
+
+- **The handle is the credential, and only the app ever has it.** It is not emailed,
+  not put in a URL, and only its digest is stored in Redis. The approving request
+  carries that digest inside the magic-link token's payload, so nothing in the
+  approval path can reconstruct something pollable.
+- **The `user_code` closes the one hole this flow opens.** Anyone who knows an address
+  can start a device sign-in, so without a check the attacker's app would be signed in
+  by a link the *owner* clicks. The app shows a four-character code, the email repeats
+  it and says not to open the link unless it matches.
+- **2FA is still enforced, in the app.** Opening the link proves control of the
+  mailbox; the poll then returns a challenge rather than tokens, and the app completes
+  it through `/auth/login/2fa`. Mailbox access alone is not enough.
+- **Single-use.** The record is destroyed the moment it is claimed, before the session
+  is handed back, so a replayed handle gets a 401.
+- **The poll is exempt from the tighter auth rate limit** (`AUTH_PATH_EXCEPTIONS`).
+  It is called every two seconds by design and is not a guessing surface: 256 bits,
+  bounded by its own TTL, destroyed on first success.
+
 ### Account enumeration
 
 Password reset, magic link, OTP request, and resend-verification all return the

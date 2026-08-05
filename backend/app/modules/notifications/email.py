@@ -415,12 +415,26 @@ async def send_password_reset_email(*, to: str, name: str, code: str) -> bool:
     return await send_email(to=to, subject=subject, html=html, text=text, category="password_reset")
 
 
-async def send_magic_link_email(*, to: str, name: str, token: str) -> bool:
+async def send_magic_link_email(
+    *,
+    to: str,
+    name: str,
+    token: str,
+    user_code: str | None = None,
+    device_label: str | None = None,
+) -> bool:
     """The one-click sign-in link.
 
     Points at ``/magic-link/verify``, not ``/magic-link``. The latter is the *request*
     form, which discards search parameters - an emailed link aimed there silently did
     nothing but re-show the form.
+
+    ``user_code`` is set when the sign-in was started from an app that cannot receive
+    this link (see :class:`~app.modules.auth.token_store.DeviceSignInStore`). Opening
+    the link then signs that app in as well, so the mail has to say so and give the
+    reader something to check it against: an unexpected link that would sign in
+    *someone else's* app is the one failure mode this flow adds, and the code is what
+    lets the reader notice it.
     """
     link = _frontend_url("/magic-link/verify", token=token)
     minutes = settings.magic_link_ttl_minutes
@@ -429,6 +443,15 @@ async def send_magic_link_email(*, to: str, name: str, token: str) -> bool:
         """
         <h1>Your sign-in link</h1>
         <p>Hi {{ name }}, tap below to sign in. No password needed.</p>
+        {% if user_code %}
+        <p>This will also sign in the app{% if device_label %} on
+           <strong>{{ device_label }}</strong>{% endif %} that asked for it. That app
+           is showing this code - check it matches before you continue:</p>
+        <div class="code">{{ user_code }}</div>
+        <p><strong>If you are not looking at a Personal ERP app showing that code, do
+           not open the link.</strong> Someone else may have entered your address, and
+           opening it would sign their app in as you.</p>
+        {% endif %}
         <a class="btn" href="{{ link }}">Sign in to Personal ERP</a>
         <p class="fallback">Or paste this into your browser:<br>{{ link }}</p>
         <p>This link expires in {{ minutes }} minutes and can be used once.</p>
@@ -437,10 +460,22 @@ async def send_magic_link_email(*, to: str, name: str, token: str) -> bool:
         name=name,
         link=link,
         minutes=minutes,
+        user_code=user_code,
+        device_label=device_label,
     )
     text = (
         f"Hi {name},\n\nSign in to Personal ERP:\n{link}\n\n"
-        f"This link expires in {minutes} minutes and can be used once.\n"
+        + (
+            f"This will also sign in the app"
+            f"{f' on {device_label}' if device_label else ''} that asked for it. That "
+            f"app is showing the code {user_code} - check it matches before you "
+            "continue.\n\nIf you are not looking at a Personal ERP app showing that "
+            "code, do not open the link: someone else may have entered your address, "
+            "and opening it would sign their app in as you.\n\n"
+            if user_code
+            else ""
+        )
+        + f"This link expires in {minutes} minutes and can be used once.\n"
     )
     return await send_email(
         to=to, subject="Your sign-in link", html=html, text=text, category="magic_link"

@@ -241,6 +241,23 @@ def generate_otp(length: int | None = None) -> str:
     return "".join(str(secrets.randbelow(10)) for _ in range(digits))
 
 
+#: Alphabet for :func:`generate_user_code`. ``I``, ``O``, ``0`` and ``1`` are absent
+#: because this code is read off one screen and compared against another, and those
+#: four are the pairs people get wrong.
+_USER_CODE_ALPHABET: Final = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_user_code(length: int = 4) -> str:
+    """A short code for confirming that two screens describe the same request.
+
+    Not a credential and not sized like one: it is shown in the app that started a
+    device sign-in and repeated in the email, so the person clicking can tell whether
+    the request came from the device in front of them. The secret in that flow is the
+    256-bit handle, which never leaves the app.
+    """
+    return "".join(secrets.choice(_USER_CODE_ALPHABET) for _ in range(length))
+
+
 def generate_recovery_codes(count: int = 10) -> list[str]:
     """Human-transcribable 2FA backup codes, formatted ``xxxx-xxxx``."""
     codes: list[str] = []

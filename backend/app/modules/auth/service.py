@@ -54,6 +54,7 @@ from app.core.security import (
     generate_recovery_codes,
     generate_token,
     hash_password,
+    hash_token,
     password_needs_rehash,
     verify_password,
 )
@@ -76,6 +77,7 @@ from app.modules.auth.schemas import (
     TokenResponse,
 )
 from app.modules.auth.token_store import (
+    device_sign_ins,
     email_verification_store,
     login_throttle,
     magic_link_store,
@@ -107,6 +109,14 @@ log = get_logger(__name__)
 #: Identical response for every passwordless/reset request, whatever the outcome.
 _NEUTRAL_EMAIL_MESSAGE = "If an account exists for that address, we have sent an email."
 
+#: How often a client waiting on a device sign-in should ask again.
+#:
+#: Served to the client rather than hard-coded in it, so the cadence can be changed
+#: without shipping a new app build. Two seconds is short enough to feel immediate
+#: after the link is clicked and slow enough that the poll stays well inside the
+#: default rate-limit budget.
+_DEVICE_POLL_INTERVAL_SECONDS = 2
+
 
 @dataclass(slots=True)
 class AuthResult:
@@ -127,6 +137,32 @@ class TwoFactorPending:
     """Password verified; awaiting a TOTP code."""
 
     challenge_id: str
+
+
+@dataclass(slots=True)
+class DeviceSignInApproved:
+    """The link belonged to an app, so nothing was signed in here.
+
+    Carries the app's ``user_code`` back so the approval page can show it: the person
+    who just clicked can see whether it matches the app they were looking at, which is
+    the last point at which a link they did not ask for is still noticeable.
+    """
+
+    user_code: str
+
+
+@dataclass(slots=True)
+class DeviceSignInOpened:
+    """A sign-in the requesting client must now poll for.
+
+    ``handle`` is the secret it polls with; ``user_code`` is the string it shows the
+    user to compare against the email.
+    """
+
+    handle: str
+    user_code: str
+    expires_in_seconds: int
+    poll_interval_seconds: int
 
 
 class AuthService:
@@ -553,7 +589,18 @@ class AuthService:
             )
         return _NEUTRAL_EMAIL_MESSAGE
 
-    async def verify_magic_link(self, token: str, ctx: RequestContext) -> AuthResult:
+    async def verify_magic_link(
+        self, token: str, ctx: RequestContext
+    ) -> AuthResult | DeviceSignInApproved:
+        """Consume a sign-in link.
+
+        **Whichever client asked for the link is the one that gets signed in**, and the
+        token itself records which that was: a link requested by an app carries a device
+        handle, a link requested from a browser does not. So a browser that merely
+        *opens* an app's link approves the app and signs nobody in locally - which is
+        what stops one click from creating two sessions on two machines, only one of
+        which the user was thinking about.
+        """
         payload = await magic_link_store().consume(token)
         if payload is None:
             raise InvalidTokenError("This sign-in link is invalid or has expired")
@@ -567,6 +614,33 @@ class AuthService:
             user.email_verified_at = dt.datetime.now(dt.UTC)
             await self.session.flush()
 
+        # An app is waiting on this click. Approve it and stop - no session here.
+        #
+        # 2FA is deliberately not checked on this path: nothing is being signed in yet.
+        # Approval only authorises the app to *claim* a session, and the claim is
+        # independently gated by 2FA in `poll_device_sign_in`, so the app still needs
+        # both factors. Checking here as well would force a 2FA user to complete 2FA in
+        # the browser to sign in somewhere else entirely.
+        device_handle_digest = payload.get("device_handle_digest")
+        if isinstance(device_handle_digest, str) and device_handle_digest:
+            record = await device_sign_ins.read_by_digest(device_handle_digest)
+            if record is None or not await device_sign_ins.approve(device_handle_digest, user.id):
+                raise InvalidTokenError(
+                    "The app that asked for this link stopped waiting. Request a new one."
+                )
+
+            log.info("device sign-in approved", extra={"user_id": str(user.id)})
+            await self.audit.record(
+                AuditAction.USER_MAGIC_LINK_REQUESTED,
+                actor=user,
+                resource_type="user",
+                resource_id=user.id,
+                summary="Approved a sign-in link for an app",
+                ip_address=ctx.ip_address,
+                user_agent=ctx.user_agent,
+            )
+            return DeviceSignInApproved(user_code=record.user_code)
+
         if user.is_two_factor_enabled:
             # A magic link is one factor; 2FA still applies. Skipping it here
             # would make email a bypass for the second factor.
@@ -574,6 +648,100 @@ class AuthService:
                 user.id, {"method": LoginMethod.MAGIC_LINK.value}
             )
             raise TwoFactorRequiredError(challenge_id)
+
+        return await self._establish_session(user, ctx, method=LoginMethod.MAGIC_LINK)
+
+    # =========================================================================
+    # Passwordless: device sign-in
+    #
+    # For a client that can *send* the magic link but never receives it. The desktop
+    # app sends one, the link opens in a browser, and without this the app would sit
+    # there signed out while the browser got the session - which is exactly what it
+    # used to do.
+    #
+    # The app holds a secret handle and polls; opening the link approves the handle;
+    # the next poll claims a session established in the *app's* own request context,
+    # so its device history, IP and user agent are the app's rather than the
+    # browser's. See :class:`~app.modules.auth.token_store.DeviceSignInStore`.
+    # =========================================================================
+    async def open_device_sign_in(self, email: str, ctx: RequestContext) -> DeviceSignInOpened:
+        """Start a device sign-in and mail the link.
+
+        Returns a handle whether or not the address has an account - the neutrality
+        rule applies here as everywhere else, and a response that only carried a
+        handle for real accounts would be an enumeration oracle. For an address with
+        no account, nothing can ever approve the record and the app polls until it
+        expires.
+        """
+        handle, user_code = await device_sign_ins.open(email)
+
+        user = await self.users.get_by_email(email)
+        if user is not None and user.can_authenticate:
+            token = await magic_link_store().issue(
+                {
+                    "user_id": str(user.id),
+                    "redirect_path": None,
+                    # The digest, so the approving request never holds anything
+                    # pollable - see DeviceSignInStore.
+                    "device_handle_digest": hash_token(handle),
+                }
+            )
+            await mailer.send_magic_link_email(
+                to=user.email,
+                name=user.full_name,
+                token=token,
+                user_code=user_code,
+                device_label=ctx.device_label,
+            )
+            await self.audit.record(
+                AuditAction.USER_MAGIC_LINK_REQUESTED,
+                actor=user,
+                resource_type="user",
+                resource_id=user.id,
+                summary="Requested a sign-in link for an app",
+            )
+
+        return DeviceSignInOpened(
+            handle=handle,
+            user_code=user_code,
+            expires_in_seconds=settings.magic_link_ttl_minutes * 60,
+            poll_interval_seconds=_DEVICE_POLL_INTERVAL_SECONDS,
+        )
+
+    async def poll_device_sign_in(
+        self, handle: str, ctx: RequestContext
+    ) -> AuthResult | TwoFactorPending | None:
+        """Claim the session once the link has been opened. ``None`` = still waiting.
+
+        Raises rather than returning ``None`` when the handle is unknown: expired and
+        pending are different answers, and a client that cannot tell them apart either
+        polls a dead handle forever or gives up on a live one.
+        """
+        record = await device_sign_ins.read(handle)
+        if record is None:
+            raise InvalidTokenError("This sign-in request has expired. Start again.")
+
+        if record.user_id is None:
+            return None
+
+        user = await self.users.get(uuid.UUID(record.user_id))
+        if user is None or not user.can_authenticate:
+            # Deactivated between approval and this poll.
+            await device_sign_ins.close(handle)
+            raise InvalidCredentialsError()
+
+        # Destroyed before the session is handed over, so a replayed handle cannot
+        # mint a second one. A crash between here and the response costs the user a
+        # restart of the flow, which is the right way round.
+        await device_sign_ins.close(handle)
+
+        if user.is_two_factor_enabled:
+            # The link proved control of the mailbox; the code is still owed, and it
+            # is owed *in the app* - which is where the session is being created.
+            challenge_id = await two_factor_challenges.create(
+                user.id, {"method": LoginMethod.MAGIC_LINK.value}
+            )
+            return TwoFactorPending(challenge_id=challenge_id)
 
         return await self._establish_session(user, ctx, method=LoginMethod.MAGIC_LINK)
 

@@ -20,12 +20,13 @@ import datetime as dt
 import json
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Final
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.redis import RedisKey, get_redis
-from app.core.security import generate_otp, generate_token, hash_token
+from app.core.security import generate_otp, generate_token, generate_user_code, hash_token
 
 log = get_logger(__name__)
 
@@ -94,6 +95,124 @@ def magic_link_store() -> OneTimeTokenStore:
         RedisKey.magic_link,
         dt.timedelta(minutes=settings.magic_link_ttl_minutes),
     )
+
+
+# =============================================================================
+# Device sign-in
+# =============================================================================
+#: How long an approved sign-in waits to be collected.
+#:
+#: Measured from approval, not from the request, so a link clicked in the last second
+#: of its own window still leaves the app time to poll. Short because an approved
+#: record is a session waiting to be claimed.
+_DEVICE_CLAIM_TTL: Final = dt.timedelta(minutes=5)
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceSignIn:
+    """A sign-in started on one client and approved from another."""
+
+    user_code: str
+    email: str
+    #: ``None`` while pending. Set once the emailed link has been opened.
+    user_id: str | None
+
+
+class DeviceSignInStore:
+    """Sign-ins for a client that cannot receive the emailed link.
+
+    The desktop app can send a magic link but never sees it: the link opens in a
+    browser, and the browser is the only client that could consume it. So the app
+    instead opens a record here, shows the user a short code, and polls until the
+    link is opened somewhere else - on this machine or another one entirely.
+
+    **The handle is the credential; the code is not.** The 256-bit handle is minted
+    for the app and never leaves it - not into the email, not into the URL - and only
+    its digest is stored, so a Redis dump yields nothing pollable. The four-character
+    ``user_code`` exists so the person opening the mail can tell whether the request
+    came from the device in front of them: without it, anyone who knows an address
+    could start a sign-in and hope the owner clicks the link, which would hand a
+    session to the attacker's app rather than merely signing the owner in.
+
+    :meth:`approve` deliberately takes a *digest* rather than a handle. The approving
+    request is the browser's, and it knows the magic-link token, not the handle - the
+    digest travels inside that token's payload. Nothing in the approval path can
+    reconstruct a pollable handle.
+    """
+
+    async def open(self, email: str) -> tuple[str, str]:
+        """Start a pending sign-in. Returns ``(handle, user_code)``.
+
+        Called before the address is known to exist, and that is the point: the
+        endpoint answers identically either way, so a record with nothing to approve
+        it is the neutral outcome for an address with no account.
+        """
+        handle = generate_token()
+        user_code = generate_user_code()
+        await get_redis().set(
+            RedisKey.device_sign_in(hash_token(handle)),
+            json.dumps({"user_code": user_code, "email": email.strip().lower(), "user_id": None}),
+            ex=int(dt.timedelta(minutes=settings.magic_link_ttl_minutes).total_seconds()),
+        )
+        return handle, user_code
+
+    async def read(self, handle: str) -> DeviceSignIn | None:
+        """The current state, or ``None`` if unknown, expired, or already claimed."""
+        return self._decode(await get_redis().get(RedisKey.device_sign_in(hash_token(handle))))
+
+    async def read_by_digest(self, handle_digest: str) -> DeviceSignIn | None:
+        """As :meth:`read`, for the approving request - which holds only the digest.
+
+        Read-only on purpose: this is the path the browser is on, and it must be able
+        to show the ``user_code`` without gaining anything it could poll with.
+        """
+        return self._decode(await get_redis().get(RedisKey.device_sign_in(handle_digest)))
+
+    async def approve(self, handle_digest: str, user_id: uuid.UUID) -> bool:
+        """Record that the emailed link was opened. ``False`` if it had expired.
+
+        Read-then-write rather than atomic, which is safe here: the only concurrent
+        writer is a second click on the same link, and it writes the same value.
+        """
+        key = RedisKey.device_sign_in(handle_digest)
+        record = self._decode(await get_redis().get(key))
+        if record is None:
+            return False
+
+        await get_redis().set(
+            key,
+            json.dumps(
+                {
+                    "user_code": record.user_code,
+                    "email": record.email,
+                    "user_id": str(user_id),
+                }
+            ),
+            ex=int(_DEVICE_CLAIM_TTL.total_seconds()),
+        )
+        return True
+
+    async def close(self, handle: str) -> None:
+        """Destroy the record. Called the moment it is claimed, so it is single-use."""
+        await get_redis().delete(RedisKey.device_sign_in(hash_token(handle)))
+
+    @staticmethod
+    def _decode(raw: bytes | str | None) -> DeviceSignIn | None:
+        # `bytes | str` because that is what redis-py's `get` is typed as - decoding is
+        # configured on the client, but the annotation covers both.
+        if raw is None:
+            return None
+        try:
+            payload: dict[str, Any] = json.loads(raw)
+        except json.JSONDecodeError:
+            log.error("corrupt device sign-in payload in redis")
+            return None
+        user_id = payload.get("user_id")
+        return DeviceSignIn(
+            user_code=str(payload.get("user_code", "")),
+            email=str(payload.get("email", "")),
+            user_id=str(user_id) if user_id else None,
+        )
 
 
 # =============================================================================
@@ -349,6 +468,8 @@ class SessionRevocationStore:
 
 
 # Module-level singletons - all are stateless wrappers over the shared pool.
+device_sign_ins = DeviceSignInStore()
+
 #: The sign-in code.
 otp_store = OtpStore("login", lambda: settings.otp_ttl_minutes)
 
