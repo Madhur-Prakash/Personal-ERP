@@ -125,6 +125,7 @@ class ScannedDocument extends DocumentSummary {
     this.extractedTaxAmount,
     required this.fieldConfidence,
     required this.lowConfidenceFields,
+    required this.correctedFields,
     this.failureMessage,
     this.billNumber,
     this.reviewedAt,
@@ -140,6 +141,11 @@ class ScannedDocument extends DocumentSummary {
 
   final Map<String, String> fieldConfidence;
   final List<String> lowConfidenceFields;
+
+  /// Fields a human has typed over. Their confidence is 1 because a person set them,
+  /// which is a different claim from "the engine was sure" - and only this list tells
+  /// the two apart, so the UI must not render a corrected field as 100% confident.
+  final List<String> correctedFields;
 
   final String? failureMessage;
   final String? billNumber;
@@ -177,6 +183,7 @@ class ScannedDocument extends DocumentSummary {
           e.key: '${e.value}',
       },
       lowConfidenceFields: stringList(json, 'low_confidence_fields'),
+      correctedFields: stringList(json, 'corrected_fields'),
       failureMessage: strOrNull(json, 'failure_message'),
       billNumber: strOrNull(json, 'bill_number'),
       reviewedAt: strOrNull(json, 'reviewed_at'),

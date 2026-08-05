@@ -540,21 +540,28 @@ class _DocumentReview extends ConsumerWidget {
       }
     }
 
+    // A plain yes/no. This used to demand a typed reason before it would do anything,
+    // which put a text box in front of a decision that is usually self-evident - a blank
+    // page, the wrong file - and collected "no" as often as anything worth reading. Who
+    // rejected it and when are on the audit row regardless.
     Future<void> reject() async {
-      final String? reason = await promptForText(
+      final bool confirmed = await confirmAction(
         context,
-        title: 'Reject this document',
-        description: 'Why is it not usable? This is kept on the record.',
-        placeholder: 'Blurred beyond reading',
+        title: 'Reject this document?',
+        message:
+            'It will be marked as not usable and cannot be entered as a bill. The file '
+            'and its recognised text are kept.',
         confirmLabel: 'Reject',
-        allowEmpty: false,
-        minimumLength: 3,
       );
-      if (reason == null) return;
+      if (!confirmed) return;
       try {
-        await ref.read(documentsApiProvider).reject(id, reason);
+        await ref.read(documentsApiProvider).reject(id);
         invalidate();
         if (context.mounted) context.toastSuccess('Document rejected');
+        // Back to the inbox, like Delete. Staying put left the screen showing the
+        // document exactly as before with a toast over it, which reads as "nothing
+        // happened".
+        onClose();
       } catch (error) {
         if (context.mounted) {
           context.toastApiError(error, 'Could not reject it');
@@ -743,10 +750,149 @@ class _Notice extends StatelessWidget {
   }
 }
 
-class _ExtractedFields extends StatelessWidget {
+/// The seven correctable fields, in the order a reviewer reads them off an invoice.
+const List<String> _editableFields = <String>[
+  'supplier_name',
+  'supplier_gstin',
+  'invoice_number',
+  'invoice_date',
+  'subtotal',
+  'tax_amount',
+  'total_amount',
+];
+
+/// What the engine read, and the reviewer's chance to disagree with it.
+///
+/// **Editable, because OCR misreads and the alternative is worse.** A smudged 8 read as a
+/// 3, a GSTIN a character short, a total taken off the wrong line - without this the only
+/// ways out were to upload a better scan or to carry the correction in your head down to
+/// the confirm form, where it reached the bill but left the document permanently claiming
+/// something false. That matters beyond tidiness: duplicate detection keys off
+/// `(GSTIN, invoice number)`, supplier matching keys off the GSTIN, and the review queue
+/// orders by a confidence score that should stop punishing a field a human has fixed.
+///
+/// Saving sends **only** the fields that changed, so correcting one value does not stamp
+/// the six beside it as human-checked.
+class _ExtractedFields extends ConsumerStatefulWidget {
   const _ExtractedFields({required this.document});
 
   final ScannedDocument document;
+
+  @override
+  ConsumerState<_ExtractedFields> createState() => _ExtractedFieldsState();
+}
+
+class _ExtractedFieldsState extends ConsumerState<_ExtractedFields> {
+  /// Non-null only while editing; the keys are [_editableFields].
+  Map<String, TextEditingController>? _drafts;
+  bool _saving = false;
+
+  /// Server-side validation messages, keyed by field name.
+  ///
+  /// A 422 already names the offending field and says why - the envelope carries
+  /// `details.fields` as `{field: message}`. Showing only its summary ("One or more
+  /// fields are invalid") throws that away and leaves the reviewer to guess which of
+  /// seven boxes it meant.
+  Map<String, String> _fieldErrors = const <String, String>{};
+
+  ScannedDocument get document => widget.document;
+
+  bool get _editable =>
+      document.status != 'confirmed' && document.status != 'rejected';
+
+  /// The raw stored value per field - what an edit starts from and is compared against.
+  ///
+  /// Raw, not formatted: `formatMoney` produces "₹1,234.00" and `formatDate` a display
+  /// date, and round-tripping either back through the API would be a parse waiting to go
+  /// wrong. The date is already `YYYY-MM-DD`, which is what the picker and the server
+  /// both want.
+  Map<String, String> _rawValues() => <String, String>{
+    'supplier_name': document.extractedSupplierName ?? '',
+    'supplier_gstin': document.extractedSupplierGstin ?? '',
+    'invoice_number': document.extractedInvoiceNumber ?? '',
+    'invoice_date': document.extractedInvoiceDate ?? '',
+    'subtotal': document.extractedSubtotal ?? '',
+    'tax_amount': document.extractedTaxAmount ?? '',
+    'total_amount': document.extractedTotalAmount ?? '',
+  };
+
+  void _startEditing() {
+    final Map<String, String> raw = _rawValues();
+    setState(() {
+      _drafts = <String, TextEditingController>{
+        for (final String field in _editableFields)
+          field: TextEditingController(text: raw[field]),
+      };
+    });
+  }
+
+  void _stopEditing() {
+    _drafts?.values.forEach((TextEditingController c) => c.dispose());
+    setState(() => _drafts = null);
+  }
+
+  Future<void> _save() async {
+    final Map<String, TextEditingController>? drafts = _drafts;
+    if (drafts == null) return;
+
+    final Map<String, String> original = _rawValues();
+    final Map<String, Object?> changed = <String, Object?>{};
+    for (final String field in _editableFields) {
+      final String next = drafts[field]!.text.trim();
+      if (next == (original[field] ?? '').trim()) continue;
+      // An emptied box means "the invoice does not carry this", which is `null` on the
+      // wire. `''` would be a 422 on the text fields and a wrong zero on the amounts.
+      changed[field] = next.isEmpty ? null : next;
+    }
+
+    if (changed.isEmpty) {
+      _stopEditing();
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _fieldErrors = const <String, String>{};
+    });
+    try {
+      await ref.read(documentsApiProvider).correct(document.id, changed);
+      ref.invalidate(documentProvider(document.id));
+      ref.invalidate(documentsProvider);
+      if (mounted) {
+        _stopEditing();
+        context.toastSuccess(
+          'Corrections saved',
+          description:
+              'The bill form below is pre-filled from the corrected values.',
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      final ApiError failure = ApiError.from(error);
+      if (failure.isValidation && failure.fieldErrors.isNotEmpty) {
+        setState(() => _fieldErrors = failure.fieldErrors);
+        context.toastError(
+          'Check the highlighted fields',
+          description: failure.fieldErrors.entries
+              .map(
+                (MapEntry<String, String> e) =>
+                    '${_fieldLabels[e.key] ?? e.key}: ${e.value}',
+              )
+              .join(' · '),
+        );
+      } else {
+        context.toastApiError(error, 'Could not save the corrections');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _drafts?.values.forEach((TextEditingController c) => c.dispose());
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -792,56 +938,144 @@ class _ExtractedFields extends StatelessWidget {
             description: document.readExactly
                 ? 'Read from the PDF text layer, so the characters are exact.'
                 : 'Recognised from an image, so the characters are a best guess.',
-            action: ConfidenceMeter(value: document.overallConfidence),
+            action: Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: 8,
+              children: _drafts == null
+                  ? <Widget>[
+                      ConfidenceMeter(value: document.overallConfidence),
+                      if (_editable)
+                        AppButton(
+                          onPressed: _startEditing,
+                          variant: AppButtonVariant.ghost,
+                          size: AppButtonSize.sm,
+                          leftIcon: LucideIcons.pencil,
+                          label: 'Edit',
+                        ),
+                    ]
+                  : <Widget>[
+                      AppButton(
+                        onPressed: _saving ? null : _stopEditing,
+                        variant: AppButtonVariant.ghost,
+                        size: AppButtonSize.sm,
+                        label: 'Cancel',
+                      ),
+                      AppButton(
+                        onPressed: _saving ? null : _save,
+                        loading: _saving,
+                        size: AppButtonSize.sm,
+                        label: 'Save',
+                      ),
+                    ],
+            ),
           ),
           CardBody(
             padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                for (final (String field, String? value) in rows)
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(color: t.border.at(0.6)),
-                      ),
+                if (_drafts != null) ...<Widget>[
+                  for (final String field in _editableFields) ...<Widget>[
+                    AppInput(
+                      label: _fieldLabels[field] ?? field,
+                      controller: _drafts![field],
+                      enabled: !_saving,
+                      error: _fieldErrors[field],
+                      // Clear the message as soon as the box is touched: leaving it
+                      // under a field the reviewer has just retyped makes a fixed value
+                      // look broken.
+                      onChanged: _fieldErrors.containsKey(field)
+                          ? (String _) => setState(
+                              () => _fieldErrors = <String, String>{
+                                for (final MapEntry<String, String> e
+                                    in _fieldErrors.entries)
+                                  if (e.key != field) e.key: e.value,
+                              },
+                            )
+                          : null,
+                      placeholder: field == 'supplier_gstin'
+                          ? '27AABCU9603R1ZM'
+                          : field == 'invoice_date'
+                          ? 'YYYY-MM-DD'
+                          : 'Not found',
+                      maxLength: field == 'supplier_gstin' ? 15 : null,
+                      keyboardType:
+                          field == 'subtotal' ||
+                              field == 'tax_amount' ||
+                              field == 'total_amount'
+                          ? const TextInputType.numberWithOptions(decimal: true)
+                          : null,
                     ),
-                    child: Row(
-                      children: <Widget>[
-                        Text(
-                          _fieldLabels[field] ?? field,
-                          style: TextStyle(fontSize: 13, color: t.contentMuted),
-                        ),
-                        const Spacer(),
-                        Text(
-                          value ?? 'Not found',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: value == null
-                                ? t.contentMuted
-                                : document.lowConfidenceFields.contains(field)
-                                ? t.warning
-                                : t.content,
-                            fontStyle: value == null ? FontStyle.italic : null,
-                            fontWeight:
-                                document.lowConfidenceFields.contains(field)
-                                ? FontWeight.w500
-                                : FontWeight.w400,
-                            fontFeatures: tabularFigures,
-                          ),
-                        ),
-                        if (document.fieldConfidence[field] !=
-                            null) ...<Widget>[
-                          const SizedBox(width: 8),
-                          ConfidenceMeter(
-                            value: document.fieldConfidence[field],
-                            compact: true,
-                          ),
-                        ],
-                      ],
+                    const SizedBox(height: 10),
+                  ],
+                  Text(
+                    'Clearing a box records that the invoice does not carry that field. '
+                    'Corrections change this document only - the bill is still created from '
+                    'the form below, which you approve.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: t.contentMuted,
                     ),
                   ),
+                ] else
+                  for (final (String field, String? value) in rows)
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: t.border.at(0.6)),
+                        ),
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Text(
+                            _fieldLabels[field] ?? field,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: t.contentMuted,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            value ?? 'Not found',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: value == null
+                                  ? t.contentMuted
+                                  : document.lowConfidenceFields.contains(field)
+                                  ? t.warning
+                                  : t.content,
+                              fontStyle: value == null
+                                  ? FontStyle.italic
+                                  : null,
+                              fontWeight:
+                                  document.lowConfidenceFields.contains(field)
+                                  ? FontWeight.w500
+                                  : FontWeight.w400,
+                              fontFeatures: tabularFigures,
+                            ),
+                          ),
+                          // A corrected field's confidence is 1 because a person typed
+                          // it. Rendering "100%" there would claim the engine was
+                          // certain, which is the opposite of what happened.
+                          if (document.correctedFields.contains(field)) ...<Widget>[
+                            const SizedBox(width: 8),
+                            Text(
+                              'Edited',
+                              style: TextStyle(fontSize: 11, color: t.success),
+                            ),
+                          ] else if (document.fieldConfidence[field] !=
+                              null) ...<Widget>[
+                            const SizedBox(width: 8),
+                            ConfidenceMeter(
+                              value: document.fieldConfidence[field],
+                              compact: true,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                 const SizedBox(height: 12),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,

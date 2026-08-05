@@ -78,7 +78,21 @@ class DocumentsApi {
         await _client.post<Json>('/documents/$id/reextract'),
       );
 
-  Future<ScannedDocument> reject(String id, String reason) async =>
+  /// Correct what the engine read.
+  ///
+  /// **Only send the fields that changed.** The endpoint is a PATCH that reads
+  /// `model_fields_set`, so a key that is absent leaves that field alone while an
+  /// explicit `null` clears it. Passing the whole form back would work, but every
+  /// untouched field would be recorded as a human correction - and the point of the
+  /// record is to say which values a person actually checked.
+  Future<ScannedDocument> correct(String id, Map<String, Object?> fields) async =>
+      ScannedDocument.fromJson(
+        await _client.patch<Json>('/documents/$id/extracted', body: fields),
+      );
+
+  /// Mark a document not usable. The reason is optional - who rejected it and when are
+  /// recorded on the audit row either way.
+  Future<ScannedDocument> reject(String id, [String? reason]) async =>
       ScannedDocument.fromJson(
         await _client.post<Json>(
           '/documents/$id/reject',

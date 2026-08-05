@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Copy,
   FileText,
+  Pencil,
   RefreshCw,
   Trash2,
   Upload,
@@ -38,6 +39,7 @@ import { NumberInput } from '@/components/ui/NumberInput';
 import {
   type BillFromDocument,
   type Document,
+  type DocumentFieldsUpdate,
   type DocumentStatus,
   type DocumentSummary,
   documentsApi,
@@ -387,10 +389,15 @@ function DocumentReview({ id, onClose }: { id: string; onClose: () => void }) {
   });
 
   const reject = useMutation({
-    mutationFn: (reason: string) => documentsApi.reject(id, reason),
+    mutationFn: () => documentsApi.reject(id),
     onSuccess: () => {
       invalidate();
-      toast.success('Document rejected');
+      toast.success('Document rejected', {
+        description: 'It stays on file and in the audit trail, marked as not usable.',
+      });
+      // Back to the inbox, like Delete. Staying put left the screen showing the document
+      // exactly as before with a toast over it, which reads as "nothing happened".
+      onClose();
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Failed'),
   });
@@ -428,11 +435,21 @@ function DocumentReview({ id, onClose }: { id: string; onClose: () => void }) {
             <RefreshCw className="h-3.5 w-3.5" aria-hidden />
             Read again
           </Button>
+          {/* A plain yes/no. This used to prompt for a reason before it would do
+              anything, which put a text box in front of a decision that is usually
+              self-evident - a blank page, the wrong file - and collected "no" as often as
+              anything worth reading. Who rejected it and when are on the audit row
+              either way. */}
           <Button
             variant="ghost"
             onClick={() => {
-              const reason = window.prompt('Why is this document not usable?');
-              if (reason && reason.trim().length >= 3) reject.mutate(reason.trim());
+              if (
+                window.confirm(
+                  'Reject this document?\n\nIt will be marked as not usable and cannot be entered as a bill. The file and its recognised text are kept.',
+                )
+              ) {
+                reject.mutate();
+              }
             }}
             disabled={reject.isPending || document.status === 'confirmed'}
           >
@@ -502,8 +519,11 @@ function DocumentReview({ id, onClose }: { id: string; onClose: () => void }) {
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <ExtractedFields document={document} />
-        <FilePreview document={document} />
+        {/* Keyed by document id so both panels reset their own state when the reviewer
+            moves to another document - an in-progress edit or a "file is missing" from
+            the previous one must not survive into this one. */}
+        <ExtractedFields key={document.id} document={document} />
+        <FilePreview key={document.id} document={document} />
       </div>
 
       {document.status !== 'confirmed' && document.status !== 'rejected' && (
@@ -513,25 +533,106 @@ function DocumentReview({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
+/** The seven correctable fields, in the order a reviewer reads them off an invoice. */
+const EDITABLE_FIELDS = [
+  'supplier_name',
+  'supplier_gstin',
+  'invoice_number',
+  'invoice_date',
+  'subtotal',
+  'tax_amount',
+  'total_amount',
+] as const;
+
+type EditableField = (typeof EDITABLE_FIELDS)[number];
+
+/** The raw stored value per field - what an edit starts from and is compared against. */
+function rawValues(document: Document): Record<EditableField, string> {
+  return {
+    supplier_name: document.extracted_supplier_name ?? '',
+    supplier_gstin: document.extracted_supplier_gstin ?? '',
+    invoice_number: document.extracted_invoice_number ?? '',
+    // Already `YYYY-MM-DD` from the API, which is exactly what `<input type="date">`
+    // wants - no parsing, and no timezone to shift it across a day boundary.
+    invoice_date: document.extracted_invoice_date ?? '',
+    subtotal: document.extracted_subtotal ?? '',
+    tax_amount: document.extracted_tax_amount ?? '',
+    total_amount: document.extracted_total_amount ?? '',
+  };
+}
+
+/**
+ * What the engine read, and the reviewer's chance to disagree with it.
+ *
+ * **Editable, because OCR misreads and the alternative is worse.** A smudged 8 read as a
+ * 3, a GSTIN a character short, a total taken off the wrong line - before this, the only
+ * ways out were to re-upload a better scan or to carry the correction in your head to the
+ * confirm form, where it landed on the bill but left the document permanently claiming
+ * something false. That matters beyond tidiness: duplicate detection keys off
+ * `(GSTIN, invoice number)`, supplier matching keys off the GSTIN, and the review queue
+ * orders by a confidence score that should not keep punishing a field a human has fixed.
+ *
+ * Saving sends **only** the fields that actually changed, so an unedited field is not
+ * re-stamped as human-checked when someone corrects the one beside it.
+ */
 function ExtractedFields({ document }: { document: Document }) {
-  const rows: [string, string | null][] = [
-    ['supplier_name', document.extracted_supplier_name],
-    ['supplier_gstin', document.extracted_supplier_gstin],
-    ['invoice_number', document.extracted_invoice_number],
-    [
-      'invoice_date',
-      document.extracted_invoice_date ? formatDate(document.extracted_invoice_date) : null,
-    ],
-    ['subtotal', document.extracted_subtotal ? formatMoney(document.extracted_subtotal) : null],
-    [
-      'tax_amount',
-      document.extracted_tax_amount ? formatMoney(document.extracted_tax_amount) : null,
-    ],
-    [
-      'total_amount',
-      document.extracted_total_amount ? formatMoney(document.extracted_total_amount) : null,
-    ],
-  ];
+  const queryClient = useQueryClient();
+  const [drafts, setDrafts] = useState<Record<EditableField, string> | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const editable = document.status !== 'confirmed' && document.status !== 'rejected';
+
+  const save = useMutation({
+    mutationFn: (fields: DocumentFieldsUpdate) => documentsApi.correct(document.id, fields),
+    onSuccess: (updated) => {
+      setDrafts(null);
+      setFieldErrors({});
+      void queryClient.invalidateQueries({ queryKey: ['document', document.id] });
+      void queryClient.invalidateQueries({ queryKey: ['documents'] });
+      toast.success('Corrections saved', {
+        description: updated.is_duplicate
+          ? 'These values now match an earlier upload - check the duplicate warning.'
+          : 'The bill form below is pre-filled from the corrected values.',
+      });
+    },
+    onError: (error: unknown) => {
+      // A 422 already names the offending field and says why - the server sends
+      // `details.fields` as `{field: message}`. Showing only the envelope's summary
+      // ("One or more fields are invalid") throws that away and leaves the reviewer to
+      // guess which of seven boxes it meant. The message goes on the field itself, and
+      // the toast names the fields so it is legible even with the card scrolled away.
+      if (error instanceof ApiError && error.isValidation) {
+        const fields = error.fieldErrors;
+        setFieldErrors(fields);
+        toast.error('Check the highlighted fields', {
+          description: Object.entries(fields)
+            .map(([field, message]) => `${FIELD_LABELS[field] ?? field}: ${message}`)
+            .join(' · '),
+        });
+        return;
+      }
+      toast.error(error instanceof ApiError ? error.message : 'Could not save the corrections');
+    },
+  });
+
+  const commit = () => {
+    if (drafts === null) return;
+    setFieldErrors({});
+    const original = rawValues(document);
+    const changed: DocumentFieldsUpdate = {};
+    for (const field of EDITABLE_FIELDS) {
+      const next = drafts[field].trim();
+      if (next === original[field].trim()) continue;
+      // An emptied box means "the invoice does not carry this", which is `null` on the
+      // wire. `''` would be a 422 on the text fields and a wrong zero on the amounts.
+      changed[field] = next === '' ? null : next;
+    }
+    if (Object.keys(changed).length === 0) {
+      setDrafts(null);
+      return;
+    }
+    save.mutate(changed);
+  };
 
   return (
     <Card>
@@ -542,32 +643,120 @@ function ExtractedFields({ document }: { document: Document }) {
             ? 'Read from the PDF text layer, so the characters are exact.'
             : 'Recognised from an image, so the characters are a best guess.'
         }
-        action={<ConfidenceMeter value={document.overall_confidence} />}
+        action={
+          <div className="flex items-center gap-2">
+            {drafts === null ? (
+              <>
+                <ConfidenceMeter value={document.overall_confidence} />
+                {editable && (
+                  <Button variant="ghost" onClick={() => setDrafts(rawValues(document))}>
+                    <Pencil className="h-3.5 w-3.5" aria-hidden />
+                    Edit
+                  </Button>
+                )}
+              </>
+            ) : (
+              <>
+                <Button variant="ghost" onClick={() => setDrafts(null)} disabled={save.isPending}>
+                  Cancel
+                </Button>
+                <Button onClick={commit} disabled={save.isPending}>
+                  {save.isPending ? 'Saving…' : 'Save'}
+                </Button>
+              </>
+            )}
+          </div>
+        }
       />
       <CardBody className="pt-0">
-        <dl className="divide-border/60 divide-y text-[13px]">
-          {rows.map(([field, value]) => {
-            const confidence = document.field_confidence[field];
-            const low = document.low_confidence_fields.includes(field);
-            return (
-              <div key={field} className="flex items-baseline justify-between gap-3 py-2">
-                <dt className="text-content-muted">{FIELD_LABELS[field] ?? field}</dt>
-                <dd className="flex items-center gap-2 text-right">
-                  <span
-                    className={cn(
-                      'text-content tabular-nums',
-                      low && 'text-warning font-medium',
-                      !value && 'text-content-muted italic',
-                    )}
-                  >
-                    {value ?? 'Not found'}
+        {drafts !== null ? (
+          <div className="space-y-2.5">
+            {EDITABLE_FIELDS.map((field) => {
+              const update = (value: string) => {
+                // Clear this field's error as soon as it is touched: leaving it under a
+                // box the reviewer has just retyped makes a fixed field look broken.
+                setFieldErrors((current) => {
+                  if (!(field in current)) return current;
+                  const { [field]: _removed, ...rest } = current;
+                  return rest;
+                });
+                setDrafts((current) =>
+                  current === null ? current : { ...current, [field]: value },
+                );
+              };
+              const isAmount =
+                field === 'subtotal' || field === 'tax_amount' || field === 'total_amount';
+              return (
+                <label key={field} className="block">
+                  <span className="text-content-secondary mb-1 block text-[12px] font-medium">
+                    {FIELD_LABELS[field] ?? field}
                   </span>
-                  {confidence && <ConfidenceMeter value={confidence} compact />}
-                </dd>
-              </div>
-            );
-          })}
-        </dl>
+                  {isAmount ? (
+                    <NumberInput
+                      value={drafts[field]}
+                      onValueChange={update}
+                      placeholder="Not found"
+                      error={fieldErrors[field]}
+                    />
+                  ) : (
+                    <Input
+                      type={field === 'invoice_date' ? 'date' : 'text'}
+                      value={drafts[field]}
+                      onChange={(event) => update(event.target.value)}
+                      placeholder={field === 'supplier_gstin' ? '27AABCU9603R1ZM' : 'Not found'}
+                      error={fieldErrors[field]}
+                      {...(field === 'supplier_gstin'
+                        ? { maxLength: 15, className: 'font-mono uppercase' }
+                        : {})}
+                    />
+                  )}
+                </label>
+              );
+            })}
+            <p className="text-content-muted pt-1 text-[12px]">
+              Clearing a box records that the invoice does not carry that field. Corrections change
+              this document only - the bill is still created from the form below, which you approve.
+            </p>
+          </div>
+        ) : (
+          <dl className="divide-border/60 divide-y text-[13px]">
+            {EDITABLE_FIELDS.map((field) => {
+              const value = displayValue(document, field);
+              const confidence = document.field_confidence[field];
+              const low = document.low_confidence_fields.includes(field);
+              const corrected = document.corrected_fields.includes(field);
+              return (
+                <div key={field} className="flex items-baseline justify-between gap-3 py-2">
+                  <dt className="text-content-muted">{FIELD_LABELS[field] ?? field}</dt>
+                  <dd className="flex items-center gap-2 text-right">
+                    <span
+                      className={cn(
+                        'text-content tabular-nums',
+                        low && 'text-warning font-medium',
+                        !value && 'text-content-muted italic',
+                      )}
+                    >
+                      {value ?? 'Not found'}
+                    </span>
+                    {/* A corrected field's confidence is 1 because a person typed it. Showing
+                        "100%" there would claim the engine was certain, which is the opposite
+                        of what happened. */}
+                    {corrected ? (
+                      <span
+                        className="text-success w-9 shrink-0 text-right text-[11px]"
+                        title="Edited by a reviewer"
+                      >
+                        Edited
+                      </span>
+                    ) : (
+                      confidence && <ConfidenceMeter value={confidence} compact />
+                    )}
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+        )}
 
         <div className="border-border mt-3 border-t pt-3 text-[12px]">
           {document.totals_reconcile ? (
@@ -586,6 +775,26 @@ function ExtractedFields({ document }: { document: Document }) {
       </CardBody>
     </Card>
   );
+}
+
+/** One field, formatted for reading rather than for editing. */
+function displayValue(document: Document, field: EditableField): string | null {
+  switch (field) {
+    case 'supplier_name':
+      return document.extracted_supplier_name;
+    case 'supplier_gstin':
+      return document.extracted_supplier_gstin;
+    case 'invoice_number':
+      return document.extracted_invoice_number;
+    case 'invoice_date':
+      return document.extracted_invoice_date ? formatDate(document.extracted_invoice_date) : null;
+    case 'subtotal':
+      return document.extracted_subtotal ? formatMoney(document.extracted_subtotal) : null;
+    case 'tax_amount':
+      return document.extracted_tax_amount ? formatMoney(document.extracted_tax_amount) : null;
+    case 'total_amount':
+      return document.extracted_total_amount ? formatMoney(document.extracted_total_amount) : null;
+  }
 }
 
 /**
@@ -609,11 +818,10 @@ function FilePreview({ document }: { document: Document }) {
     let objectUrl: string | null = null;
     let cancelled = false;
 
-    // Reset both, or switching documents shows the previous one's outcome until this
-    // fetch lands - a stale "file is missing" against a document that is perfectly fine.
-    setUrl(null);
-    setFailure(null);
-
+    // No state reset here: the caller keys this component by document id, so moving to
+    // another document mounts a fresh one rather than reusing this one's `url` and
+    // `failure`. Clearing them in the effect body would be a second render on every
+    // mount to reach the state it already started in.
     void documentsApi
       .fileUrl(document.id)
       .then((created) => {

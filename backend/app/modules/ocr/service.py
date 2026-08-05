@@ -771,7 +771,7 @@ class DocumentService:
         self,
         organization_id: uuid.UUID,
         document_id: uuid.UUID,
-        reason: str,
+        reason: str | None,
         actor: User,
         ctx: RequestContext | None = None,
     ) -> Document:
@@ -784,7 +784,10 @@ class DocumentService:
             )
 
         document.status = DocumentStatus.REJECTED
-        document.notes = reason
+        # Only when one was given. Overwriting an existing note with `None` would erase
+        # something a person wrote in favour of nothing.
+        if reason is not None:
+            document.notes = reason
         document.reviewed_by_user_id = actor.id
         document.reviewed_at = dt.datetime.now(dt.UTC)
 

@@ -192,7 +192,16 @@ class DocumentFieldsUpdate(BaseSchema):
 
 
 class RejectDocumentRequest(BaseSchema):
-    reason: Annotated[str, Field(min_length=3, max_length=500)]
+    """Why a document is not usable, if the reviewer cares to say.
+
+    **Optional, deliberately.** It used to be required, and the cost was a text prompt in
+    front of a decision that is usually obvious - a blank page, a duplicate, the wrong
+    file - so the reason it collected was as often "no" or "asdf" as anything worth
+    keeping. What actually has to survive is *that* it was rejected, by whom, and when,
+    and all three are on the audit row regardless of what is typed here.
+    """
+
+    reason: Annotated[str, Field(min_length=3, max_length=500)] | None = None
 
 
 class ReviewNotesRequest(BaseSchema):

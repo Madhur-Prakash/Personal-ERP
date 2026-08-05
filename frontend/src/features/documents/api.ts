@@ -70,6 +70,10 @@ export interface Document extends DocumentSummary {
 
   field_confidence: Record<string, Confidence>;
   low_confidence_fields: string[];
+  /** Fields a human has typed over. Their confidence is 1 because a person set them,
+   *  which is not the same claim as "the engine was sure" - only this list separates
+   *  the two. */
+  corrected_fields: string[];
 
   failure_code: string | null;
   failure_message: string | null;
@@ -105,6 +109,25 @@ export interface UploadResult {
 export interface ConfirmResult {
   document: Document;
   bill: Bill;
+}
+
+/**
+ * Corrections to what the engine read.
+ *
+ * **Omission and `null` mean different things**, and the endpoint is a PATCH precisely
+ * so they can: a key that is absent leaves that field alone, while `null` clears it.
+ * Build this by including only the fields the reviewer actually changed - sending the
+ * whole form back would rewrite six fields to say what they already said, each one
+ * marked as a human correction.
+ */
+export interface DocumentFieldsUpdate {
+  supplier_name?: string | null;
+  supplier_gstin?: string | null;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  subtotal?: Money | null;
+  tax_amount?: Money | null;
+  total_amount?: Money | null;
 }
 
 export interface BillFromDocument {
@@ -153,9 +176,16 @@ export const documentsApi = {
   },
 
   reextract: (id: string) => api.post<Document>(`/documents/${id}/reextract`),
+
+  /** Correct what was read. Send only the fields that changed - see the type. */
+  correct: (id: string, fields: DocumentFieldsUpdate) =>
+    api.patch<Document>(`/documents/${id}/extracted`, fields),
+
   confirm: (id: string, bill: BillFromDocument) =>
     api.post<ConfirmResult>(`/documents/${id}/confirm`, { bill }),
-  reject: (id: string, reason: string) => api.post<Document>(`/documents/${id}/reject`, { reason }),
+  /** Mark a document not usable. The reason is optional - who and when are audited anyway. */
+  reject: (id: string, reason?: string) =>
+    api.post<Document>(`/documents/${id}/reject`, { reason: reason ?? null }),
   remove: (id: string) => api.delete<{ message: string }>(`/documents/${id}`),
 
   /**

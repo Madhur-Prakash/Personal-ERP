@@ -394,10 +394,17 @@ async def reject_document(
     ctx: RequestCtx,
     _: Annotated[None, Depends(require_permission(Permission.DOCUMENT_WRITE))],
 ) -> DocumentRead:
-    """Mark a document as not usable, with a reason.
+    """Mark a document as not usable.
 
-    A reason is required. "Rejected" with no explanation tells the next person
-    nothing, and this row is the only record of why an invoice was not entered.
+    **Rejecting is not deleting**, and the difference is the point of having both. A
+    rejected document keeps its file, its recognised text and its place in the audit
+    trail - it is a decision on the record, reversible by uploading the file again, and
+    the answer to "what happened to that invoice?" months later. Deleting removes it from
+    the inbox altogether and is refused outright once the document is behind a posted
+    bill, because that file is the evidence for a ledger entry.
+
+    A reason is optional (see :class:`RejectDocumentRequest`). Who rejected it and when
+    are recorded either way.
     """
     document = await service.reject(organization_id, document_id, data.reason, user, ctx)
     return _detail(document)
