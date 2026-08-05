@@ -144,6 +144,13 @@ class Settings(BaseSettings):
     cors_origins: CsvList = Field(default_factory=lambda: ["http://localhost:5173"])
     allowed_hosts: CsvList = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
 
+    #: The hostname Render serves this service at, injected by the platform itself.
+    #:
+    #: Read only to fold into :attr:`allowed_hosts` - see :meth:`_allow_platform_hostname`.
+    #: Nothing else should use it: a deployment on any other platform leaves it unset, and
+    #: code that assumes a value here would work in exactly one place.
+    render_external_hostname: str | None = None
+
     # ---- No edge-gateway secret ---------------------------------------------
     # There was a `GATEWAY_SECRET` here: a value an nginx in front of this service would
     # stamp on every forwarded request, which the backend then required. It is gone,
@@ -308,8 +315,19 @@ class Settings(BaseSettings):
     #: token-churning loop.
     rate_limit_token_exchange: str
 
-   # rate limit for health endpoints. The only budget here with a working default
-    rate_limit_health: str 
+    #: ``/health``, ``/health/live`` and ``/health/ready``.
+    #:
+    #: Required, like every other budget here, so no deployment can silently run these
+    #: unmetered - and required means required *everywhere the app boots*, including a
+    #: platform dashboard, where there is no ``.env`` to fall back on. Omit it there and
+    #: the process refuses to start.
+    #:
+    #: Choose the number with the probe interval in hand. ``5/minute`` allows one probe
+    #: every 12 seconds per caller; anything faster collects a 429, which the platform
+    #: reads as unhealthy, restarts the instance over, and throttles its replacement just
+    #: as quickly. The endpoint worth protecting is ``/ready``, which pings PostgreSQL and
+    #: Redis on every call.
+    rate_limit_health: str
 
     # ---- Email (Gmail API) --------------------------------------------------
     gmail_credentials_b64: str | None = None
@@ -560,6 +578,33 @@ class Settings(BaseSettings):
             for name, spec in tiers.items()
             if (rate := _rate_per_second(spec)) is not None and rate > ip_rate
         }
+
+    @model_validator(mode="after")
+    def _allow_platform_hostname(self) -> Self:
+        """Add the platform's own hostname to :attr:`allowed_hosts` when it provides one.
+
+        **This closes the worst deployment failure this configuration has.** In production
+        ``TrustedHostMiddleware`` refuses any request whose ``Host`` is not on the list,
+        before routing, with a plain ``400 Invalid host header``. Deploy to Render without
+        remembering ``ALLOWED_HOSTS`` and the result is not an obvious outage: the health
+        probes answer 200 (they are exempt - see
+        :class:`~app.core.middleware.ProbeExemptTrustedHostMiddleware`), the platform
+        reports the service healthy, and **every single API call returns 400**. The app
+        looks up and is entirely unusable, and nothing in the logs names the variable.
+
+        ``RENDER_EXTERNAL_HOSTNAME`` is set by Render on every service and is exactly the
+        name it serves this process at. Trusting it is not a widening of the control: it
+        comes from the platform, not from a request, so it is not something a caller can
+        influence - and refusing the hostname the platform is *actually* using was never
+        protecting anything.
+
+        Appended rather than substituted, so an explicit ``ALLOWED_HOSTS`` (a custom
+        domain, a staging alias) keeps every entry it lists.
+        """
+        platform_host = (self.render_external_hostname or "").strip()
+        if platform_host and platform_host not in self.allowed_hosts:
+            self.allowed_hosts.append(platform_host)
+        return self
 
     @model_validator(mode="after")
     def _validate_rate_limit_budgets(self) -> Self:

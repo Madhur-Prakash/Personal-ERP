@@ -28,9 +28,10 @@ every call, which makes it the cheapest way to make this deployment do real work
   inspects the signature and raises ``No "request" or "websocket" argument`` at import
   time otherwise, which fails the process at startup rather than at the endpoint.
 
-The budget is :attr:`~app.core.config.Settings.rate_limit_health`, which is defaulted
-rather than required, for the reason given where it is declared: an orchestrator's
-liveness probe is a poor thing to gate on an environment variable being present.
+The budget is :attr:`~app.core.config.Settings.rate_limit_health`, which is required like
+every other budget - so it must be set wherever this boots, a platform dashboard
+included. Size it against the probe interval rather than against a user's patience: the
+caller here is a machine on a timer, and a 429 it collects is read as "unhealthy".
 """
 
 from __future__ import annotations
