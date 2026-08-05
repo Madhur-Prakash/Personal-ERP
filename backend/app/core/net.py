@@ -31,7 +31,6 @@ headers are trusted, and why the shipped Dockerfile no longer passes ``*``.
 
 from __future__ import annotations
 
-import hmac
 from typing import TYPE_CHECKING, Final
 
 from app.core.config import settings
@@ -100,17 +99,14 @@ def _strip_port(value: str) -> str:
     return value
 
 
-def secrets_match(supplied: str | None, expected: str) -> bool:
-    """Constant-time comparison of a header value against a configured secret.
+# `secrets_match` lived here: a constant-time comparison of a request header against a
+# configured secret. Its only caller was the gateway-key check, which is gone, so it went
+# with it rather than staying as a utility nothing uses.
+#
+# If a header ever needs comparing against a secret again, the requirement it existed for
+# still holds and is one stdlib call: `hmac.compare_digest(supplied, expected)` on encoded
+# bytes, never `==`. String `==` short-circuits at the first differing byte, which leaks the
+# length of the matching prefix through response timing - enough, over enough requests, to
+# recover the secret one byte at a time.
 
-    ``==`` on strings short-circuits at the first differing byte, which leaks the
-    length of the matching prefix through response timing. Over enough requests that is
-    enough to recover the secret one byte at a time, so the comparison has to be
-    length-independent even though the values are compared millions of times.
-    """
-    if not supplied:
-        return False
-    return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
-
-
-__all__ = ["UNKNOWN_IP", "client_ip", "peer_ip", "secrets_match"]
+__all__ = ["UNKNOWN_IP", "client_ip", "peer_ip"]

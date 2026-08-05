@@ -23,12 +23,11 @@ from typing import Any, ClassVar
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from pydantic import SecretStr
 from starlette.requests import Request
 
 from app.core.config import Environment, settings
 from app.core.middleware import DOCS_PATHS, SecurityHeadersMiddleware
-from app.core.net import client_ip, secrets_match
+from app.core.net import client_ip
 from app.core.ratelimit import (
     FALLBACK_BUDGET,
     RateLimiter,
@@ -37,8 +36,6 @@ from app.core.ratelimit import (
     parse_budget,
 )
 from app.main import create_app
-
-GATEWAY_SECRET = "test-gateway-secret-long-enough-to-be-accepted-0123456789"
 
 
 # =============================================================================
@@ -260,47 +257,11 @@ class TestDocsBlocking:
 
 
 # =============================================================================
-# Gateway
+# Origin guard: methods, probes, preflights
 # =============================================================================
-class TestGatewayGuard:
-    async def test_not_enforced_when_no_secret_is_set(self, probe: AsyncClient) -> None:
-        assert settings.gateway_enforced is False
+class TestOriginGuard:
+    async def test_health_probes_pass(self, probe: AsyncClient) -> None:
         assert (await probe.get("/health/live")).status_code == 200
-
-    async def test_request_without_the_header_is_refused(self, patch_settings: Any) -> None:
-        patch_settings(gateway_secret=SecretStr(GATEWAY_SECRET))
-        async with await _client() as http:
-            response = await http.get("/api/v1/auth/password-policy")
-
-        assert response.status_code == 404
-        assert response.json()["error"]["code"] == "not_found"
-
-    async def test_request_with_the_header_passes(self, patch_settings: Any) -> None:
-        patch_settings(gateway_secret=SecretStr(GATEWAY_SECRET))
-        async with await _client(**{settings.gateway_header: GATEWAY_SECRET}) as http:
-            response = await http.get("/api/v1/auth/password-policy")
-
-        assert response.status_code == 200
-
-    async def test_wrong_secret_is_refused(self, patch_settings: Any) -> None:
-        patch_settings(gateway_secret=SecretStr(GATEWAY_SECRET))
-        async with await _client(**{settings.gateway_header: "not-the-secret"}) as http:
-            assert (await http.get("/api/v1/auth/password-policy")).status_code == 404
-
-    async def test_a_prefix_of_the_secret_is_refused(self, patch_settings: Any) -> None:
-        """Guards the constant-time comparison against being replaced with `startswith`."""
-        patch_settings(gateway_secret=SecretStr(GATEWAY_SECRET))
-        async with await _client(**{settings.gateway_header: GATEWAY_SECRET[:-1]}) as http:
-            assert (await http.get("/api/v1/auth/password-policy")).status_code == 404
-
-    async def test_health_probes_are_exempt(self, patch_settings: Any) -> None:
-        """A container healthcheck reaches the app directly, with no proxy to stamp it.
-
-        Gating it would make every deployment fail its own healthcheck and roll back.
-        """
-        patch_settings(gateway_secret=SecretStr(GATEWAY_SECRET))
-        async with await _client() as http:
-            assert (await http.get("/health/live")).status_code == 200
 
     @pytest.mark.parametrize("method", ["TRACE", "TRACK"])
     async def test_dangerous_methods_refused(self, probe: AsyncClient, method: str) -> None:
@@ -308,22 +269,38 @@ class TestGatewayGuard:
         assert response.status_code == 405
         assert response.json()["error"]["code"] == "method_not_allowed"
 
+    async def test_a_non_browser_request_passes(self, probe: AsyncClient) -> None:
+        """No `Origin`, no `Referer` - curl, a script, a healthcheck.
 
-class TestPreflightSurvivesTheGatewayGuard:
-    """A CORS preflight must reach CORSMiddleware even with the gateway enforced.
+        Allowed on purpose. This guard is a browser control and cannot say anything about a
+        caller that simply omits the headers; refusing them would break every legitimate
+        non-browser client. Authentication and rate limiting are what constrain those.
+        """
+        assert (await probe.get("/api/v1/auth/password-policy")).status_code == 200
 
-    The regression these guard against took the whole frontend down while looking like a
-    CORS misconfiguration. A preflight sends no custom headers *by specification* - its job
-    is to ask whether ``X-Gateway-Key`` may be sent - so gating it on that header is a
-    condition no browser can satisfy. Worse, the guard sits outside CORSMiddleware, so the
-    rejection went out with no ``Access-Control-Allow-Origin`` and the browser reported a
-    CORS error for what was a gateway problem.
 
-    Not development-only: it breaks any edge that forwards ``OPTIONS`` without stamping the
-    header, which most proxy configurations do by default.
+class TestPreflightReachesCors:
+    """A CORS preflight must reach CORSMiddleware, whatever guards sit in front of it.
+
+    These exist because of a regression that took the entire frontend down while looking
+    like a CORS misconfiguration. A ``GATEWAY_SECRET`` check used to run here, outside
+    CORSMiddleware, and a preflight cannot carry a custom header - by specification, since
+    its whole job is to *ask* whether one may be sent. So it was rejected, the rejection went
+    out with no ``Access-Control-Allow-Origin``, and the browser reported::
+
+        Response to preflight request doesn't pass access control check:
+        No 'Access-Control-Allow-Origin' header is present
+
+    which sends you to the CORS configuration, where nothing is wrong.
+
+    That check is gone now, and the origin check below it never applied to ``OPTIONS``
+    anyway - so these tests currently pass without the explicit exemption in
+    ``OriginGuardMiddleware``. They are kept as the statement of the invariant: **nothing
+    outside CORSMiddleware may reject a preflight.** They are what fails if a future guard
+    forgets it.
     """
 
-    PREFLIGHT = {
+    PREFLIGHT: ClassVar[dict[str, str]] = {
         "Origin": "http://localhost:5173",
         "Access-Control-Request-Method": "POST",
         "Access-Control-Request-Headers": "content-type",
@@ -333,10 +310,7 @@ class TestPreflightSurvivesTheGatewayGuard:
         self, patch_settings: Any
     ) -> None:
         """The exact request the browser makes before POSTing to /auth/login."""
-        patch_settings(
-            gateway_secret=SecretStr(GATEWAY_SECRET),
-            cors_origins=["http://localhost:5173"],
-        )
+        patch_settings(cors_origins=["http://localhost:5173"])
         async with await _client() as http:
             response = await http.options("/api/v1/auth/login", headers=self.PREFLIGHT)
 
@@ -348,70 +322,41 @@ class TestPreflightSurvivesTheGatewayGuard:
 
     async def test_preflight_for_refresh_passes(self, patch_settings: Any) -> None:
         """`/auth/refresh` fires on page load, so it failed before login was even tried."""
-        patch_settings(
-            gateway_secret=SecretStr(GATEWAY_SECRET),
-            cors_origins=["http://localhost:5173"],
-        )
+        patch_settings(cors_origins=["http://localhost:5173"])
         async with await _client() as http:
             response = await http.options("/api/v1/auth/refresh", headers=self.PREFLIGHT)
 
         assert response.status_code == 200
         assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
 
-    async def test_the_real_request_is_still_refused_without_the_header(
-        self, patch_settings: Any
-    ) -> None:
-        """The point of the exemption: it covers the question, never the action.
+    async def test_the_gateway_header_is_no_longer_advertised(self, patch_settings: Any) -> None:
+        """The preflight answer must not still offer a header nothing reads.
 
-        If this ever passes, exempting preflights has become a hole rather than a fix -
-        the guarantee is that nothing which *does* anything gets through unstamped.
+        Guards the other half of the removal: `allow_headers` used to include
+        `settings.gateway_header`, and leaving it there would tell every client to keep
+        sending a credential the server has stopped checking.
         """
-        patch_settings(
-            gateway_secret=SecretStr(GATEWAY_SECRET),
-            cors_origins=["http://localhost:5173"],
-        )
-        async with await _client(Origin="http://localhost:5173") as http:
-            response = await http.post(
+        patch_settings(cors_origins=["http://localhost:5173"])
+        async with await _client() as http:
+            response = await http.options(
                 "/api/v1/auth/login",
-                json={"email": "someone@example.com", "password": "irrelevant"},
+                headers={**self.PREFLIGHT, "Access-Control-Request-Headers": "authorization"},
             )
 
-        assert response.status_code == 404
-        assert response.json()["error"]["code"] == "not_found"
-
-    async def test_a_bare_options_is_not_treated_as_a_preflight(
-        self, patch_settings: Any
-    ) -> None:
-        """No `Origin`, no `Access-Control-Request-Method` - so not a preflight.
-
-        Keeps the exemption narrow. `OPTIONS` on its own is a caller asking what an endpoint
-        supports, which is exactly the reconnaissance the guard exists to refuse.
-        """
-        patch_settings(gateway_secret=SecretStr(GATEWAY_SECRET))
-        async with await _client() as http:
-            assert (await http.options("/api/v1/auth/login")).status_code == 404
-
-    async def test_options_with_an_origin_but_no_requested_method_is_not_a_preflight(
-        self, patch_settings: Any
-    ) -> None:
-        """Both headers are required, so `Origin` alone cannot be used to slip past."""
-        patch_settings(gateway_secret=SecretStr(GATEWAY_SECRET))
-        async with await _client(Origin="http://localhost:5173") as http:
-            assert (await http.options("/api/v1/auth/login")).status_code == 404
+        allowed = response.headers.get("access-control-allow-headers", "").lower()
+        assert "authorization" in allowed
+        assert "gateway" not in allowed
 
     async def test_a_foreign_origin_preflight_is_answered_but_not_allowed(
         self, patch_settings: Any
     ) -> None:
         """Reaching CORSMiddleware is not the same as being permitted by it.
 
-        The guard stops filtering here; CORS decides. An origin outside `CORS_ORIGINS` gets
-        a response with no `Access-Control-Allow-Origin`, which is what makes the browser
-        block the request that would have followed.
+        The guard stops filtering; CORS decides. An origin outside `CORS_ORIGINS` gets a
+        response with no `Access-Control-Allow-Origin`, which is what makes the browser block
+        the request that would have followed.
         """
-        patch_settings(
-            gateway_secret=SecretStr(GATEWAY_SECRET),
-            cors_origins=["http://localhost:5173"],
-        )
+        patch_settings(cors_origins=["http://localhost:5173"])
         async with await _client() as http:
             response = await http.options(
                 "/api/v1/auth/login",
@@ -420,14 +365,30 @@ class TestPreflightSurvivesTheGatewayGuard:
 
         assert "access-control-allow-origin" not in response.headers
 
-    async def test_preflight_passes_with_the_gateway_disabled_too(self) -> None:
-        """The ordinary local case, so the exemption is not silently secret-dependent."""
-        assert settings.gateway_enforced is False
-        async with await _client() as http:
-            response = await http.options("/api/v1/auth/login", headers=self.PREFLIGHT)
+    async def test_a_preflight_is_recognised_only_with_both_headers(self) -> None:
+        """`is_cors_preflight` is the same three-part test CORSMiddleware uses.
 
-        assert response.status_code == 200
-        assert "access-control-allow-origin" in response.headers
+        Asserted on the predicate rather than over HTTP, because with no guard rejecting
+        `OPTIONS` any more, the two cases are indistinguishable end to end - and the
+        predicate is what a future guard would call.
+        """
+        from starlette.datastructures import Headers
+        from starlette.requests import Request
+
+        from app.core.middleware import is_cors_preflight
+
+        def request(method: str, **headers: str) -> Request:
+            raw = Headers(headers).raw
+            return Request({"type": "http", "method": method, "headers": raw, "path": "/"})
+
+        assert is_cors_preflight(
+            request("OPTIONS", origin="http://x", **{"access-control-request-method": "POST"})
+        )
+        assert not is_cors_preflight(request("OPTIONS"))
+        assert not is_cors_preflight(request("OPTIONS", origin="http://x"))
+        assert not is_cors_preflight(
+            request("POST", origin="http://x", **{"access-control-request-method": "POST"})
+        )
 
 
 class TestOriginEnforcement:
@@ -478,8 +439,10 @@ class TestOriginEnforcement:
     async def test_no_origin_header_is_allowed(self, probe: AsyncClient) -> None:
         """The desktop app, curl, and a backup script all send neither header.
 
-        Refusing them would break every non-browser client, and it is not what the
-        origin check is for - the gateway secret is the control that constrains those.
+        Refusing them would break every non-browser client, and it is not what this check
+        is for. What constrains those callers is authentication and rate limiting - there is
+        no header-based control that can distinguish them, which is precisely why the
+        gateway secret that used to sit here needed a proxy rather than a client.
         """
         response = await probe.post("/api/v1/auth/login", json={})
         assert response.status_code == 422
@@ -596,21 +559,6 @@ class TestClientIp:
 
     def test_empty_header_falls_back_to_peer(self) -> None:
         assert client_ip(_request({"X-Forwarded-For": "  ,  "})) == "10.0.0.5"
-
-
-class TestSecretsMatch:
-    def test_equal_matches(self) -> None:
-        assert secrets_match("abc", "abc")
-
-    def test_different_does_not(self) -> None:
-        assert not secrets_match("abc", "abd")
-
-    def test_prefix_does_not(self) -> None:
-        assert not secrets_match("ab", "abc")
-
-    def test_missing_does_not(self) -> None:
-        assert not secrets_match(None, "abc")
-        assert not secrets_match("", "abc")
 
 
 # =============================================================================
@@ -1167,7 +1115,6 @@ class TestProductionGuardrails:
         "cors_origins": ["https://app.example.com"],
         "allowed_hosts": ["app.example.com"],
         "frontend_url": "https://app.example.com",
-        "gateway_secret": "g" * 48,
         "postgres_password": "a-real-password",
         "rate_limit_enabled": True,
         "enforce_origin": True,
@@ -1185,8 +1132,6 @@ class TestProductionGuardrails:
     @pytest.mark.parametrize(
         ("overrides", "expected"),
         [
-            ({"gateway_secret": None}, "GATEWAY_SECRET"),
-            ({"gateway_secret": "short"}, "at least 32"),
             ({"debug": True}, "DEBUG"),
             ({"cors_origins": ["*"]}, "CORS_ORIGINS"),
             ({"cors_origins": ["http://app.example.com"]}, "https://"),
@@ -1204,14 +1149,9 @@ class TestProductionGuardrails:
         with pytest.raises(ValueError, match=expected):
             self._build(**overrides)
 
-    def test_direct_access_can_be_opted_into_explicitly(self) -> None:
-        """The escape hatch for a deployment where this service *is* the edge."""
-        built = self._build(gateway_secret=None, allow_direct_backend_access=True)
-        assert built.gateway_enforced is False
-
     def test_development_is_not_subject_to_any_of_this(self) -> None:
         from app.core.config import Settings
 
         built = Settings(environment="development", _env_file=None)
         assert built.debug is True
-        assert built.gateway_enforced is False
+        assert built.enforce_origin is True

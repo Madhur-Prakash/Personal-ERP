@@ -4,9 +4,8 @@ Order is significant. Starlette runs middleware outermost-first on the way in an
 innermost-first on the way out, so registration order in :mod:`app.main` is reversed
 relative to execution. The stack is arranged so that:
 
-* the cheapest rejections happen first - a request that will be refused for its host,
-  its size, or its lack of a gateway credential must not reach Redis, let alone the
-  database;
+* the cheapest rejections happen first - a request that will be refused for its host, its
+  method, its size, or its origin must not reach Redis, let alone the database;
 * request-id assignment happens before anything that can reject, so every refusal is
   correlatable in the logs;
 * rate limiting runs before any handler work, so a flood costs one Redis round trip;
@@ -31,7 +30,7 @@ from starlette.types import ASGIApp
 
 from app.core.config import settings
 from app.core.logging import clear_log_context, get_logger, set_log_context
-from app.core.net import client_ip, secrets_match
+from app.core.net import client_ip
 from app.core.ratelimit import RateLimiter, Tier, budgets, classify, parse_budget
 
 log = get_logger(__name__)
@@ -350,48 +349,33 @@ class DocsGuardMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-class GatewayGuardMiddleware(BaseHTTPMiddleware):
-    """Require that a request arrived through our own edge, and from our own frontend.
-
-    Two independent checks, because they defend against different callers.
-
-    **The gateway secret** answers "did this come through our proxy?". The edge stamps
-    :attr:`~app.core.config.Settings.gateway_header` on everything it forwards; the
-    backend refuses anything without it. This is the only one of the two that constrains
-    a non-browser caller, and it works precisely because the secret lives on the server
-    side - see the note on :attr:`~app.core.config.Settings.gateway_secret` for why no
-    header a shipped client holds could do this job.
+class OriginGuardMiddleware(BaseHTTPMiddleware):
+    """Refuse dangerous methods, and state-changing requests from a page we do not own.
 
     **The origin check** answers "did this browser page come from our frontend?".
     ``Origin`` and ``Referer`` are set by the browser and cannot be overridden by page
-    script, so a state-changing request from ``evil.example`` is identifiable and
-    refused. It says nothing about ``curl``, which simply omits both - that is the
-    gateway secret's job, and conflating the two leads to believing either one is
-    sufficient alone.
+    script, so a state-changing request from ``evil.example`` is identifiable and refused.
+    Defence in depth behind ``SameSite=Strict`` on the refresh cookie.
 
-    A cross-origin request with **neither** header is allowed through when the gateway
-    check is satisfied. Refusing it would break every legitimate non-browser client: the
-    desktop app, a healthcheck, a backup script, ``curl`` in an operator's terminal.
+    **It says nothing about a non-browser caller,** and cannot. ``curl`` simply omits both
+    headers, so a request with neither is allowed through - refusing it would break every
+    legitimate non-browser client: a healthcheck, a backup script, an operator's terminal.
+    What constrains those is authentication and rate limiting, not this.
 
-    Two things are exempt from both checks, for the same underlying reason - the caller
-    physically cannot satisfy them:
+    That gap used to be covered by a second check in this class - a ``GATEWAY_SECRET`` an
+    nginx in front of the service stamped on every forwarded request. It is gone, because
+    this service is the public edge rather than something sitting behind a proxy we
+    configure. See the note where the setting was declared in
+    :mod:`app.core.config` for what it did and did not buy, and what re-adding it would
+    require. Do not read its absence as this check having grown to cover more: **the origin
+    check is a browser-only control, and always was.**
 
-    * **Health probes.** A container healthcheck reaches the app directly on localhost, with
-      no proxy to stamp anything, so gating it would make every deployment roll back.
-    * **CORS preflights.** A preflight sends no custom headers by specification - it exists
-      to *ask* whether one may be sent - so requiring the gateway header on it is a condition
-      no browser can meet. See the comment at the check itself for why exempting it concedes
-      nothing, and what the symptom looks like when it is not exempt (a CORS error that sends
-      you looking at the CORS configuration, for a gateway problem).
+    Two things are exempt, for the same underlying reason - the caller cannot satisfy them:
 
-    **A browser cannot satisfy the gateway check on its own, and is not meant to.** The
-    secret lives server-side and the edge stamps it; a value shipped in a page's JavaScript
-    would be readable by anyone who opened devtools, which is exactly why this check is about
-    the *edge* rather than the client. The consequence is worth stating plainly because it
-    surfaces as a confusing 404: **serving the frontend from a dev server with no proxy in
-    front, while ``GATEWAY_SECRET`` is set, means every API call is refused.** Local
-    development leaves the secret blank - see the note on
-    :attr:`~app.core.config.Settings.gateway_secret`.
+    * **Health probes.** A container healthcheck reaches the app directly on localhost, so
+      gating it would make every deployment fail its own healthcheck and roll back.
+    * **CORS preflights.** A preflight is a question, not a state change, and it must reach
+      :class:`~starlette.middleware.cors.CORSMiddleware` to be answered at all.
     """
 
     async def dispatch(
@@ -415,21 +399,19 @@ class GatewayGuardMiddleware(BaseHTTPMiddleware):
         if path.startswith(PROBE_PREFIXES):
             return await call_next(request)
 
+        # A CORS preflight goes straight through to CORSMiddleware.
+        #
+        # Redundant with the `UNSAFE_METHODS` test below - `OPTIONS` is not in that set - and
+        # kept deliberately, as a stated invariant rather than an accident of which methods
+        # happen to be listed where. Nothing outside CORSMiddleware may reject a preflight: a
+        # preflight is a *question*, changes nothing, and this guard runs outside CORS, so any
+        # rejection here goes out with no `Access-Control-Allow-Origin` at all. The browser
+        # then reports a CORS failure, which sends you to the CORS configuration, which is
+        # correct - and the real cause is here. That already happened once, with a
+        # `GATEWAY_SECRET` check a preflight could not possibly satisfy, and it took the whole
+        # frontend down. Two lines to make the next such check obviously wrong.
         if is_cors_preflight(request):
             return await call_next(request)
-
-        if settings.gateway_enforced and not self._gateway_ok(request):
-            log.warning(
-                "request rejected: missing or invalid gateway credential",
-                extra={
-                    "path": path,
-                    "method": request.method,
-                    "client_ip": getattr(request.state, "client_ip", None),
-                },
-            )
-            # 404, for the same reason as the docs guard: a probe of the backend's real
-            # address learns nothing about whether there is an API here at all.
-            return _error(request, status_code=404, code="not_found", message="Not Found")
 
         if settings.enforce_origin and request.method in UNSAFE_METHODS:
             rejection = self._origin_rejection(request)
@@ -437,15 +419,6 @@ class GatewayGuardMiddleware(BaseHTTPMiddleware):
                 return rejection
 
         return await call_next(request)
-
-    @staticmethod
-    def _gateway_ok(request: Request) -> bool:
-        secret = settings.gateway_secret
-        if secret is None:  # unreachable while `gateway_enforced` is true
-            return True
-        return secrets_match(
-            request.headers.get(settings.gateway_header), secret.get_secret_value()
-        )
 
     def _origin_rejection(self, request: Request) -> JSONResponse | None:
         """Refuse a state-changing request from a browser page we do not own.
@@ -720,7 +693,7 @@ __all__ = [
     "REQUEST_ID_HEADER",
     "BodySizeLimitMiddleware",
     "DocsGuardMiddleware",
-    "GatewayGuardMiddleware",
+    "OriginGuardMiddleware",
     "RateLimitMiddleware",
     "RequestContextMiddleware",
     "SecurityHeadersMiddleware",

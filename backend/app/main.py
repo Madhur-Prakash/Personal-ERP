@@ -27,7 +27,7 @@ from app.core.logging import configure_logging, flush_logs, get_logger
 from app.core.middleware import (
     BodySizeLimitMiddleware,
     DocsGuardMiddleware,
-    GatewayGuardMiddleware,
+    OriginGuardMiddleware,
     RateLimitMiddleware,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
@@ -65,13 +65,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             "debug": settings.debug,
             "docs": settings.docs_url,
             # The posture, named at boot. Every one of these is a thing an operator will
-            # otherwise discover by being attacked: a gateway check silently off because
+            # otherwise discover by being attacked: an origin check silently off because
             # the variable was not carried into the new deployment, or a rate limiter
             # disabled for a load test and never turned back on. Config validation
             # refuses to start a production process in any of these states, but staging
             # and development run happily, and those are where the misconfiguration is
             # written before it is copied.
-            "gateway_enforced": settings.gateway_enforced,
             "origin_enforced": settings.enforce_origin,
             "rate_limiting": settings.rate_limit_enabled,
             "proxy_headers_trusted": settings.trust_proxy_headers,
@@ -180,7 +179,7 @@ def _register_middleware(app: FastAPI) -> None:
     bottom-up gives the actual request path::
 
         SecurityHeaders -> TrustedHost -> RequestContext -> DocsGuard
-            -> GatewayGuard -> CORS -> BodySizeLimit -> RateLimit -> GZip
+            -> OriginGuard -> CORS -> BodySizeLimit -> RateLimit -> GZip
             -> route handler
 
     Every position in that list is a decision:
@@ -197,8 +196,17 @@ def _register_middleware(app: FastAPI) -> None:
       IP for testing from a phone).
     * **RequestContext next.** Everything below it can reject, and a rejection with no
       request id cannot be correlated with the report that follows it.
-    * **The two guards before CORS.** A caller that has not come through our edge should
-      not learn whether this origin is allowed, or that there is an API here at all.
+    * **The guards before CORS.** DocsGuard refuses ``/docs`` in production without CORS
+      first advertising what it would have allowed there.
+
+      This position has a sharp edge, and it has drawn blood: **anything rejected here goes
+      out with no CORS headers**, so a browser sees an opaque CORS failure rather than the
+      status that was actually sent. A ``GATEWAY_SECRET`` check that once sat in
+      ``OriginGuard`` rejected the browser's preflight - which by specification cannot carry
+      a custom header - and the whole frontend failed with an error pointing at the CORS
+      configuration. Preflights are now explicitly passed through; see
+      :class:`~app.core.middleware.OriginGuardMiddleware`. Any future check added here must
+      do the same.
     * **CORS above the limiter.** A 429 or a 413 has to be *readable* by the frontend -
       it needs ``Retry-After`` to back off intelligently. Without the CORS headers on
       those responses the browser hands the page an opaque network error instead, and
@@ -222,7 +230,7 @@ def _register_middleware(app: FastAPI) -> None:
         # An allow-list, not a wildcard. `*` is invalid alongside credentials anyway,
         # and enumerating the four headers the frontend actually sends means a request
         # carrying anything else is rejected at the preflight.
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID", settings.gateway_header],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
         expose_headers=[
             "X-Request-ID",
             "X-RateLimit-Limit",
@@ -235,7 +243,7 @@ def _register_middleware(app: FastAPI) -> None:
         max_age=3600,
     )
 
-    app.add_middleware(GatewayGuardMiddleware)
+    app.add_middleware(OriginGuardMiddleware)
     app.add_middleware(DocsGuardMiddleware)
     app.add_middleware(RequestContextMiddleware)
 

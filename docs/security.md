@@ -4,9 +4,10 @@ Every control below exists for a stated reason. Where a common alternative was
 rejected, the reason is given - a control whose rationale nobody remembers is a
 control that gets removed in the next refactor.
 
-For the findings that produced the edge-gateway, rate-limiting and header controls
-described here - including one critical issue in the test harness and the reason a
-shipped client cannot authenticate itself - see [security-audit.md](security-audit.md).
+For the findings that produced the rate-limiting and header controls described here -
+including one critical issue in the test harness and the reason a shipped client cannot
+authenticate itself - see [security-audit.md](security-audit.md). That report predates the
+removal of the edge-gateway check; the note in its access-control section says what changed.
 
 ---
 
@@ -16,7 +17,7 @@ What this system is actually defending against, in rough order of likelihood:
 
 | Threat | Primary control |
 | --- | --- |
-| Direct access to the API, bypassing our own edge | `GATEWAY_SECRET` stamped by the proxy; no published host port |
+| Direct access to the API, bypassing our own edge | **Not defended** - this service *is* the edge. See below |
 | Credential stuffing from a breach elsewhere | Argon2id, per-account lockout, edge + app rate limiting, 2FA |
 | Spoofed client address defeating IP-based limits | Forwarding hops counted from the right, `--no-proxy-headers` |
 | API surface reconnaissance | No docs or OpenAPI schema in production, enforced in three places |
@@ -38,41 +39,39 @@ Stage 10.
 
 ## Reaching the API at all
 
-Three independent checks run before any handler, in this order. They are independent on
-purpose: each one constrains a different caller, and none is sufficient alone.
+Two checks run before any handler. They constrain different callers, and neither is
+sufficient alone.
 
-### The edge gateway - `GATEWAY_SECRET`
+### There is no edge gateway, deliberately
 
-The requirement "only our frontend may call the API" has an honest form and a wishful
-one, and the difference matters.
+"Only our frontend may call the API" has an honest form and a wishful one, and this
+deployment can satisfy neither — so it claims neither.
 
 **A shipped client cannot authenticate itself.** The React bundle is JavaScript the
-browser is handed on request. The desktop client's own template says of its config file
-that "anything in it ships to whoever has the binary". Any header, token or signature the
-*client* holds is readable by whoever holds the client and replayable from `curl`. There
-is no client-side version of this control.
+browser is handed on request. Any header, token or signature the *client* holds is
+readable by whoever holds the client and replayable from `curl`. There is no client-side
+version of this control, and `X-Gateway-Key` was never sent by the frontend — that was the
+point, not an omission.
 
-**The edge can.** nginx runs on the operator's machine, and a value it injects
-server-side never reaches a user, a page, or a decompiler. So the property enforced is
-*"this request arrived through our edge"*:
+**Only a proxy could,** and there isn't one of ours. This service runs behind a platform
+router (Render), not behind an nginx we configure, so there is nothing positioned to inject
+a server-side value. A `GATEWAY_SECRET` check was removed rather than left half-wired.
 
-- `infra/nginx/proxy-params.conf` stamps `X-Gateway-Key: $gateway_key` on every proxied
-  request.
-- `GatewayGuardMiddleware` compares it against `GATEWAY_SECRET` with
-  `hmac.compare_digest` - constant-time, because `==` on strings short-circuits at the
-  first differing byte and leaks the matching prefix length through response timing.
-- A request without it gets **404**. Not 403: a 403 confirms there is an API at this
-  address and that it is merely withholding something.
-- Health probes are exempt. A container healthcheck reaches the app directly on
-  localhost with no proxy to stamp anything, so gating it would make every deployment
-  fail its own healthcheck and roll back.
+What it *would* have bought, if a proxy is ever added: it closes the **side door** — the
+backend reachable at its own address, where the edge's TLS, logging, IP rules and rate
+limits are all skipped. That matters most when an origin IP behind a CDN leaks. It does
+**not** make the API private; anyone may still walk through the front door, it only
+requires that they use it.
 
-Production **refuses to boot** without a secret, unless `ALLOW_DIRECT_BACKEND_ACCESS=true`
-is set deliberately - the documented escape hatch for a single-service PaaS deployment
-that genuinely is its own edge.
+Re-adding it needs three things, and the third is the one that bites:
 
-Combined with `docker-compose.prod.yml`, where the API publishes no host port, reaching
-the backend requires both network access to the internal bridge *and* the secret.
+1. A proxy config stamping the header on every forwarded request.
+2. That config **overwriting** any client-supplied value, not passing one through —
+   otherwise the check is satisfied by the very caller it exists to stop.
+3. An exemption for CORS preflights. A preflight cannot carry a custom header by
+   specification; gating it produced `No 'Access-Control-Allow-Origin' header is present`
+   and took the whole frontend down while pointing at the CORS config. See
+   `OriginGuardMiddleware` and `TestPreflightReachesCors`.
 
 ### Origin enforcement
 
@@ -84,8 +83,9 @@ identifiable and refused with 403.
 A request with **neither** header passes. That is the desktop app, `curl`, a backup
 script; refusing them would break every non-browser client while stopping no attacker,
 because an attacker simply omits both. This closes the browser-driven CSRF path - which
-`SameSite=Strict` already covers, making this the second layer - not scripted access. The
-gateway secret is what constrains scripted access.
+`SameSite=Strict` already covers, making this the second layer - not scripted access. What
+constrains a scripted caller is authentication and rate limiting; no header-based check can,
+which is exactly why the removed gateway secret needed a proxy rather than a client.
 
 Comparison is on `scheme://host:port`, lowercased, so a trailing slash or a capitalised
 host does not decide the outcome. A check that fails on formatting rather than identity is
@@ -722,7 +722,7 @@ project on that port.
 | A02 Cryptographic failures | Argon2id, Fernet at rest, TLS 1.2+, HSTS, hashed tokens |
 | A03 Injection | Parameterised ORM queries, allow-listed sorts, Pydantic validation, Jinja autoescape |
 | A04 Insecure design | Staged delivery, threat model, lockout prevention, reversible migrations |
-| A05 Misconfiguration | Boot-time production validation (refuses to start without a gateway secret, https origins, rate limiting), no docs in production, non-root read-only containers with all capabilities dropped, internal-only data network |
+| A05 Misconfiguration | Boot-time production validation (https origins, strong secrets, rate limiting and origin enforcement all required), no docs in production, non-root read-only containers with all capabilities dropped, internal-only data network |
 | A06 Vulnerable components | Pinned lockfiles, `--frozen` installs in CI, zero npm advisories |
 | A07 Auth failures | 2FA, lockout, rotation with reuse detection, no enumeration, session revocation |
 | A08 Integrity failures | Append-only audit, SHA-pinned image tags, migration drift check in CI |

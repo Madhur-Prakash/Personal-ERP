@@ -143,22 +143,26 @@ class Settings(BaseSettings):
     cors_origins: CsvList = Field(default_factory=lambda: ["http://localhost:5173"])
     allowed_hosts: CsvList = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
 
-# ---- Edge gateway -------------------------------------------------------
-    #: Secret injected by the edge proxy into forwarded requests.
-    #: Client secrets are replayable; this proves the request came through our
-    #: edge instead of directly from a client.
-    #: Disabled in development/tests. Production requires it unless
-    #: :attr:`allow_direct_backend_access` is enabled.
-    gateway_secret: SecretStr | None = None
-
-    #: Header carrying :attr:`gateway_secret`. Renameable so it can be made
-    #: unremarkable in logs and traces; the default is descriptive on purpose.
-    gateway_header: str = "X-Gateway-Key"
-
-    #: Allow production without a gateway secret.
-    #: For deployments where the API is the public edge. Disables the
-    #: "only through our edge" guarantee; all other security checks remain.
-    allow_direct_backend_access: bool = False
+    # ---- No edge-gateway secret ---------------------------------------------
+    # There was a `GATEWAY_SECRET` here: a value an nginx in front of this service would
+    # stamp on every forwarded request, which the backend then required. It is gone,
+    # because this service *is* the public edge - it runs behind a platform router
+    # (Render, Fly, a PaaS) rather than behind a proxy we configure.
+    #
+    # The distinction it drew is real, and worth recording so nobody re-adds it by halves.
+    # It proved "this request came through my proxy", which closes the side door: the
+    # backend reachable at its own address, bypassing whatever the edge does. It could
+    # never be a *client* credential - a header a browser bundle holds is readable by
+    # anyone who opens devtools - so only a server-side proxy could satisfy it, and there
+    # is no such proxy here.
+    #
+    # It also never made the API private. Anyone can walk through the front door; it only
+    # required that they use it. Everything that actually authorises a caller is still
+    # here: JWT auth, RBAC, the origin check below, per-tier rate limits, host validation.
+    #
+    # Re-adding it is only worthwhile alongside a proxy configuration that stamps the
+    # header, and that must *overwrite* any client-supplied value rather than pass one
+    # through - otherwise the check is satisfied by the attacker it exists to stop.
 
     #: Enforce ``Origin``/``Referer`` on state-changing requests.
     #: Blocks browser-based CSRF by verifying headers browsers cannot forge.
@@ -298,24 +302,38 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=15 * 1024 * 1024, ge=64 * 1024)
 
     # ---- Object storage: optional, off unless configured ---------------------
-    #: S3-compatible storage for document blobs. Leave unset to use PostgreSQL.
-#:
-#: When all settings are provided, documents are stored in an S3-compatible
-#: bucket instead. Objects must remain private.
-    minio_endpoint: str = '' # default to empty string to disable object storage
-    minio_access_key: str = ''
-    minio_secret_key: SecretStr = ''
+    #: S3-compatible storage for document blobs. **Leave these blank.**
+    #:
+    #: Blank is the default and the supported configuration: documents are compressed into
+    #: PostgreSQL (``document_blob``), in the same transaction as the row describing them and
+    #: covered by the same ``pg_dump``. See :mod:`app.modules.ocr.storage`.
+    #:
+    #: Setting all three of endpoint / access key / secret switches to a bucket, for an
+    #: install whose blobs have outgrown the database. Two of three reads as "not
+    #: configured" - see :attr:`document_storage`.
+    minio_endpoint: str = ""
+    minio_access_key: str = ""
+    #: ``SecretStr("")``, not ``""``. A bare string here is not merely a type error: pydantic
+    #: does not validate defaults, so the attribute would be a plain ``str`` at runtime and
+    #: :attr:`document_storage` would raise ``AttributeError`` on ``.get_secret_value()`` the
+    #: moment an endpoint and access key were configured without a secret.
+    minio_secret_key: SecretStr = SecretStr("")
     minio_bucket: str = "personalerp-documents"
-    minio_root_user: str = ''
-    minio_root_password: SecretStr = ''
 
     #: TLS to the object store. False only for a store on the loopback interface; true for
     #: anything reachable over a network - the credentials and the documents both cross it.
     minio_secure: bool = False
 
     # ---- Logifyx (backend logging) ---------------------------------------------
-    # See https://pypi.org/project/logifyx/ — these are read by logifyx itself.
-    log_file: str 
+    # See https://pypi.org/project/logifyx/ - the LOG_* keys are read by logifyx itself.
+    #: Single shared log file for the whole process, read by
+    #: :func:`app.core.logging._resolve_log_file`.
+    #:
+    #: **It needs a default.** Declared bare it becomes a *required* setting, so a deployment
+    #: that never set ``LOG_FILE`` - which is every deployment that was happy with logifyx's
+    #: own default - stops booting, with a validation error about logging while the operator
+    #: is looking for what they changed about the database.
+    log_file: str = "personalerp.log"
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -432,17 +450,6 @@ class Settings(BaseSettings):
     @property
     def openapi_url(self) -> str | None:
         return "/openapi.json" if self.docs_enabled else None
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def gateway_enforced(self) -> bool:
-        """Whether requests must arrive carrying :attr:`gateway_secret`.
-
-        Derived from whether a secret exists rather than from a separate switch: a
-        switch is a way for the two to disagree, and the failure mode of "enforcement
-        on, no secret configured" is a service that rejects every request.
-        """
-        return self.gateway_secret is not None and bool(self.gateway_secret.get_secret_value())
 
     # -------------------------------------------------------------------------
     # Guardrails
@@ -596,21 +603,10 @@ class Settings(BaseSettings):
         if not self.frontend_url.startswith("https://"):
             problems.append("FRONTEND_URL must be https:// (it is emailed to users)")
 
-        # The whole point of the exercise: in production the API is reachable only
-        # through an edge that knows the secret. Refusing to boot without one is what
-        # stops that guarantee from being lost to a forgotten environment variable,
-        # since nothing about the running service would look wrong.
-        if not self.gateway_enforced and not self.allow_direct_backend_access:
-            problems.append(
-                "GATEWAY_SECRET is required so only the edge proxy can reach the API. "
-                'Generate one with `python -c "import secrets; '
-                'print(secrets.token_urlsafe(48))"` and set the same value on the proxy. '
-                "Set ALLOW_DIRECT_BACKEND_ACCESS=true only if this service *is* the "
-                "public edge and you accept that anyone may call it directly."
-            )
-        if self.gateway_enforced and len(self.gateway_secret.get_secret_value()) < 32:  # type: ignore[union-attr]
-            problems.append("GATEWAY_SECRET must be at least 32 characters")
-
+        # No gateway-secret check here any more. This service is the public edge, so
+        # "only my proxy may reach the API" is not a property it can assert - see the note
+        # where the setting used to be. What remains below is every guarantee that does not
+        # depend on there being a proxy.
         if not self.rate_limit_enabled:
             problems.append("RATE_LIMIT_ENABLED must be true")
         if not self.enforce_origin:

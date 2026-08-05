@@ -162,6 +162,25 @@ reaches a user, a page, or a decompiler. So the property enforced is *"this requ
 arrived through our edge"* - which is checkable, and is what the requirement actually
 means in a deployment where the frontend is served from that same edge.
 
+> **SUPERSEDED — the gateway check has since been removed.** Every `GATEWAY_SECRET` /
+> `X-Gateway-Key` / `GatewayGuardMiddleware` reference in the rest of this report is
+> historical. The deployment turned out to have no proxy of its own — it runs behind a
+> platform router (Render), which is the `ALLOW_DIRECT_BACKEND_ACCESS=true` topology this
+> section already described as the escape hatch. The `infra/nginx/` configuration the
+> control depended on was never in the repository, so the check had no counterpart to stamp
+> the header and refused every browser request.
+>
+> It was removed rather than left configured-but-unsatisfiable, along with its setting, its
+> `secrets_match` helper, and the production boot check that required it. The reasoning is
+> preserved in `app/core/config.py` where the setting was declared, including the two things
+> re-adding it would require. `OriginGuardMiddleware` keeps the origin half.
+>
+> Its removal also fixed a live outage it was causing: it rejected the browser's CORS
+> preflight — which by specification cannot carry a custom header — from *outside*
+> `CORSMiddleware`, so the response had no `Access-Control-Allow-Origin` and every call from
+> the frontend failed with an error pointing at the CORS configuration. See
+> [security.md](security.md#there-is-no-edge-gateway-deliberately).
+
 Implemented as:
 
 - `GATEWAY_SECRET`, stamped by `infra/nginx/proxy-params.conf` as `X-Gateway-Key` on
