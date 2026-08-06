@@ -145,7 +145,7 @@ class _AppShellState extends ConsumerState<AppShell> {
 // =============================================================================
 // Sidebar
 // =============================================================================
-class _Sidebar extends ConsumerWidget {
+class _Sidebar extends ConsumerStatefulWidget {
   const _Sidebar({
     required this.auth,
     required this.onNavigate,
@@ -164,8 +164,45 @@ class _Sidebar extends ConsumerWidget {
   final VoidCallback? onClose;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Sidebar> createState() => _SidebarState();
+}
+
+/// Stateful only to own the hover, which has to live *above* the rows rather than inside
+/// each one.
+///
+/// **Two rows could otherwise be shaded at once, and were.** The obvious spelling gives
+/// every row its own `bool _hovered` flipped by its own `MouseRegion`, which is correct
+/// only while every `onExit` arrives. It does not always: Flutter resolves mouse regions
+/// per frame, so a pointer sweeping down a list two pixels apart, a rebuild that moves a
+/// row mid-gesture, or a pointer leaving the window can drop one - and a row whose exit
+/// went missing stays shaded while the next one lights up, one of them nowhere near the
+/// pointer.
+///
+/// A single path on the parent makes that unrepresentable: entering any row overwrites
+/// the one before it, so a missed exit self-corrects on the very next enter instead of
+/// persisting until something rebuilds.
+class _SidebarState extends ConsumerState<_Sidebar> {
+  /// The path of the row under the pointer, or null.
+  String? _hoveredPath;
+
+  void _setHovered(String path, bool entered) {
+    if (entered) {
+      if (_hoveredPath != path) setState(() => _hoveredPath = path);
+      return;
+    }
+    // Guarded, not unconditional. Flutter can deliver the next row's `onEnter` *before*
+    // this row's `onExit`; clearing blindly would then wipe the hover that had just
+    // arrived and leave the sidebar with nothing shaded.
+    if (_hoveredPath == path) setState(() => _hoveredPath = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final AppTokens t = context.tokens;
+    final AuthState auth = widget.auth;
+    final VoidCallback onNavigate = widget.onNavigate;
+    final bool showClose = widget.showClose;
+    final VoidCallback? onClose = widget.onClose;
     final AuthenticatedUser? user = auth.user;
     final OrganizationSummary? organization = auth.organization;
     final String location = GoRouterState.of(context).matchedLocation;
@@ -281,6 +318,11 @@ class _Sidebar extends ConsumerWidget {
                             _NavRow(
                               item: item,
                               active: _isActive(item, location),
+                              // Keyed on the path, which is what makes a row unique -
+                              // two sections can carry the same label.
+                              hovered: _hoveredPath == item.path,
+                              onHover: (bool entered) =>
+                                  _setHovered(item.path, entered),
                               onTap: () {
                                 onNavigate();
                                 context.go(item.path);
@@ -345,7 +387,8 @@ class _Sidebar extends ConsumerWidget {
 
   List<NavItem> _visible(NavSection section) => section.items
       .where(
-        (NavItem item) => item.permission == null || auth.can(item.permission!),
+        (NavItem item) =>
+            item.permission == null || widget.auth.can(item.permission!),
       )
       .toList(growable: false);
 
@@ -441,28 +484,26 @@ class _OrganizationRowState extends State<_OrganizationRow> {
   }
 }
 
-class _NavRow extends StatefulWidget {
+/// Stateless: the hover belongs to [_SidebarState], which can only hold one row at a
+/// time. See the note there for why a bool per row was not enough.
+class _NavRow extends StatelessWidget {
   const _NavRow({
     required this.item,
     required this.active,
+    required this.hovered,
+    required this.onHover,
     required this.onTap,
   });
 
   final NavItem item;
   final bool active;
+  final bool hovered;
+  final ValueChanged<bool> onHover;
   final VoidCallback onTap;
-
-  @override
-  State<_NavRow> createState() => _NavRowState();
-}
-
-class _NavRowState extends State<_NavRow> {
-  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
     final AppTokens t = context.tokens;
-    final NavItem item = widget.item;
 
     // Not yet built. A disabled row is more honest than a link to a 404 - but the
     // badge has to say so in words. "S6" is an internal build-order number that means
@@ -494,28 +535,40 @@ class _NavRowState extends State<_NavRow> {
       );
     }
 
-    final Color background = widget.active
+    final Color background = active
         ? t.primary.at(0.10)
-        : _hovered
+        : hovered
         ? t.surfaceHover
         : Colors.transparent;
-    final Color foreground = widget.active
+    final Color foreground = active
         ? t.primary
-        : _hovered
+        : hovered
         ? t.content
         : t.contentSecondary;
 
     return Semantics(
-      selected: widget.active,
+      selected: active,
       button: true,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
+        onEnter: (_) => onHover(true),
+        onExit: (_) => onHover(false),
         child: GestureDetector(
-          onTap: widget.onTap,
+          onTap: onTap,
           child: AnimatedContainer(
-            duration: Motion.fast,
+            // Fades in, clears instantly - and the asymmetry is the point.
+            //
+            // A symmetric 120 ms cross-fade means the row you just left is still
+            // painting its background while the row you entered paints its own. Sweep
+            // the pointer down the list and two or three rows are shaded at any instant:
+            // a comet tail behind the cursor that looks exactly like several rows being
+            // selected at once. It needs no dropped event to happen - it is just the
+            // exit animation outliving the exit.
+            //
+            // Zero on the way out means at most one row is ever shaded. The active row
+            // keeps its animation because it is not chasing a pointer: it changes on
+            // navigation, where a fade reads as deliberate rather than as lag.
+            duration: active || hovered ? Motion.fast : Duration.zero,
             margin: const EdgeInsets.only(bottom: 2),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
