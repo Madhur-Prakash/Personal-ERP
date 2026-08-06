@@ -464,7 +464,12 @@ class _TabState extends State<_Tab> {
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
-                  color: widget.selected ? t.primary : Colors.transparent,
+                  // `primary.at(0)`, not `Colors.transparent`: that constant is
+                  // transparent *black*, and the `AnimatedContainer` lerps every
+                  // channel - so the rule would darken its way up from black before
+                  // arriving at the accent colour. Same colour, zero alpha, and only
+                  // the opacity travels.
+                  color: widget.selected ? t.primary : t.primary.at(0),
                   width: 2,
                 ),
               ),

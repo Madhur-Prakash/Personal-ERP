@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/oklch.dart';
 import '../theme/tokens.dart';
 
 /// Button variants and sizes, ported from `components/ui/Button.tsx`.
@@ -282,11 +283,18 @@ class _AppButtonState extends State<AppButton> {
           foreground: t.content,
           border: t.border,
         );
+      // `surfaceHover.at(0)` rather than `Colors.transparent` on both of these.
+      //
+      // The background is animated (see the `AnimatedContainer` above), and
+      // `Colors.transparent` is transparent *black* - so lerping to a near-white hover
+      // grey walks the RGB up from zero and paints a solid mid-grey halfway through.
+      // Every ghost and outline button flashed dark before settling. Holding the colour
+      // and animating only its alpha keeps the wash at its final hue throughout.
       case AppButtonVariant.outline:
         return _ButtonStyle(
           background: _hovered && _enabled
               ? t.surfaceHover
-              : Colors.transparent,
+              : t.surfaceHover.at(0),
           foreground: t.content,
           border: t.borderStrong,
         );
@@ -294,7 +302,7 @@ class _AppButtonState extends State<AppButton> {
         return _ButtonStyle(
           background: _hovered && _enabled
               ? t.surfaceHover
-              : Colors.transparent,
+              : t.surfaceHover.at(0),
           foreground: _hovered && _enabled ? t.content : t.contentSecondary,
         );
       case AppButtonVariant.destructive:

@@ -424,7 +424,9 @@ class _OrganizationRowState extends State<_OrganizationRow> {
           duration: Motion.fast,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: _hovered ? t.surfaceHover : Colors.transparent,
+            // Zero-alpha hover grey, not `Colors.transparent` - see the note in
+            // `_NavRow` on why the lerp otherwise flashes dark mid-fade.
+            color: _hovered ? t.surfaceHover : t.surfaceHover.at(0),
             borderRadius: BorderRadius.circular(Radii.lg),
             border: Border.all(color: t.border),
           ),
@@ -535,11 +537,22 @@ class _NavRow extends StatelessWidget {
       );
     }
 
+    // `surfaceHover.at(0)`, never `Colors.transparent`.
+    //
+    // **`Colors.transparent` is transparent *black* (`0x00000000`), and an
+    // `AnimatedContainer` lerps every channel.** Fading to a near-white hover grey
+    // therefore drags red, green and blue up from zero: halfway through the 120 ms the
+    // row paints rgb(188,188,189) - a solid mid-grey, far darker than either end - and
+    // only then settles onto the barely-there rgb(245,245,246). Hovering flashed dark
+    // and then dropped its colour, which is exactly backwards from what the fade is for.
+    //
+    // The same colour at zero alpha leaves the RGB fixed and animates opacity alone, so
+    // the row washes in at its final hue and stays there.
     final Color background = active
         ? t.primary.at(0.10)
         : hovered
         ? t.surfaceHover
-        : Colors.transparent;
+        : t.surfaceHover.at(0);
     final Color foreground = active
         ? t.primary
         : hovered
