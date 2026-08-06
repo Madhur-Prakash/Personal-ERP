@@ -1,6 +1,12 @@
+<div align="center">
+
 # Personal ERP
 
 **A self-hosted ERP for small businesses. Simple to run, yours to keep.**
+
+[Documentation](docs/README.md) · [Quick start](#quick-start) · [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md)
+
+</div>
 
 Small businesses get offered two bad options: cloud SaaS that rents you your own
 books and raises the price once you depend on it, or legacy desktop software that
