@@ -32,6 +32,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   bool _showPassword = false;
   bool _submitting = false;
+  bool _resending = false;
   String? _nameError;
   String? _emailError;
   String? _passwordError;
@@ -162,15 +163,42 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 height: 1.6,
               ),
             ),
+            // Sending mail is the slowest thing on this screen and the least visible - an
+            // API call whose whole effect happens in someone else's inbox. Without the
+            // spinner the button looks inert, so it gets pressed again, and the second
+            // press spends one of the three sends a minute the server allows.
+            //
+            // The failure was worse than invisible before this: nothing caught the throw,
+            // so a refused resend - the rate limit being the likely one - reported
+            // nothing at all to the person waiting on the email.
             AppButton(
-              onPressed: () async {
-                await ref
-                    .read(authApiProvider)
-                    .resendVerification(_registeredEmail!);
-                if (context.mounted) {
-                  context.toastSuccess('Verification email sent again');
-                }
-              },
+              onPressed: _resending
+                  ? null
+                  : () async {
+                      setState(() => _resending = true);
+                      try {
+                        await ref
+                            .read(authApiProvider)
+                            .resendVerification(_registeredEmail!);
+                        if (context.mounted) {
+                          context.toastSuccess(
+                            'Verification email sent again',
+                            description:
+                                'Check $_registeredEmail, including the spam folder.',
+                          );
+                        }
+                      } catch (error) {
+                        if (context.mounted) {
+                          context.toastApiError(
+                            error,
+                            'Could not resend the email. Please try again.',
+                          );
+                        }
+                      } finally {
+                        if (mounted) setState(() => _resending = false);
+                      }
+                    },
+              loading: _resending,
               variant: AppButtonVariant.secondary,
               fullWidth: true,
               label: 'Resend verification email',

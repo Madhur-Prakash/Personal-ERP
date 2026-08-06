@@ -32,6 +32,7 @@ export function RegisterPage() {
   const search = useSearch({ strict: false });
   const [showPassword, setShowPassword] = useState(false);
   const [done, setDone] = useState<{ email: string } | null>(null);
+  const [resending, setResending] = useState(false);
 
   // Fetched rather than hard-coded so the displayed rules always match what the
   // server will actually accept.
@@ -128,13 +129,40 @@ export function RegisterPage() {
             The link expires in 24 hours. Check your spam folder if it has not arrived in a few
             minutes.
           </p>
+          {/* Sending mail is the slowest thing on this screen and the least visible - it
+              is an API call whose whole effect happens in someone else's inbox. Without a
+              spinner the button looks inert, so it gets pressed again, and the second
+              press spends one of the three sends a minute the server allows.
+
+              The failure was worse than invisible before this: a bare `.then()` meant a
+              rejected promise had no handler at all, so a refused resend - the rate limit
+              being the likely one - reported nothing whatsoever. */}
           <Button
             variant="secondary"
             fullWidth
+            loading={resending}
             onClick={() => {
+              setResending(true);
               void authApi
                 .resendVerification(done.email)
-                .then(() => toast.success('Verification email sent again'));
+                .then(() =>
+                  toast.success('Verification email sent again', {
+                    description: `Check ${done.email}, including the spam folder.`,
+                  }),
+                )
+                .catch((error: unknown) => {
+                  if (error instanceof ApiError) {
+                    // The mail-sending budget is the tightest in the application, so a
+                    // refusal here is far more often "too soon" than "broken" - and the
+                    // one thing that answer needs is *how long*.
+                    toast.error(
+                      error.isRateLimited ? error.rateLimitMessage : error.message,
+                    );
+                    return;
+                  }
+                  toast.error('Could not resend the email. Please try again.');
+                })
+                .finally(() => setResending(false));
             }}
           >
             Resend verification email

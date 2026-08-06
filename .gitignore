@@ -45,6 +45,8 @@ secrets/
 infra/nginx/certs/
 infra/certbot/
 
+.vercel/
+
 # ---- Editors / OS ----
 .idea/
 .vscode/*
