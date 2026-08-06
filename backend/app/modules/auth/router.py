@@ -127,10 +127,21 @@ def _set_refresh_cookie(response: Response, result: AuthResult) -> None:
       long-lived credential. This is the single most important one.
     * ``secure`` - HTTPS only. Relaxed in local development, where there is no
       TLS and the cookie would otherwise never be set.
-    * ``samesite="strict"`` - the browser withholds the cookie on cross-site
-      requests, which is what makes CSRF against the refresh endpoint infeasible.
+    * ``samesite`` - ``strict`` while the app and the API are one site, which is what
+      makes CSRF against the refresh endpoint infeasible. It cannot stay ``strict`` when
+      they are not: a browser withholds a strict cookie from *every* cross-site request,
+      so an SPA on one host calling an API on another would sign in successfully and then
+      find no session on the next page load, because ``/auth/refresh`` is exactly the
+      request the cookie never reaches. Derived rather than hardcoded - see
+      :attr:`~app.core.config.Settings.refresh_cookie_samesite` for the derivation and
+      for what replaces ``strict`` as the CSRF control when it has to be relaxed.
     * ``path`` - scoped to the auth routes, so it is not attached to every API
       call that has no use for it.
+
+    **Both functions must agree on every attribute.** A browser matches a deletion to a
+    stored cookie by name, domain and path, and rejects a ``Set-Cookie`` whose
+    ``SameSite=None`` lacks ``Secure`` - so a clear that disagreed with the set would
+    silently leave the credential in place on sign-out.
     """
     # Measured from now, not from the access token's expiry - the two have
     # entirely different lifetimes.
@@ -141,8 +152,8 @@ def _set_refresh_cookie(response: Response, result: AuthResult) -> None:
         value=result.refresh_token,
         max_age=max(max_age, 0),
         httponly=True,
-        secure=not settings.environment.is_local,
-        samesite="strict",
+        secure=settings.cookie_is_secure,
+        samesite=settings.refresh_cookie_samesite,
         path=f"{settings.api_v1_prefix}/auth",
     )
 
@@ -152,8 +163,8 @@ def _clear_refresh_cookie(response: Response) -> None:
         key=REFRESH_COOKIE_NAME,
         path=f"{settings.api_v1_prefix}/auth",
         httponly=True,
-        secure=not settings.environment.is_local,
-        samesite="strict",
+        secure=settings.cookie_is_secure,
+        samesite=settings.refresh_cookie_samesite,
     )
 
 

@@ -98,6 +98,20 @@ def _blank_to_none(value: object) -> object:
 #: A URL-shaped override where blank means "fall back to the composed parts".
 OptionalDsn = Annotated[str | None, BeforeValidator(_blank_to_none)]
 
+def _site_of(host: str) -> str:
+    """A rough registrable domain: the last two labels of a hostname.
+
+    Deliberately not a public-suffix lookup, which would mean shipping and refreshing
+    the PSL to answer one question at boot. Two labels distinguishes the cases that
+    actually occur - ``app.example.com`` and ``api.example.com`` are one site,
+    ``…vercel.app`` and ``…onrender.com`` are not - and
+    :attr:`Settings.cookie_samesite` is the escape hatch for the case it gets wrong.
+    """
+    cleaned = host.strip().lower().split(":")[0].rstrip(".")
+    labels = [label for label in cleaned.split(".") if label]
+    return ".".join(labels[-2:]) if len(labels) > 2 else cleaned
+
+
 #: Period names accepted in a rate-limit spec, in seconds.
 _RATE_PERIODS = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
 
@@ -176,6 +190,14 @@ class Settings(BaseSettings):
     #: Blocks browser-based CSRF by verifying headers browsers cannot forge.
     #: Non-browser clients are unaffected.
     enforce_origin: bool = True
+
+    #: Force the refresh cookie's ``SameSite``, overriding what is derived below.
+    #:
+    #: Only needed when the derivation is wrong for your hosting - two apps on different
+    #: subdomains of one *public suffix* (``a.vercel.app`` and ``b.vercel.app``) look
+    #: same-site to the comparison in :attr:`refresh_cookie_samesite` but are cross-site
+    #: to the browser. Setting ``none`` there is the fix.
+    cookie_samesite: Literal["strict", "lax", "none"] | None = None
 
     #: Trust ``X-Forwarded-*`` headers when resolving the client.
     #: Safe behind trusted proxies because client IP is resolved from the
@@ -398,6 +420,52 @@ class Settings(BaseSettings):
         return not self.environment.is_production
 
     @computed_field  # type: ignore[prop-decorator]
+    @property
+    def cookie_is_secure(self) -> bool:
+        """``Secure`` on the refresh cookie: everywhere but local development.
+
+        Relaxed locally because there is no TLS there and the browser would refuse to
+        store the cookie at all, which would break sign-in on a developer's machine.
+        """
+        return not self.environment.is_local
+
+    @property
+    def refresh_cookie_samesite(self) -> Literal["strict", "lax", "none"]:
+        """``SameSite`` for the refresh cookie, derived from where the frontend lives.
+
+        **`strict` is correct only while the app and the API are one site.** When they
+        are not - an SPA on ``…vercel.app`` calling an API on ``…onrender.com`` - the
+        browser withholds a `strict` cookie from every request to the API, including
+        ``POST /auth/refresh``. The failure is quiet and very confusing: signing in works
+        (that response *sets* the cookie), the tab keeps working off the in-memory access
+        token, and then a page reload or a second tab finds no session at all, because
+        the one request that could restore it is the one the cookie never reaches.
+
+        So a cross-site deployment gets ``none``, which is the only value a browser will
+        send cross-site - and only with ``Secure``, so without TLS this falls back to
+        ``lax`` rather than emitting a combination browsers reject outright.
+
+        **What is given up, and what covers it.** `strict` was this codebase's CSRF
+        defence for the refresh endpoint. `none` gives that up, and
+        :class:`~app.core.middleware.OriginGuardMiddleware` takes over: it rejects any
+        state-changing request whose ``Origin`` is not in ``CORS_ORIGINS``, and
+        ``/auth/refresh`` is a POST, so it is covered. Refresh tokens also rotate on
+        every use and reuse revokes the lineage, so a replayed cookie is detected rather
+        than merely being harder to obtain. Set :attr:`cookie_samesite` to force a value
+        if that trade is not one you want to make.
+        """
+        if self.cookie_samesite is not None:
+            return self.cookie_samesite
+
+        frontend_host = urlsplit(self.frontend_url).hostname
+        if not frontend_host:
+            return "strict"
+
+        if _site_of(frontend_host) in {_site_of(host) for host in self.allowed_hosts}:
+            return "strict"
+
+        return "none" if self.cookie_is_secure else "lax"
+
     @property
     def document_storage(self) -> Literal["object", "database"]:
         """Which backend holds document blobs. ``"database"`` unless a bucket is configured.
