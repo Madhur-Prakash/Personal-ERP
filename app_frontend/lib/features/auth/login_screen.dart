@@ -305,6 +305,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 label: 'Forgot password?',
                 fontWeight: FontWeight.w400,
                 colour: t.contentMuted,
+                // `text-content-muted hover:text-primary` on the web.
+                hoverColour: t.primary,
                 onTap: () => context.go('/forgot-password'),
               ),
             ],

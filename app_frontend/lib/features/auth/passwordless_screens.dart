@@ -641,6 +641,8 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
                   label: 'Use a different email',
                   fontWeight: FontWeight.w400,
                   colour: t.contentMuted,
+                  // `text-content-muted hover:text-content` on the web.
+                  hoverColour: t.content,
                   onTap: () => setState(() {
                     _codeStep = false;
                     _code.clear();

@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../layout/theme_toggle.dart';
 import '../../theme/tokens.dart';
+import '../../widgets/primitives.dart';
 
 /// Shell for the unauthenticated screens.
 ///
@@ -200,20 +201,12 @@ class AuthFooterPrompt extends StatelessWidget {
       children: <Widget>[
         Text(prompt, style: TextStyle(fontSize: 13, color: t.contentMuted)),
         const SizedBox(width: 4),
-        MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: onAction,
-            child: Text(
-              actionLabel,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: t.primary,
-              ),
-            ),
-          ),
-        ),
+        // `AppTextLink`, not a hand-rolled MouseRegion + GestureDetector + Text. That
+        // spelling set the cursor and nothing else, so "Create an account" was the one
+        // link on the screen that did not react to a pointer at all - while its web
+        // counterpart carries `hover:underline`. Same widget as every other link now, so
+        // it cannot drift again.
+        AppTextLink(label: actionLabel, onTap: onAction),
       ],
     );
   }
@@ -253,27 +246,78 @@ class AuthDivider extends StatelessWidget {
 /// In the layout file rather than duplicated per screen: five of the auth screens end
 /// with it, and a hand-built row per screen drifted by a pixel on the web before it was
 /// shared.
-class BackToSignIn extends StatelessWidget {
+/// **Hover warms it to the primary colour and rules a line under the label.** Both,
+/// because the colour shift is what the web does (`hover:text-primary`) and the rule is
+/// the stronger affordance - a link that only changes shade is easy to miss.
+///
+/// **The rule is drawn, not `TextDecoration.underline`.** Flutter's decoration sits hard
+/// against the baseline at whatever hair-width the font reports, and on this exact string
+/// that puts it through the descender of the *g* in "sign" - it reads as a strikethrough
+/// on the one word it crosses. A one-pixel border three pixels clear of the text has none
+/// of that, and lands about where the web's `underline-offset-4` puts it. The border is
+/// transparent rather than absent when idle, so the row cannot resize by a pixel as the
+/// pointer crosses it.
+///
+/// The arrow warms with the label but is not underlined, for the same reason the rule is
+/// offset: a line under a glyph reads as a line through it.
+///
+/// One `TweenAnimationBuilder` drives all three, so the icon, the label and the rule
+/// cannot arrive at slightly different moments - and the hover is on the whole row, so
+/// pointing at the arrow lights up the link the arrow belongs to.
+class BackToSignIn extends StatefulWidget {
   const BackToSignIn({super.key});
+
+  @override
+  State<BackToSignIn> createState() => _BackToSignInState();
+}
+
+class _BackToSignInState extends State<BackToSignIn> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
     final AppTokens t = context.tokens;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () => context.go('/login'),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          spacing: 6,
-          children: <Widget>[
-            Icon(LucideIcons.arrowLeft, size: 14, color: t.contentMuted),
-            Text(
-              'Back to sign in',
-              style: TextStyle(fontSize: 13, color: t.contentMuted),
-            ),
-          ],
+
+    return Semantics(
+      link: true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: () => context.go('/login'),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(end: _hovered ? 1 : 0),
+            duration: Motion.fast,
+            curve: Motion.easeOutQuart,
+            builder: (BuildContext context, double progress, Widget? _) {
+              final Color colour =
+                  Color.lerp(t.contentMuted, t.primary, progress) ??
+                  t.contentMuted;
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                spacing: 6,
+                children: <Widget>[
+                  Icon(LucideIcons.arrowLeft, size: 14, color: colour),
+                  Container(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: colour.withValues(alpha: progress),
+                        ),
+                      ),
+                    ),
+                    child: Text(
+                      'Back to sign in',
+                      style: TextStyle(fontSize: 13, color: colour),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

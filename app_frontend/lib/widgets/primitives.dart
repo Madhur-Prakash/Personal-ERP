@@ -661,6 +661,7 @@ class AppTextLink extends StatefulWidget {
     this.fontSize = 13,
     this.fontWeight = FontWeight.w500,
     this.colour,
+    this.hoverColour,
   });
 
   final String label;
@@ -668,6 +669,19 @@ class AppTextLink extends StatefulWidget {
   final double fontSize;
   final FontWeight fontWeight;
   final Color? colour;
+
+  /// Shift to this colour on hover, instead of underlining.
+  ///
+  /// **The web has two link treatments and this is which one you get.** A link already
+  /// carrying the primary colour underlines (`hover:underline` on "Create an account"),
+  /// while a muted one changes colour and stays undecorated - `hover:text-primary` on
+  /// "Forgot password?", `hover:text-content` in the footer and on "Use a different
+  /// email". Null gives the first, which is the right default: an underline is the only
+  /// feedback available to a link that is already the accent colour.
+  ///
+  /// This used to underline unconditionally, so every muted link in the app answered a
+  /// hover differently from its counterpart on the website.
+  final Color? hoverColour;
 
   @override
   State<AppTextLink> createState() => _AppTextLinkState();
@@ -678,7 +692,11 @@ class _AppTextLinkState extends State<AppTextLink> {
 
   @override
   Widget build(BuildContext context) {
-    final Color colour = widget.colour ?? context.tokens.primary;
+    final Color base = widget.colour ?? context.tokens.primary;
+    final Color? hoverColour = widget.hoverColour;
+    final bool shiftsColour = hoverColour != null;
+    final Color colour = _hovered && shiftsColour ? hoverColour : base;
+
     return Semantics(
       link: true,
       child: MouseRegion(
@@ -687,15 +705,20 @@ class _AppTextLinkState extends State<AppTextLink> {
         onExit: (_) => setState(() => _hovered = false),
         child: GestureDetector(
           onTap: widget.onTap,
-          child: Text(
-            widget.label,
+          // Animated for the colour case only, and at the same 120 ms the web spends on
+          // `transition-colors`. An underline appearing over 120 ms reads as a smear
+          // rather than as a state change, which is why the web transitions colour and
+          // not `text-decoration` either.
+          child: AnimatedDefaultTextStyle(
+            duration: shiftsColour ? Motion.fast : Duration.zero,
             style: TextStyle(
               fontSize: widget.fontSize,
               fontWeight: widget.fontWeight,
               color: colour,
-              decoration: _hovered ? TextDecoration.underline : null,
+              decoration: _hovered && !shiftsColour ? TextDecoration.underline : null,
               decorationColor: colour,
             ),
+            child: Text(widget.label),
           ),
         ),
       ),

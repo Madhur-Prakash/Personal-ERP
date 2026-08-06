@@ -157,6 +157,8 @@ class AppFooter extends ConsumerWidget {
                               fontSize: 12,
                               fontWeight: FontWeight.w400,
                               colour: t.contentMuted,
+                              // `hover:text-content transition-colors` on the web.
+                              hoverColour: t.content,
                               onTap: () => context.go(item.path),
                             ),
                           ),
