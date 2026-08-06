@@ -47,7 +47,13 @@ jobs:
         env:
           POSTGRES_USER: personalerp
           POSTGRES_PASSWORD: personalerp
-          POSTGRES_DB: personalerp
+          # `_test`, and not by convention. `Settings._enforce_test_safety` refuses to
+          # start against any database whose name does not end that way when
+          # ENVIRONMENT=test, because the suite drops every table - see finding 1 in
+          # docs/security-audit.md. `conftest.py` already forces this name for pytest;
+          # the alembic steps below run outside pytest and read the `.env` instead, so
+          # the container has to be named this way for them too.
+          POSTGRES_DB: personalerp_test
         ports: ['5432:5432']
         # Without a health check the job races the database's startup and fails
         # intermittently on the first connection.
@@ -88,6 +94,16 @@ jobs:
         run: uv sync --frozen
 
       - name: Write test environment
+        # Every `RATE_LIMIT_*` below is a **required** setting with no default, so
+        # omitting one does not fall back - it refuses to construct `Settings` at all,
+        # and the first thing to touch it (alembic, then pytest) dies with thirteen
+        # "Field required" errors. They were constants until they moved into `.env`;
+        # this file did not move with them.
+        #
+        # The values are only there to be valid: `conftest.py` sets
+        # `RATE_LIMIT_ENABLED=false` for the suite, and the two tests that care about
+        # budgets patch their own. They mirror the committed sample so that a number
+        # here is never mistaken for a tuned one.
         run: |
           cat > ../.env <<'EOF'
           ENVIRONMENT=test
@@ -96,13 +112,26 @@ jobs:
           POSTGRES_PORT=5432
           POSTGRES_USER=personalerp
           POSTGRES_PASSWORD=personalerp
-          POSTGRES_DB=personalerp
+          POSTGRES_DB=personalerp_test
           REDIS_HOST=localhost
           REDIS_PORT=6379
           SECRET_KEY=ci-only-secret-key-0123456789abcdefghijklmnopqrstuv
           CORS_ORIGINS=http://localhost:5173
           LOG_LEVEL=WARNING
           LOG_COLOR=false
+          RATE_LIMIT_DEFAULT=15/minute
+          RATE_LIMIT_AUTH=10/minute
+          RATE_LIMIT_AUTH_STRICT=5/minute
+          RATE_LIMIT_READ=25/minute
+          RATE_LIMIT_WRITE=15/minute
+          RATE_LIMIT_UPLOAD=5/minute
+          RATE_LIMIT_EXPORT=5/minute
+          RATE_LIMIT_IP=250/minute
+          RATE_LIMIT_LOGIN=5/minute
+          RATE_LIMIT_REGISTER=3/minute
+          RATE_LIMIT_MAIL_SENDING=3/minute
+          RATE_LIMIT_TOKEN_EXCHANGE=20/minute
+          RATE_LIMIT_HEALTH=5/minute
           EOF
 
       - name: Lint (ruff)
