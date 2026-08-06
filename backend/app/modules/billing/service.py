@@ -224,11 +224,7 @@ class MoneyAccount:
     @property
     def subtitle(self) -> str | None:
         """The line under the name: "HDFC Bank ··4321", or nothing to say."""
-        parts = [
-            part
-            for part in (self.bank_name, self.card_network)
-            if part
-        ]
+        parts = [part for part in (self.bank_name, self.card_network) if part]
         tail = self.account_number_last4 or self.card_last4
         if tail:
             parts.append(f"··{tail}")
@@ -276,9 +272,7 @@ class BankDetails:
     @property
     def is_empty(self) -> bool:
         """Nothing worth persisting - which is the normal case for cash in hand."""
-        return not any(
-            (self.bank_name, self.holder_name, self.account_number)
-        )
+        return not any((self.bank_name, self.holder_name, self.account_number))
 
 
 #: Stands in for "this account has no details", so the lookups below can read
@@ -629,9 +623,7 @@ class BillingService:
             # From the requested kind rather than defaulted: a bank account that came back
             # labelled "cash" would show under the wrong heading in the picker the client
             # builds from this field, immediately after being created.
-            kind=(
-                MoneyAccountKind.BANK if kind is MoneyKind.BANK else MoneyAccountKind.CASH
-            ),
+            kind=(MoneyAccountKind.BANK if kind is MoneyKind.BANK else MoneyAccountKind.CASH),
             is_default=False,
             bank_name=details.bank_name,
             holder_name=details.holder_name,
@@ -682,15 +674,11 @@ class BillingService:
 
         existing = (
             await self.session.execute(
-                select(BankAccountDetail).where(
-                    BankAccountDetail.account_id == account_id
-                )
+                select(BankAccountDetail).where(BankAccountDetail.account_id == account_id)
             )
         ).scalar_one_or_none()
 
-        row = existing or BankAccountDetail(
-            organization_id=organization_id, account_id=account_id
-        )
+        row = existing or BankAccountDetail(organization_id=organization_id, account_id=account_id)
         row.bank_name = bank
         row.holder_name = holder
         row.account_number_encrypted = encrypt_secret(digits) if digits else None
@@ -756,11 +744,7 @@ class BillingService:
         # for, but `carded` has to know about every card - an archived one still holds the
         # `RESTRICT` reference that blocks deleting its account.
         all_cards = await self.cards(organization_id, include_archived=True)
-        cards = (
-            all_cards
-            if include_archived
-            else [c for c in all_cards if c.is_active]
-        )
+        cards = all_cards if include_archived else [c for c in all_cards if c.is_active]
 
         cash = [a for a in rows if a.subtype.is_cash_equivalent]
         by_id = {a.id: a for a in rows}
@@ -795,9 +779,7 @@ class BillingService:
                 ),
                 bank_name=details.get(a.id, _NO_BANK_DETAILS).bank_name,
                 holder_name=details.get(a.id, _NO_BANK_DETAILS).holder_name,
-                account_number_last4=details.get(
-                    a.id, _NO_BANK_DETAILS
-                ).account_number_last4,
+                account_number_last4=details.get(a.id, _NO_BANK_DETAILS).account_number_last4,
                 is_active=a.is_active,
                 # A seeded account is a system account and cannot be deactivated - the
                 # accounting service refuses, because later modules post to it by role.
@@ -806,18 +788,12 @@ class BillingService:
                 # no card drawing on it. Each of those would otherwise be an error the user
                 # could only discover by pressing the button - so the reason travels with the
                 # flag.
-                can_delete=(
-                    not a.is_system
-                    and a.id not in posted_to
-                    and a.id not in carded
-                ),
+                can_delete=(not a.is_system and a.id not in posted_to and a.id not in carded),
                 delete_blocked_reason=_why_not_deletable(
                     is_system=a.is_system,
                     has_postings=a.id in posted_to,
                     card_labels=[
-                        f"{c.label} ··{c.last4}"
-                        for c in all_cards
-                        if c.account_id == a.id
+                        f"{c.label} ··{c.last4}" for c in all_cards if c.account_id == a.id
                     ],
                 ),
             )
@@ -860,9 +836,7 @@ class BillingService:
 
         return accounts
 
-    async def _accounts_with_postings(
-        self, organization_id: uuid.UUID
-    ) -> set[uuid.UUID]:
+    async def _accounts_with_postings(self, organization_id: uuid.UUID) -> set[uuid.UUID]:
         """Which of this organization's accounts have a journal line against them.
 
         **One aggregate query, not one per account.** The repository's ``has_postings`` asks
@@ -977,9 +951,7 @@ class BillingService:
             ),
         )
 
-    async def bank_details(
-        self, organization_id: uuid.UUID, account_id: uuid.UUID
-    ) -> BankDetails:
+    async def bank_details(self, organization_id: uuid.UUID, account_id: uuid.UUID) -> BankDetails:
         """One account's details, **with the number decrypted.**
 
         Separate from the list path so that reading a full account number is an explicit
@@ -1054,13 +1026,8 @@ class BillingService:
         # Renaming comes first, so a clash is refused before anything is written.
         if name is not None and name.strip() and name.strip() != account.name:
             cleaned = name.strip()
-            every = await self.accounts.list_for_org(
-                organization_id, include_inactive=True
-            )
-            if any(
-                a.id != account_id and a.name.casefold() == cleaned.casefold()
-                for a in every
-            ):
+            every = await self.accounts.list_for_org(organization_id, include_inactive=True)
+            if any(a.id != account_id and a.name.casefold() == cleaned.casefold() for a in every):
                 raise ConflictError(
                     f'An account called "{cleaned}" already exists.',
                     code="account_exists",
@@ -1377,9 +1344,7 @@ class BillingService:
         if label is not None:
             cleaned = label.strip()
             if not cleaned:
-                raise ValidationError(
-                    "Give the card a name, so you can tell it apart later."
-                )
+                raise ValidationError("Give the card a name, so you can tell it apart later.")
             row.label = cleaned
 
         if holder_name is not None:
@@ -1416,8 +1381,7 @@ class BillingService:
             )
             if clash is not None:
                 raise ConflictError(
-                    f"A {row.kind.label.lower()} ending {identity.last4} is already on "
-                    "file.",
+                    f"A {row.kind.label.lower()} ending {identity.last4} is already on file.",
                     code="card_exists",
                 )
 

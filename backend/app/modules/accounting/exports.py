@@ -32,7 +32,7 @@ from app.modules.accounting.schemas import BalanceSheet
 #: A format string rather than a pre-formatted string, so the cell stays a *number*: the
 #: recipient can sum a column, sort it, or change the currency symbol. Writing "₹1,234.00" as
 #: text would look identical and be useless in a spreadsheet.
-_MONEY_FORMAT: Final = '#,##0.00;[Red]-#,##0.00'
+_MONEY_FORMAT: Final = "#,##0.00;[Red]-#,##0.00"
 
 _HEADING: Final = Font(bold=True, size=12)
 _LABEL: Final = Font(bold=True)
@@ -133,9 +133,7 @@ def format_money(amount: Decimal, currency: str) -> str:
     negative = amount < 0
     whole, _, frac = f"{abs(amount):.2f}".partition(".")
     grouped = _group_indian(whole) if currency == "INR" else f"{int(whole):,}"
-    symbol = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£"}.get(
-        currency, f"{currency} "
-    )
+    symbol = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£"}.get(currency, f"{currency} ")
     return f"{'-' if negative else ''}{symbol}{grouped}.{frac}"
 
 
@@ -192,9 +190,7 @@ def to_xlsx(
     page.cell(row=header, column=2, value=sheet.as_of.isoformat()).font = _LABEL
     page.cell(row=header, column=2).alignment = Alignment(horizontal="right")
     if comparative is not None:
-        page.cell(
-            row=header, column=3, value=comparative.as_of.isoformat()
-        ).font = _LABEL
+        page.cell(row=header, column=3, value=comparative.as_of.isoformat()).font = _LABEL
         page.cell(row=header, column=3).alignment = Alignment(horizontal="right")
 
     prior = _amount_by_label(comparative) if comparative is not None else {}

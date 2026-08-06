@@ -190,6 +190,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Create the .env both stacks reference
+        # `env_file: [.env]` on the backend service is a hard requirement: compose
+        # refuses to even parse a file that names one it cannot stat. `.env` is
+        # gitignored, so on a fresh checkout it is never there.
+        #
+        # Empty is enough. `config` only resolves the file's *existence* and the
+        # `${...}` interpolations, and those come from the step environment below -
+        # nothing here needs a real value, and putting one in would only invite
+        # someone to mistake this for a working configuration.
+        run: touch .env
+
       - name: Validate compose files
         # Parses and schema-checks both stacks. No images are built and no daemon
         # work happens - this is `config --quiet`, which catches the YAML and

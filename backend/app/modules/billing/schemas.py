@@ -93,9 +93,7 @@ PartyName = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1
 #: are accepted and stripped; letters are not, because an account number has none.
 AccountNumber = Annotated[
     str,
-    StringConstraints(
-        strip_whitespace=True, min_length=4, max_length=34, pattern=r"^[\d\s-]+$"
-    ),
+    StringConstraints(strip_whitespace=True, min_length=4, max_length=34, pattern=r"^[\d\s-]+$"),
 ]
 
 

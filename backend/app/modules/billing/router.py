@@ -263,9 +263,7 @@ async def list_money_accounts(
     """
     return [
         _account_response(a)
-        for a in await service.money_accounts(
-            organization_id, include_archived=include_archived
-        )
+        for a in await service.money_accounts(organization_id, include_archived=include_archived)
     ]
 
 

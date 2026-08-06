@@ -636,15 +636,11 @@ async def balance_sheet_export(
     )
 
     name = (
-        await session.execute(
-            select(Organization.name).where(Organization.id == organization_id)
-        )
+        await session.execute(select(Organization.name).where(Organization.id == organization_id))
     ).scalar_one_or_none() or "Balance sheet"
 
     writer = to_xlsx if fmt == "xlsx" else to_pdf
-    payload = writer(
-        sheet, organization=name, currency=calendar.currency, comparative=prior
-    )
+    payload = writer(sheet, organization=name, currency=calendar.currency, comparative=prior)
     media = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         if fmt == "xlsx"

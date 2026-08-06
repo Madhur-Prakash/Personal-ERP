@@ -238,8 +238,7 @@ function withoutEnvelope(status: number, body: unknown): string {
                     : 'The request failed';
 
   const text = typeof body === 'string' ? body.trim() : '';
-  const usable =
-    text !== '' && text.length <= 200 && !/^[<[{]/.test(text) ? `: ${text}` : '';
+  const usable = text !== '' && text.length <= 200 && !/^[<[{]/.test(text) ? `: ${text}` : '';
 
   return `${base}${usable} (HTTP ${status}).`;
 }

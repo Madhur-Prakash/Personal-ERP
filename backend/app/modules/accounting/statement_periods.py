@@ -105,16 +105,12 @@ def resolve_statement_period(
             span = _quarter_span(today, fiscal_start_month)
         case StatementPeriod.LAST_QUARTER:
             this = _quarter_span(today, fiscal_start_month)
-            span = _quarter_span(
-                this.start - dt.timedelta(days=1), fiscal_start_month
-            )
+            span = _quarter_span(this.start - dt.timedelta(days=1), fiscal_start_month)
         case StatementPeriod.THIS_FISCAL_YEAR:
             span = _fiscal_span(today, fiscal_start_month)
         case _:
             this = _fiscal_span(today, fiscal_start_month)
-            span = _fiscal_span(
-                this.start - dt.timedelta(days=1), fiscal_start_month
-            )
+            span = _fiscal_span(this.start - dt.timedelta(days=1), fiscal_start_month)
 
     as_of = min(span.end, today)
     return as_of, span.start - dt.timedelta(days=1)

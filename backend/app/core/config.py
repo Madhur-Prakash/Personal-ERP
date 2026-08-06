@@ -98,6 +98,7 @@ def _blank_to_none(value: object) -> object:
 #: A URL-shaped override where blank means "fall back to the composed parts".
 OptionalDsn = Annotated[str | None, BeforeValidator(_blank_to_none)]
 
+
 def _site_of(host: str) -> str:
     """A rough registrable domain: the last two labels of a hostname.
 

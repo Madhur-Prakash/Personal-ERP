@@ -192,8 +192,8 @@ export function MagicLinkVerifyPage() {
             <Check className="h-6 w-6" />
           </div>
           <p className="text-content-muted text-[13px] leading-relaxed">
-            The app should be showing this code. If it is not, close this tab and change
-            your password - the link was not requested by you.
+            The app should be showing this code. If it is not, close this tab and change your
+            password - the link was not requested by you.
           </p>
           <div className="bg-primary/10 text-primary rounded-xl px-6 py-4 text-center font-mono text-3xl font-semibold tracking-[0.3em]">
             {userCode}

@@ -155,9 +155,7 @@ export function RegisterPage() {
                     // The mail-sending budget is the tightest in the application, so a
                     // refusal here is far more often "too soon" than "broken" - and the
                     // one thing that answer needs is *how long*.
-                    toast.error(
-                      error.isRateLimited ? error.rateLimitMessage : error.message,
-                    );
+                    toast.error(error.isRateLimited ? error.rateLimitMessage : error.message);
                     return;
                   }
                   toast.error('Could not resend the email. Please try again.');

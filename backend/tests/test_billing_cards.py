@@ -675,9 +675,7 @@ class TestBankDetails:
         )
 
         stored = (
-            await db.execute(
-                text("SELECT account_number_encrypted FROM bank_account_detail")
-            )
+            await db.execute(text("SELECT account_number_encrypted FROM bank_account_detail"))
         ).scalar_one()
 
         assert stored is not None
@@ -702,9 +700,7 @@ class TestBankDetails:
         ).json()
 
         details = (
-            await authed_client.get(
-                f"{api}/billing/money-accounts/{created['id']}/details"
-            )
+            await authed_client.get(f"{api}/billing/money-accounts/{created['id']}/details")
         ).json()
         assert details["account_number"] == "50100123454321"
         assert details["account_number_last4"] == "4321"
@@ -725,9 +721,7 @@ class TestBankDetails:
         ).json()
 
         details = (
-            await authed_client.get(
-                f"{api}/billing/money-accounts/{created['id']}/details"
-            )
+            await authed_client.get(f"{api}/billing/money-accounts/{created['id']}/details")
         ).json()
         assert details["account_number"] == "50100123454321"
 
@@ -768,9 +762,7 @@ class TestBankDetails:
                 "account_number": "50100123454321",
             },
         )
-        count = (
-            await db.execute(text("SELECT count(*) FROM bank_account_detail"))
-        ).scalar_one()
+        count = (await db.execute(text("SELECT count(*) FROM bank_account_detail"))).scalar_one()
         assert count == 0
 
     async def test_the_seeded_bank_account_can_be_filled_in_afterwards(
@@ -821,7 +813,7 @@ class TestBankDetails:
     async def test_details_cannot_be_hung_on_a_revenue_account(
         self, authed_client: AsyncClient, api: str, books: Organization
     ) -> None:
-        """"Which bank is Sales Revenue at" is not a question, so it is refused."""
+        """ "Which bank is Sales Revenue at" is not a question, so it is refused."""
         options = (await authed_client.get(f"{api}/billing/options")).json()
         category = options["categories"][0]
 
@@ -887,9 +879,7 @@ class TestArchivingAnAccount:
         ).json()
         assert created["can_archive"] is True
 
-        response = await authed_client.post(
-            f"{api}/billing/money-accounts/{created['id']}/archive"
-        )
+        response = await authed_client.post(f"{api}/billing/money-accounts/{created['id']}/archive")
         assert response.status_code == 200, response.text
         assert response.json()["is_active"] is False
 
@@ -903,9 +893,7 @@ class TestArchivingAnAccount:
                 json={"name": "Old current account", "kind": "bank"},
             )
         ).json()
-        await authed_client.post(
-            f"{api}/billing/money-accounts/{created['id']}/archive"
-        )
+        await authed_client.post(f"{api}/billing/money-accounts/{created['id']}/archive")
 
         offered = await money_accounts(authed_client, api)
         assert all(a["id"] != created["id"] for a in offered)
@@ -928,14 +916,10 @@ class TestArchivingAnAccount:
                 json={"name": "Seasonal float", "kind": "cash"},
             )
         ).json()
-        await authed_client.post(
-            f"{api}/billing/money-accounts/{created['id']}/archive"
-        )
+        await authed_client.post(f"{api}/billing/money-accounts/{created['id']}/archive")
 
         restored = (
-            await authed_client.post(
-                f"{api}/billing/money-accounts/{created['id']}/restore"
-            )
+            await authed_client.post(f"{api}/billing/money-accounts/{created['id']}/restore")
         ).json()
         assert restored["is_active"] is True
 
@@ -958,9 +942,7 @@ class TestArchivingAnAccount:
         offered = await money_accounts(authed_client, api)
         seeded = next(a for a in offered if not a["card_id"])
 
-        response = await authed_client.post(
-            f"{api}/billing/money-accounts/{seeded['id']}/archive"
-        )
+        response = await authed_client.post(f"{api}/billing/money-accounts/{seeded['id']}/archive")
         assert response.status_code == 422, response.text
 
     async def test_archiving_keeps_the_entries_that_used_it(
@@ -986,9 +968,7 @@ class TestArchivingAnAccount:
         )
         assert posted.status_code == 201, posted.text
 
-        await authed_client.post(
-            f"{api}/billing/money-accounts/{created['id']}/archive"
-        )
+        await authed_client.post(f"{api}/billing/money-accounts/{created['id']}/archive")
 
         # The day book still shows it, named as before.
         entries = (await authed_client.get(f"{api}/billing")).json()["items"]

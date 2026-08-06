@@ -240,9 +240,7 @@ class BankAccountDetail(Base, UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixi
     organization: Mapped[Organization] = relationship(lazy="raise")
     account: Mapped[Account] = relationship(lazy="raise")
 
-    __table_args__ = (
-        UniqueConstraint("account_id", name="uq_bank_account_detail_account"),
-    )
+    __table_args__ = (UniqueConstraint("account_id", name="uq_bank_account_detail_account"),)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<BankAccountDetail {self.bank_name} ··{self.account_number_last4}>"

@@ -679,9 +679,7 @@ class DocumentService:
             organization_id=organization_id,
             resource_type="document",
             resource_id=document.id,
-            summary=(
-                f"Corrected {', '.join(sorted(changes))} on {document.original_filename}"
-            ),
+            summary=(f"Corrected {', '.join(sorted(changes))} on {document.original_filename}"),
             changes={
                 # Both halves, because the question this row answers later is not "what
                 # does it say now" - the document itself says that - but "what did the

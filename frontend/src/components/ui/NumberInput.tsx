@@ -18,8 +18,7 @@ import { Input, type InputProps } from '@/components/ui/Input';
 import { type SanitiseOptions, sanitiseDecimal } from '@/lib/decimalInput';
 
 export interface NumberInputProps
-  extends Omit<InputProps, 'onChange' | 'value' | 'type' | 'inputMode'>,
-    SanitiseOptions {
+  extends Omit<InputProps, 'onChange' | 'value' | 'type' | 'inputMode'>, SanitiseOptions {
   value: string;
   /**
    * Called with the sanitised value.

@@ -254,9 +254,7 @@ def _register_middleware(app: FastAPI) -> None:
         # which reads as "the health endpoints are disabled in production" when they are
         # registered and working. The wrapper exempts `/health/live` and `/health/ready`
         # and delegates everything else unchanged.
-        app.add_middleware(
-            ProbeExemptTrustedHostMiddleware, allowed_hosts=settings.allowed_hosts
-        )
+        app.add_middleware(ProbeExemptTrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
     app.add_middleware(SecurityHeadersMiddleware)
 
