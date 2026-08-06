@@ -78,6 +78,26 @@ class AppSelect extends StatelessWidget {
   final bool enabled;
   final double? width;
 
+  /// How tall the menu may grow: about eight rows, and never a large fraction of the
+  /// window.
+  ///
+  /// **`PopupMenuButton` does not shrink a menu that will not fit below its button - it
+  /// slides the whole menu up until it does.** A generous cap is therefore not a maximum
+  /// height, it is a licence to move: the audit log's forty-odd actions asked for 420px
+  /// under a field sitting near the top of a short window, could not have it, and opened
+  /// as a panel over the page title instead - while the four-item severity filter beside
+  /// it, needing only ~160px, stayed neatly under its field.
+  ///
+  /// So the fix is to make the long menu ask for about what the short one asks for.
+  /// Eight rows is the conventional depth for a select: enough to scan, small enough
+  /// that it fits beneath the field in any realistic layout, and the rest scrolls.
+  ///
+  /// A field genuinely in the bottom third of the window will still open upwards. That
+  /// is the correct answer there - the alternative is a menu running off-screen - and it
+  /// is no longer the answer for a field near the top, which was the actual complaint.
+  double _menuMaxHeight(BuildContext context) =>
+      (MediaQuery.sizeOf(context).height * 0.4).clamp(200.0, 300.0);
+
   List<SelectOption> get _flat => groups != null
       ? groups!
             .expand((SelectGroup group) => group.options)
@@ -103,7 +123,21 @@ class AppSelect extends StatelessWidget {
       // Anchored under the field and matched to its width, so it reads as the field
       // expanding rather than as a menu appearing somewhere near it.
       position: PopupMenuPosition.under,
-      constraints: const BoxConstraints(minWidth: 220, maxHeight: 420),
+      constraints: BoxConstraints(
+        minWidth: 220,
+        maxHeight: _menuMaxHeight(context),
+      ),
+      // 120 ms in and out, on the curve everything else in this app moves on.
+      //
+      // Material's default is a 300 ms *height* animation - the panel unrolls to its
+      // full length rather than appearing - which next to this app's 120 ms hovers and
+      // presses reads as the menu labouring into place. A list of forty audit actions
+      // unrolling over a third of a second is the worst case of it.
+      popUpAnimationStyle: AnimationStyle(
+        duration: Motion.fast,
+        reverseDuration: Motion.fast,
+        curve: Motion.easeOutQuart,
+      ),
       onSelected: onChanged,
       itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
         if (placeholder != null)
