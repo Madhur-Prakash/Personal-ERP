@@ -40,7 +40,7 @@ export function AuthLayout({
             className="bg-primary text-primary-content flex h-7 w-7 items-center justify-center rounded-lg text-sm font-bold"
             aria-hidden
           >
-            N
+            E
           </span>
           <span className="text-content text-[15px] font-semibold tracking-tight">
             Personal ERP

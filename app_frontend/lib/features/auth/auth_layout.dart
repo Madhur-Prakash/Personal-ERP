@@ -80,7 +80,7 @@ class AuthLayout extends StatelessWidget {
                               ),
                               alignment: Alignment.center,
                               child: Text(
-                                'N',
+                                'E',
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w700,
