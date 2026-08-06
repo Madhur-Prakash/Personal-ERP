@@ -1,13 +1,19 @@
 # =============================================================================
 # CI - runs on every push and pull request.
 #
-# Backend and frontend run as independent jobs so a frontend type error does not
-# hide a backend test failure, and both report in parallel.
+# **Checks only.** Nothing here builds a container image, publishes to a registry,
+# or deploys. The backend is built from source by Render and the frontend by
+# Vercel, so an image built here would be a second artefact nobody deploys - slow
+# to produce, and misleading the moment it diverges from what the platforms
+# actually run.
 #
-# The backend job runs against real PostgreSQL and Redis service containers
-# rather than mocks or SQLite. The test suite verifies partial unique indexes,
-# JSONB behaviour, and cursor pagination - none of which SQLite implements the
-# same way, so passing against a substitute would prove nothing.
+# Backend and frontend are independent jobs so a frontend type error does not hide
+# a backend test failure, and both report in parallel.
+#
+# The backend job runs against real PostgreSQL and Redis service containers rather
+# than mocks or SQLite. The test suite verifies partial unique indexes, JSONB
+# behaviour, and cursor pagination - none of which SQLite implements the same way,
+# so passing against a substitute would prove nothing.
 # =============================================================================
 
 name: CI
@@ -128,15 +134,10 @@ jobs:
         run: uv run alembic check
 
       - name: Run tests
-        run: uv run pytest --cov --cov-report=xml --cov-report=term-missing -q
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: backend-coverage
-          path: backend/coverage.xml
-          retention-days: 7
+        # Coverage is printed, not exported. The XML report was uploaded as an
+        # artifact that nothing ever downloaded; the terminal summary is what
+        # anyone reading a failed run actually looks at.
+        run: uv run pytest --cov --cov-report=term-missing -q
 
   # ---------------------------------------------------------------------------
   frontend:
@@ -170,35 +171,30 @@ jobs:
         run: npm run format:check
 
       - name: Build
+        # A check, not a deliverable: Vercel builds its own bundle from source on
+        # every deploy, and the output here is discarded. It stays because the
+        # bundler catches a class of mistake `tsc` does not - an unresolvable
+        # import, a bad chunking config - and finding that here is much cheaper
+        # than finding it in a failed deploy.
         run: npm run build
         env:
           VITE_API_BASE_URL: http://localhost:8000
           VITE_API_V1_PREFIX: /api/v1
 
-      - name: Upload build
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-dist
-          path: frontend/dist
-          retention-days: 7
-
   # ---------------------------------------------------------------------------
-  docker:
-    name: Docker images
+  config:
+    name: Compose config
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # Only after both test jobs pass - no point building an image from code that
-    # does not compile.
-    needs: [backend, frontend]
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
-
       - name: Validate compose files
-        # Catches YAML and schema mistakes that would otherwise only surface on
-        # the server during a deploy.
+        # Parses and schema-checks both stacks. No images are built and no daemon
+        # work happens - this is `config --quiet`, which catches the YAML and
+        # schema mistakes that would otherwise surface only when someone tries to
+        # bring the stack up.
         run: |
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.prod.yml config --quiet
@@ -207,22 +203,3 @@ jobs:
           POSTGRES_PASSWORD: ci
           POSTGRES_DB: personalerp
           REDIS_PASSWORD: ci
-
-      - name: Build backend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          target: production
-          push: false
-          # GitHub Actions cache, so layers survive between runs.
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,scope=backend,mode=max
-
-      - name: Build frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          target: production
-          push: false
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,scope=frontend,mode=max
