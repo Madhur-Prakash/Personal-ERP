@@ -1,6 +1,6 @@
 # Windows installer
 
-Packages the Flutter desktop client into a single `PersonalERP-Setup-1.0.0-x64.exe`.
+Packages the Flutter desktop client into a single `PersonalERP-Setup.exe`.
 
 ---
 
@@ -67,7 +67,7 @@ checkbox, then install. Nothing needs to be typed.
 your PC" warning, and most people stop there. If you have a certificate:
 
 ```powershell
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 installer\dist\PersonalERP-Setup-1.0.0-x64.exe
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 installer\dist\PersonalERP-Setup.exe
 ```
 
 Sign `personalerp_desktop.exe` before compiling as well, so the warning does not simply
@@ -107,7 +107,11 @@ The version appears in three places and they should agree:
 | --- | --- |
 | `app_frontend/pubspec.yaml` | `version: 1.0.0+1` |
 | `installer/personal-erp.iss` | `#define AppVersion "1.0.0"` |
-| The output filename | derived from `AppVersion` |
+| The installed app | reports `AppVersion` in Add/Remove Programs and in the file's Properties |
+
+The output filename is deliberately **not** versioned - it is always
+`PersonalERP-Setup.exe`, so a download link never needs updating. Each build therefore
+replaces the previous one; archive it first if you need to keep a specific release.
 
 `AppId` must **never** change between versions - it is the identity Windows tracks the
 installation under, and changing it makes the next release install alongside this one

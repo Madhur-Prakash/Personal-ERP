@@ -67,7 +67,12 @@ CloseApplications=yes
 RestartApplications=no
 
 OutputDir=dist
-OutputBaseFilename=PersonalERP-Setup-{#AppVersion}-x64
+; A fixed name, so a download link or a deploy script never has to be edited for a new
+; release. The version is still recoverable from the file itself - `VersionInfoVersion`
+; above puts it in the Properties dialog - and from Add/Remove Programs once installed.
+; The trade is that each build overwrites the last: archive one before rebuilding if you
+; need to keep it.
+OutputBaseFilename=PersonalERP-Setup
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName}
