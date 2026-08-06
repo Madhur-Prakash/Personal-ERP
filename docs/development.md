@@ -1,5 +1,9 @@
 # Development
 
+<!-- nav:start -->
+[Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · **Development** · [Deployment](deployment.md)
+<!-- nav:end -->
+
 ## Setup
 
 Requires Docker, [uv](https://docs.astral.sh/uv/), and Node 24.
@@ -284,3 +288,16 @@ Recorded because each cost real time:
 - **Vite's object-form `manualChunks` matches exact specifiers only.** It will not
   capture `react/jsx-runtime`, producing an empty chunk while React stays in the
   main bundle. Use the function form.
+
+<!-- related:start -->
+
+---
+
+## Related reading
+
+- [Architecture](architecture.md) - the layering the conventions exist to protect
+- [Database](database.md) - migrations, and how tests get an isolated schema
+- [API](api.md) - the contract a new endpoint has to fit
+
+[All documentation](README.md)
+<!-- related:end -->

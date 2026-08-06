@@ -422,14 +422,21 @@ prevention, and secret redaction in the audit trail.
 
 ## Documentation
 
+**[docs/](docs/README.md)** is the index: reading paths by what you are trying to do, and
+a map of how the nine documents relate. Every page carries a nav bar to every other, so
+any of the links below is a fine place to start.
+
 | Document | Contents |
 | --- | --- |
+| [docs/spec.md](docs/spec.md) | The requirements: product goals, modules, delivery model, non-negotiables |
 | [docs/architecture.md](docs/architecture.md) | Layering, request lifecycle, module structure, diagrams |
-| [docs/security.md](docs/security.md) | Threat model and every control, with rationale |
 | [docs/database.md](docs/database.md) | Schema, ER diagram, indexes, migration workflow |
+| [docs/accounting.md](docs/accounting.md) | Double-entry invariants, exact money, reversals, numbering, fiscal calendar |
 | [docs/api.md](docs/api.md) | Auth flows, error contract, pagination, and the platform + documents endpoints; `/docs` is authoritative for the rest |
-| [docs/deployment.md](docs/deployment.md) | VPS setup, TLS, backups, zero-downtime deploys |
+| [docs/security.md](docs/security.md) | Threat model and every control, with rationale |
+| [docs/security-audit.md](docs/security-audit.md) | Nine findings against the running code, each with its fix and how to verify it |
 | [docs/development.md](docs/development.md) | Local workflow, conventions, testing, adding a module |
+| [docs/deployment.md](docs/deployment.md) | VPS setup, TLS, backups, zero-downtime deploys |
 
 ---
 

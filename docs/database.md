@@ -1,5 +1,9 @@
 # Database
 
+<!-- nav:start -->
+[Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · **Database** · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
+<!-- nav:end -->
+
 PostgreSQL 17. Seven tables in Stage 1, plus Alembic's `alembic_version`.
 
 ---
@@ -295,3 +299,16 @@ defaults to 14 days.
 `infra/scripts/restore.sh` requires typing the database name to confirm, stops the
 application first, restores inside a single transaction, then re-applies any
 migrations newer than the backup.
+
+<!-- related:start -->
+
+---
+
+## Related reading
+
+- [Accounting](accounting.md) - why the ledger tables are shaped the way they are
+- [Architecture](architecture.md) - where persistence sits in the layering
+- [Deployment](deployment.md) - backups, restores, and running migrations on a server
+
+[All documentation](README.md)
+<!-- related:end -->

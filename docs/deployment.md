@@ -1,5 +1,9 @@
 # Deployment
 
+<!-- nav:start -->
+[Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · **Deployment**
+<!-- nav:end -->
+
 Self-hosted on a single VPS with Docker Compose. Everything below assumes Ubuntu
 22.04+ or Debian 12+.
 
@@ -312,3 +316,16 @@ static assets to a CDN.
 - [ ] First owner account created
 
 The restore rehearsal is the one people skip, and it is the one that matters.
+
+<!-- related:start -->
+
+---
+
+## Related reading
+
+- [Security](security.md) - what to verify is switched on before opening a port
+- [Database](database.md) - backup and restore mechanics in detail
+- [Development](development.md) - the local stack this mirrors
+
+[All documentation](README.md)
+<!-- related:end -->

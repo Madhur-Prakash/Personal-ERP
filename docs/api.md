@@ -1,5 +1,9 @@
 # API
 
+<!-- nav:start -->
+[Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · **API** · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
+<!-- nav:end -->
+
 Base: `/api/v1`. Interactive docs at `/docs` (development only - disabled in
 production, and blocked at the edge as well).
 
@@ -422,3 +426,16 @@ an attacker rotates IPs trivially.
   browsers forbid `*` alongside credentials, and the refresh cookie needs them.
 - **No trailing-slash redirects.** A 307 on a POST turns it into a GET and drops
   the body in some clients, so a wrong URL 404s instead.
+
+<!-- related:start -->
+
+---
+
+## Related reading
+
+- [Security](security.md) - what guards each of these endpoints, and why
+- [Architecture](architecture.md) - the request lifecycle behind every call
+- [Accounting](accounting.md) - the rules the money endpoints enforce
+
+[All documentation](README.md)
+<!-- related:end -->

@@ -1,5 +1,9 @@
 # Personal ERP - master specification
 
+<!-- nav:start -->
+[Docs](README.md) · **Spec** · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
+<!-- nav:end -->
+
 The requirements document for this project. It lived in a chat prompt for the first
 two modules; it lives here now so it is versioned alongside the code it describes.
 
@@ -185,3 +189,16 @@ uv run alembic check            # no schema drift
 Plus, per module: a reversible migration (`downgrade` then `upgrade` must both
 run), and a documented rationale in `docs/` for any decision where a common
 alternative was rejected.
+
+<!-- related:start -->
+
+---
+
+## Related reading
+
+- [Architecture](architecture.md) - how these requirements are actually laid out in code
+- [Accounting](accounting.md) - the ledger the non-negotiables demand
+- [Development](development.md) - the quality gates every module has to pass
+
+[All documentation](README.md)
+<!-- related:end -->

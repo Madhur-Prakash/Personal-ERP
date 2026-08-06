@@ -1,5 +1,9 @@
 # Architecture
 
+<!-- nav:start -->
+[Docs](README.md) · [Spec](spec.md) · **Architecture** · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
+<!-- nav:end -->
+
 ## Guiding principle
 
 The dependency graph points inward. Business rules do not know how they are
@@ -289,3 +293,16 @@ Adding a module (say, invoices in Stage 3):
 
 Step 3 is the one people skip. Because permissions live in code, a capability
 without a catalogue entry cannot be granted through the UI at all.
+
+<!-- related:start -->
+
+---
+
+## Related reading
+
+- [Database](database.md) - the schema the persistence layer maps to
+- [API](api.md) - the contract the outermost layer publishes
+- [Development](development.md) - conventions, and how to add a module
+
+[All documentation](README.md)
+<!-- related:end -->

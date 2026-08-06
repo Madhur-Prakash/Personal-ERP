@@ -1,5 +1,9 @@
 # Security
 
+<!-- nav:start -->
+[Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · **Security** · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
+<!-- nav:end -->
+
 Every control below exists for a stated reason. Where a common alternative was
 rejected, the reason is given - a control whose rationale nobody remembers is a
 control that gets removed in the next refactor.
@@ -746,3 +750,16 @@ Stated plainly rather than left implied:
 - **Secrets manager** - Stage 10. Currently environment variables.
 - **API keys and webhook signing** - Stage 9.
 - **Automated dependency scanning in CI** - Stage 10.
+
+<!-- related:start -->
+
+---
+
+## Related reading
+
+- [Audit](security-audit.md) - the review that produced several of these controls
+- [API](api.md) - the surface they protect
+- [Deployment](deployment.md) - the ones that only exist once it is on a server
+
+[All documentation](README.md)
+<!-- related:end -->

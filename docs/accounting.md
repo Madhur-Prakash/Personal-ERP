@@ -1,5 +1,9 @@
 # Accounting core
 
+<!-- nav:start -->
+[Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · **Accounting** · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
+<!-- nav:end -->
+
 The double-entry ledger. Every later stage posts into it: Stage 3 invoices hit the
 sales journal, Stage 4 goods receipts move inventory and recognise COGS, Stage 5
 OCR produces draft entries, Stage 8 reports read the ledger.
@@ -255,3 +259,16 @@ Both were live defects, found while building this stage: the Stage 1 index
 `uq_invitation_pending_email` had never fired. Migration `a1f2e3d4c5b6` remaps the
 data and adds the constraints; two regression tests cover the index firing and the
 stored casing.
+
+<!-- related:start -->
+
+---
+
+## Related reading
+
+- [Database](database.md) - the tables and constraints behind these invariants
+- [API](api.md) - the endpoints that post into the ledger
+- [Spec](spec.md) - the product requirements this implements
+
+[All documentation](README.md)
+<!-- related:end -->

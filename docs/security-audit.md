@@ -1,5 +1,9 @@
 # Security audit
 
+<!-- nav:start -->
+[Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · **Audit** · [Development](development.md) · [Deployment](deployment.md)
+<!-- nav:end -->
+
 Full review of the backend's exposure surface, and the hardening applied as a result.
 Every finding below was verified against the code, not inferred from a pattern.
 
@@ -682,3 +686,16 @@ done | sort | uniq -c        # expect 429s
 # Headers
 curl -sSI https://your.host/api/v1/auth/password-policy
 ```
+
+<!-- related:start -->
+
+---
+
+## Related reading
+
+- [Security](security.md) - the full control set, with rationale
+- [Deployment](deployment.md) - applying the hardening to a live server
+- [Development](development.md) - the test-isolation guarantees finding 1 turned into
+
+[All documentation](README.md)
+<!-- related:end -->
