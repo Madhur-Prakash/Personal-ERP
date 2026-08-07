@@ -1,11 +1,24 @@
+<div align="center">
+
 # API
+
+**The HTTP contract: auth flows, the error envelope, endpoints, pagination, limits.**
+
+![Base](https://img.shields.io/badge/base-%2Fapi%2Fv1-4C8BF5?style=flat-square)
+![Operations](https://img.shields.io/badge/197_operations-152_paths-4C8BF5?style=flat-square)
+![Bodies](https://img.shields.io/badge/bodies-snake__case-6E7681?style=flat-square)
+![Tokens](https://img.shields.io/badge/access_token-15_minutes-D29922?style=flat-square)
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · **API** · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
 <!-- nav:end -->
 
-Base: `/api/v1`. Interactive docs at `/docs` (development only - disabled in
-production, and blocked at the edge as well).
+</div>
+
+---
+
+Base: `/api/v1`. Interactive docs at `/docs` - **development only**, disabled in
+production by the app itself rather than left to a proxy to hide.
 
 All bodies are `snake_case`, matching the database and the frontend types. One
 name per field, everywhere.

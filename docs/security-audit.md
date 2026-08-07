@@ -1,8 +1,22 @@
+<div align="center">
+
 # Security audit
+
+**Sixteen findings against running code - each with its fix, and how to confirm it.**
+
+![Critical](https://img.shields.io/badge/critical-1-DA3633?style=flat-square)
+![High](https://img.shields.io/badge/high-2-F85149?style=flat-square)
+![Medium](https://img.shields.io/badge/medium-5-D29922?style=flat-square)
+![Low](https://img.shields.io/badge/low-7-4C8BF5?style=flat-square)
+![Info](https://img.shields.io/badge/info-1_action_required-8957E5?style=flat-square)
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · **Audit** · [Development](development.md) · [Deployment](deployment.md)
 <!-- nav:end -->
+
+</div>
+
+---
 
 Full review of the backend's exposure surface, and the hardening applied as a result.
 Every finding below was verified against the code, not inferred from a pattern.

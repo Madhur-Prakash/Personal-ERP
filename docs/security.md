@@ -1,17 +1,92 @@
+<div align="center">
+
 # Security
+
+**The threat model, every control, and how to report something you find.**
+
+![Auth](https://img.shields.io/badge/passwords-Argon2id-2EA043?style=flat-square)
+![Sessions](https://img.shields.io/badge/refresh_tokens-rotated_reuse--detected-2EA043?style=flat-square)
+![At rest](https://img.shields.io/badge/secrets_at_rest-Fernet-4C8BF5?style=flat-square)
+![Audit](https://img.shields.io/badge/audit_trail-append--only-8957E5?style=flat-square)
+![Findings](https://img.shields.io/badge/audit_findings-16_reviewed-6E7681?style=flat-square)
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · **Security** · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
 <!-- nav:end -->
 
+</div>
+
+---
+
+**This page is both the security policy and the control set.** GitHub serves it as the
+repository's Security tab, so it opens with how to report something and then documents
+every control and why it is there.
+
 Every control below exists for a stated reason. Where a common alternative was
 rejected, the reason is given - a control whose rationale nobody remembers is a
 control that gets removed in the next refactor.
 
+---
+
+## Reporting a vulnerability
+
+**Do not open a public issue.** An issue describing a live authentication or ledger flaw
+tells everyone running this software about it at the same moment it tells the maintainer.
+
+Use **GitHub's private vulnerability reporting** on this repository - the *Security* tab,
+then *Report a vulnerability*. It creates a private thread visible only to the maintainer,
+and a fix can be prepared before anything is public. If it is disabled, email the address
+on the maintainer's GitHub profile with `SECURITY` in the subject.
+
+What to expect:
+
+| | |
+| --- | --- |
+| **Acknowledgement** | Within a few days. This is a single-maintainer project, not a staffed programme, and pretending otherwise would only set a deadline nobody meets |
+| **What helps most** | A version or commit SHA, the affected endpoint or screen, and the smallest sequence that reproduces it. A working proof of concept is welcome; it is not required |
+| **Scope** | The code in this repository. A finding against *your* deployment's proxy, DNS, or host is yours to fix - though [Deployment](deployment.md#8-pre-flight-checklist) is where to check whether the stack expected you to configure it |
+| **Disclosure** | Coordinated. Please give a reasonable window before publishing; credit is given in the fix unless you would rather not be named |
+| **Already known** | The [security audit](security-audit.md) lists sixteen findings and their fixes, and [What this does not solve](security-audit.md#what-this-does-not-solve) names the accepted limits. Checking there first saves us both a round trip |
+
+### Supported versions
+
+`main` only. There are no maintained release branches, so a fix lands on `main` and
+self-hosted installs update by pulling it. The audit report notes which findings changed
+the deployment shape rather than just the code, which is the sort of fix that needs more
+than a `git pull`.
+
+### If you run this yourself
+
+Two findings need the operator rather than the code, and both are worth reading before
+you go live: **`.env` holds live credentials** (finding 16), and **the stack terminates no
+TLS** - whatever proxy you put in front is a control surface this repository cannot check
+for you.
+
+---
+
+## On this page
+
+| Section | What it covers |
+| --- | --- |
+| [Threat model](#threat-model) | What this defends against, in order of likelihood |
+| [Reaching the API at all](#reaching-the-api-at-all) | Why there is no edge gateway, origin enforcement, host/method/size limits |
+| [Who is calling](#who-is-calling---client-address-resolution) | Client address resolution, and why the left-most `X-Forwarded-For` is a trap |
+| [Authentication](#authentication) | Argon2id, password policy, device sign-in, enumeration, lockout, TOTP |
+| [Session management](#session-management) | The token split, rotation with reuse detection, revoking a stateless token |
+| [Authorization](#authorization) | Permissions in code, staleness bounds, tenant isolation, lockout prevention |
+| [Input handling](#input-handling) | Validation boundaries and mass-assignment defence |
+| [Document storage](#document-storage) | Attacker-controlled paths, tenant predicates, byte-exact round trips |
+| [Secrets and logging](#secrets-and-logging) | Redaction, card numbers and PCI DSS scope, encrypted bank details |
+| [Rate limiting](#rate-limiting) | Both layers, and why both fail open |
+| [Transport and headers](#transport-and-headers) | What this application sets, and what it cannot |
+| [OWASP Top 10](#owasp-top-10-2021) | The mapping |
+| [Deferred](#deferred-to-later-stages) | Stated plainly rather than left implied |
+
 For the findings that produced the rate-limiting and header controls described here -
 including one critical issue in the test harness and the reason a shipped client cannot
-authenticate itself - see [security-audit.md](security-audit.md). That report predates the
-removal of the edge-gateway check; the note in its access-control section says what changed.
+authenticate itself - see [security-audit.md](security-audit.md). **That report predates
+two changes**: the edge-gateway check was removed, and the nginx/certbot edge was removed
+from the production stack entirely. Findings 3 and 5 carry notes saying so.
 
 ---
 
@@ -35,9 +110,10 @@ What this system is actually defending against, in rough order of likelihood:
 | Leaked database dump | Passwords hashed, tokens digested, 2FA secrets encrypted |
 | A tenant locking itself out | Owner cannot be removed, suspended, or demoted |
 
-Explicitly **out of scope for Stage 1**: DDoS beyond basic rate limiting, insider
-threat at the infrastructure level, and supply-chain attestation. Those belong to
-Stage 10.
+Explicitly **out of scope**: volumetric DDoS, insider threat at the infrastructure
+level, and supply-chain attestation. The first belongs to whatever sits in front of
+this stack; the other two belong to Stage 10 (production hardening), and neither is
+claimed to be handled today.
 
 ---
 
@@ -739,11 +815,17 @@ project on that port.
 | A03 Injection | Parameterised ORM queries, allow-listed sorts, Pydantic validation, Jinja autoescape |
 | A04 Insecure design | Staged delivery, threat model, lockout prevention, reversible migrations |
 | A05 Misconfiguration | Boot-time production validation (https origins, strong secrets, rate limiting and origin enforcement all required), no docs in production, non-root read-only containers with all capabilities dropped, internal-only data network |
-| A06 Vulnerable components | Pinned lockfiles, `--frozen` installs in CI, zero npm advisories |
+| A06 Vulnerable components | Pinned lockfiles both sides; `npm ci` in CI installs the lockfile exactly and fails if it disagrees with `package.json`. `uv sync --frozen` is a local gate only - see the note below |
 | A07 Auth failures | 2FA, lockout, rotation with reuse detection, no enumeration, session revocation |
-| A08 Integrity failures | Append-only audit, SHA-pinned image tags, migration drift check in CI |
+| A08 Integrity failures | Append-only audit, pinned base images, `alembic check` for migration drift - run locally, not in CI |
 | A09 Logging failures | logifyx everywhere with redaction, audit trail, request-id correlation |
-| A10 SSRF | No user-supplied URLs are fetched server-side in Stage 1 |
+| A10 SSRF | No user-supplied URL is fetched server-side. Documents arrive as uploaded bytes, never as a URL the server retrieves |
+
+> **Two rows above depend on a person, not a pipeline.** CI runs the frontend checks and
+> validates the compose files; the backend job was removed when builds moved to Render and
+> Vercel. So `uv sync --frozen`, `alembic check`, ruff, mypy and pytest block nothing on
+> their own - `make check` before pushing is what enforces them. Restoring that job is the
+> single highest-value hardening change available to this repository.
 
 ---
 

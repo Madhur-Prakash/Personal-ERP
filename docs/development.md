@@ -1,8 +1,16 @@
+<div align="center">
+
 # Development
+
+**Local setup, the conventions that are not style preferences, testing, and the gotchas.**
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · **Development** · [Deployment](deployment.md)
 <!-- nav:end -->
+
+</div>
+
+---
 
 ## Setup
 

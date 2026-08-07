@@ -1,10 +1,28 @@
+<div align="center">
+
 # Database
+
+**The schema, the indexes and why each exists, migrations, transactions, backups.**
+
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![Keys](https://img.shields.io/badge/primary_keys-UUIDv7-6E7681?style=flat-square)
+![Migrations](https://img.shields.io/badge/Alembic-reversible-8957E5?style=flat-square)
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · **Database** · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
 <!-- nav:end -->
 
-PostgreSQL 17. Seven tables in Stage 1, plus Alembic's `alembic_version`.
+</div>
+
+---
+
+PostgreSQL 17, plus Alembic's `alembic_version`.
+
+**The diagram below covers the foundation tables only** - users, organizations, roles,
+memberships, sessions, invitations, audit. Those are the ones whose constraints are worth
+reading in full, and they are stable. The commercial modules add their own tables under
+the same conventions, and the authoritative shape of those is the models themselves:
+`backend/app/modules/<name>/models.py`.
 
 ---
 

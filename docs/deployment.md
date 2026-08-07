@@ -1,8 +1,20 @@
+<div align="center">
+
 # Deployment
+
+**Self-hosting on a VPS: configuration, the proxy you supply, backups, updates.**
+
+![Stack](https://img.shields.io/badge/services-postgres_redis_migrate_backend_frontend-2496ED?style=flat-square&logo=docker&logoColor=white)
+![TLS](https://img.shields.io/badge/TLS-terminated_in_front-D29922?style=flat-square)
+![Managed](https://img.shields.io/badge/managed-Render_+_Vercel-000000?style=flat-square&logo=vercel&logoColor=white)
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · **Deployment**
 <!-- nav:end -->
+
+</div>
+
+---
 
 Self-hosted on a single VPS with Docker Compose. Everything below assumes Ubuntu
 22.04+ or Debian 12+.

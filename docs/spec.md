@@ -1,8 +1,16 @@
-# Personal ERP - master specification
+<div align="center">
+
+# Master specification
+
+**What this is meant to be: product goals, modules, delivery model, non-negotiables.**
 
 <!-- nav:start -->
 [Docs](README.md) · **Spec** · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
 <!-- nav:end -->
+
+</div>
+
+---
 
 The requirements document for this project. It lived in a chat prompt for the first
 two modules; it lives here now so it is versioned alongside the code it describes.

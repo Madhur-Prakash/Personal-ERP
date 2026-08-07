@@ -1,12 +1,24 @@
+<div align="center">
+
 # Accounting core
+
+**The double-entry ledger: its invariants, exact money, reversals, and the fiscal calendar.**
+
+![Money](https://img.shields.io/badge/money-NUMERIC(18,4)_never_float-2EA043?style=flat-square)
+![Entries](https://img.shields.io/badge/posted_entries-immutable-DA3633?style=flat-square)
+![Correction](https://img.shields.io/badge/correction-by_reversal-D29922?style=flat-square)
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · **Accounting** · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
 <!-- nav:end -->
 
-The double-entry ledger. Every later stage posts into it: Stage 3 invoices hit the
-sales journal, Stage 4 goods receipts move inventory and recognise COGS, Stage 5
-OCR produces draft entries, Stage 8 reports read the ledger.
+</div>
+
+---
+
+The double-entry ledger. Every commercial module posts into it: invoices hit the
+sales journal, goods receipts move inventory and recognise COGS, scanned documents
+produce a draft a human confirms, and every report reads back out of it.
 
 Getting this wrong is not recoverable later, so each invariant is enforced in
 three places - Pydantic schema, service, and database constraint.

@@ -1,8 +1,16 @@
+<div align="center">
+
 # Architecture
+
+**Layering, the request lifecycle end to end, and how fifteen modules fit together.**
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · **Architecture** · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
 <!-- nav:end -->
+
+</div>
+
+---
 
 ## Guiding principle
 
