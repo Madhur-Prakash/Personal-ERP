@@ -8,7 +8,6 @@
 ![Sessions](https://img.shields.io/badge/refresh_tokens-rotated_reuse--detected-2EA043?style=flat-square)
 ![At rest](https://img.shields.io/badge/secrets_at_rest-Fernet-4C8BF5?style=flat-square)
 ![Audit](https://img.shields.io/badge/audit_trail-append--only-8957E5?style=flat-square)
-![Findings](https://img.shields.io/badge/audit_findings-16_reviewed-6E7681?style=flat-square)
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · **Security** · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)

@@ -4,10 +4,7 @@
 
 **A self-hosted ERP for small businesses. Simple to run, yours to keep.**
 
-[![CI](https://github.com/Madhur-Prakash/Personal-ERP/actions/workflows/ci.yml/badge.svg)](https://github.com/Madhur-Prakash/Personal-ERP/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/badge/licence-MIT-2EA043?style=flat-square)](LICENSE)
-![API](https://img.shields.io/badge/API-197_operations-4C8BF5?style=flat-square)
-![Modules](https://img.shields.io/badge/backend_modules-15-8957E5?style=flat-square)
 ![Permissions](https://img.shields.io/badge/RBAC-42_permissions-8957E5?style=flat-square)
 ![Self-hosted](https://img.shields.io/badge/self--hosted-one_compose_file-6E7681?style=flat-square)
 
@@ -19,10 +16,8 @@
 
 ![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
 ![Flutter](https://img.shields.io/badge/Flutter-3.44-02569B?style=flat-square&logo=flutter&logoColor=white)
-![Dart](https://img.shields.io/badge/Dart-3.12-0175C2?style=flat-square&logo=dart&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
 [Documentation](docs/README.md) · [Quick start](#quick-start) · [Architecture](docs/architecture.md) · [Security](docs/security.md) · [Deployment](docs/deployment.md)
