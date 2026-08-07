@@ -234,9 +234,27 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop the constraints and put the member names back."""
+    """Drop the constraints and put the member names back.
+
+    **``IF EXISTS``, not ``op.drop_constraint``.** This migration creates
+    ``ck_audit_log_auditaction``, but two later migrations own it afterwards:
+    ``b7c4e19d2a83`` rebuilds it to match the grown enum, and ``c4d18a6f2b30`` widens it
+    again for ``document.corrected``. Both *drop* it on their own downgrade and neither
+    recreates it - so by the time this runs in a full ``downgrade base`` the constraint is
+    already gone, and a bare ``DROP CONSTRAINT`` aborts the entire chain with
+    ``UndefinedObjectError``.
+
+    A downgrade has to tolerate the schema a *later* migration left behind, which is not
+    the shape this migration's own upgrade produced.
+
+    The name is written out rather than passed to ``op.drop_constraint`` because the
+    metadata naming convention is ``ck_%(table_name)s_%(constraint_name)s`` and the names
+    in :data:`ENUM_COLUMNS` already begin with ``ck_``, so what exists in the database is
+    the doubled ``ck_audit_log_ck_audit_log_auditaction``. Spelling it here keeps this
+    statement naming the same object as the two migrations above.
+    """
     for table, column, mapping, constraint in ENUM_COLUMNS:
-        op.drop_constraint(constraint, table, type_="check")
+        op.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS ck_{table}_{constraint}")
 
         for name, value in mapping.items():
             if name == value:
