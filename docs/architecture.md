@@ -43,23 +43,23 @@ rows, and receive them as a plain value object rather than importing `Request`.
 
 ```mermaid
 graph TB
-    subgraph Client
+    subgraph Clients
         B[Browser<br/>React 19 SPA]
+        D[Desktop<br/>Flutter]
     end
 
-    subgraph Edge
-        N[Nginx<br/>TLS · rate limit · routing]
+    subgraph Edge["Edge - not in this repository"]
+        N[Platform router or your reverse proxy<br/>TLS · certificates · volumetric shedding]
     end
 
     subgraph Application
-        F[Frontend container<br/>static assets]
-        A1[FastAPI replica 1]
-        A2[FastAPI replica 2]
+        F[Frontend container<br/>static assets, :8080]
+        A[FastAPI<br/>router → service → repository, :8000]
     end
 
     subgraph State
-        P[(PostgreSQL 17<br/>durable)]
-        R[(Redis 7<br/>ephemeral)]
+        P[(PostgreSQL 17<br/>durable · ledger · documents)]
+        R[(Redis 7<br/>ephemeral · sessions · limits)]
     end
 
     subgraph External
@@ -67,20 +67,24 @@ graph TB
     end
 
     B -->|HTTPS| N
+    D -->|HTTPS| N
     N -->|/| F
-    N -->|/api/*| A1
-    N -->|/api/*| A2
-    A1 --> P
-    A2 --> P
-    A1 --> R
-    A2 --> R
-    A1 --> S
+    N -->|/api/*| A
+    A --> P
+    A --> R
+    A --> S
 ```
 
-The API replicas are stateless. Everything that must survive a restart is in
-PostgreSQL; everything short-lived is in Redis. That is what allows replicas to be
-added, removed, or restarted independently, and what makes `start-first` rolling
-deploys safe.
+**The edge is dashed for a reason: nothing in this repository is it.** TLS is
+terminated by Render's router in the managed deployment, and by whatever proxy the
+operator already runs in a self-hosted one. `docker-compose.prod.yml` publishes the
+two HTTP ports above on loopback and stops there - see
+[Deployment](deployment.md#3-tls---in-front-of-the-stack).
+
+The API process is stateless regardless. Everything that must survive a restart is in
+PostgreSQL; everything short-lived is in Redis. That is what allows instances to be
+added, removed, or restarted independently - and the only thing currently missing for
+horizontal scale is something to balance across them.
 
 ### What lives where, and why
 
@@ -166,32 +170,57 @@ matters more in accounting than anywhere else.
 
 ## Modules
 
-```mermaid
-graph LR
-    subgraph core
-        CFG[config] --- LOG[logging]
-        SEC[security] --- EXC[exceptions]
-        MW[middleware] --- PAG[pagination]
-    end
+Fifteen modules, in three tiers. An arrow is a real domain dependency, not an
+import of convenience.
 
-    subgraph modules
+```mermaid
+graph TD
+    subgraph Platform
         AUTH[auth] --> USERS[users]
         AUTH --> ORGS[organizations]
-        AUTH --> RBAC[rbac]
-        ORGS --> RBAC
-        AUTH --> AUDIT[audit]
-        ORGS --> AUDIT
-        RBAC --> AUDIT
+        ORGS --> RBAC[rbac]
+        ORGS --> AUDIT[audit]
         AUTH --> NOTIF[notifications]
-        ORGS --> NOTIF
+        HEALTH[health]
     end
 
-    modules --> core
+    subgraph Ledger
+        ACCT[accounting]
+    end
+
+    subgraph Commerce
+        BILL[billing]
+        SALES[sales]
+        PURCH[purchasing]
+        OCR[ocr]
+        TAX[tax]
+        ANALYTICS[analytics]
+    end
+
+    ORGS --> ACCT
+    ACCT --> BILL
+    ACCT --> SALES
+    ACCT --> PURCH
+    TAX --> SALES
+    TAX --> PURCH
+    PURCH --> OCR
+    ACCT --> ANALYTICS
 ```
 
 `core` depends on nothing in `modules`. Modules depend on `core` and, where a
 real domain relationship exists, on each other - `organizations` needs `rbac`
 because a membership holds a role.
+
+**Everything commercial points at `accounting`, and never the reverse.** An invoice
+is not a record that resembles a ledger entry; issuing one *is* two postings plus a
+tax line. `PostingService.post_simple` is the single contract they all call, which is
+why the ledger had to be stable before any of them were built.
+
+`ocr` is the one module that depends on another module's *service* rather than the
+ledger: confirming a scanned document calls `BillService.create`, the same entry
+point `POST /bills` uses. It has no posting path of its own, deliberately - a second
+one would eventually diverge, and the divergence would be in code that writes to the
+ledger.
 
 Cross-module imports use string-based SQLAlchemy relationships
 (`"OrganizationMember"`) to avoid import cycles;
@@ -285,7 +314,7 @@ Adding a module (say, invoices in Stage 3):
    silently omits them.
 3. Add permissions to the `Permission` enum and a `PermissionGroup`. The
    permission-group test asserts every permission belongs to exactly one group,
-   so a forgotten entry fails CI.
+   so a forgotten entry fails the suite.
 4. `repository.py`, `schemas.py`, `service.py`, `router.py`.
 5. Mount the router in `api/v1/router.py`.
 6. `make migration m="add invoice tables"`, then review the generated SQL.

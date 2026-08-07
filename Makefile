@@ -283,11 +283,31 @@ prod-migrate: ## Apply migrations in production
 prod-config: ## Validate the production compose file
 	$(COMPOSE_PROD) config --quiet && echo "docker-compose.prod.yml is valid"
 
+# Backup and restore run entirely through the postgres container, so there is no
+# script tree to keep in sync with the compose file and nothing extra to install
+# on the server. `./backups` is the host side of the container's /backups mount.
 .PHONY: backup
-backup: ## Back up the production database
-	./infra/scripts/backup.sh
+backup: ## Back up the production database to ./backups
+	@mkdir -p backups
+	@name="personalerp-$$(date -u +%Y%m%dT%H%M%SZ).dump"; \
+	echo "dumping to backups/$$name"; \
+	$(COMPOSE_PROD) exec -T -e DUMP="/backups/$$name" postgres sh -c \
+	  'pg_dump -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" --format=custom --file="$$DUMP.partial" \
+	   && pg_restore --list "$$DUMP.partial" > /dev/null \
+	   && mv "$$DUMP.partial" "$$DUMP"'; \
+	echo "verified backups/$$name"
 
 .PHONY: restore
-restore: ## Restore from a backup: make restore f=path/to.dump
-	@test -n "$(f)" || { echo 'Usage: make restore f=infra/backups/personalerp-....dump'; exit 1; }
-	./infra/scripts/restore.sh "$(f)"
+restore: ## Restore from a backup: make restore f=backups/personalerp-....dump
+	@test -n "$(f)" || { echo 'Usage: make restore f=backups/personalerp-....dump'; exit 1; }
+	@test -f "$(f)" || { echo "no such file: $(f)"; exit 1; }
+	@echo "This REPLACES the production database with $(f)."
+	@read -p 'Type the database name to confirm: ' answer; \
+	expected=$$(grep -E '^POSTGRES_DB=' .env | cut -d= -f2-); \
+	test "$$answer" = "$$expected" || { echo 'aborted'; exit 1; }
+	$(COMPOSE_PROD) stop backend
+	$(COMPOSE_PROD) exec -T postgres sh -c \
+	  'pg_restore -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" --clean --if-exists \
+	     --single-transaction --no-owner' < "$(f)"
+	$(COMPOSE_PROD) run --rm migrate
+	$(COMPOSE_PROD) start backend

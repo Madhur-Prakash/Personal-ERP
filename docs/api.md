@@ -106,7 +106,7 @@ of reasons.
 
 ## Endpoints
 
-177 operations across 136 paths. The tables below cover the platform modules and
+197 operations across 152 paths. The tables below cover the platform modules and
 scanned documents in prose because their rules are not visible from a schema. For
 the commercial modules - accounting, sales, purchasing, inventory - **the generated
 OpenAPI schema at `/docs` is the reference**, and it is authoritative: it is
@@ -402,17 +402,26 @@ in URLs.
 
 ## Rate limits
 
-Two layers. Both send `X-RateLimit-Limit`, `X-RateLimit-Remaining`,
-`X-RateLimit-Reset`, and `Retry-After` on rejection.
+Enforced in the application, per IP. Responses carry `X-RateLimit-Limit`,
+`X-RateLimit-Remaining`, `X-RateLimit-Reset`, and `Retry-After` on rejection.
 
-| Scope | App | Edge (Nginx) |
-| --- | --- | --- |
-| Default | 200/min per IP | 30 r/s, burst 100 |
-| Auth paths | 10/min per IP | 2 r/s, burst 8 |
-| `/health/*` | exempt | exempt |
+| Scope | Limit |
+| --- | --- |
+| Default | 200/min per IP |
+| Auth paths | 10/min per IP |
+| `/health/*` | exempt |
 
 Separately, per-account lockout after 5 failed logins - keyed on the email, since
 an attacker rotates IPs trivially.
+
+**Nothing sheds a volumetric flood before it reaches this application.** There is no
+proxy in the stack, so whatever budget the platform router or your own reverse proxy
+applies is the only layer in front of Python. The limits above run *after* the request
+has arrived, and buy per-caller fairness rather than capacity protection.
+
+The per-IP limit is only as good as the caller's resolved address: set
+`TRUSTED_PROXY_HOPS` to the number of proxies in front, or every request shares one
+budget under the proxy's own address.
 
 ---
 

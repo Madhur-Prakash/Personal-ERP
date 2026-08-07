@@ -42,8 +42,10 @@ secrets/
 
 # ---- Infra volumes ----
 .docker-data/
-infra/nginx/certs/
-infra/certbot/
+
+# Database dumps written by the production stack's `/backups` mount. Never
+# committed: they are the whole database, secrets and customer data included.
+backups/
 
 .vercel/
 

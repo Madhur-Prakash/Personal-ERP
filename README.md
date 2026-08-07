@@ -5,21 +5,25 @@
 **A self-hosted ERP for small businesses. Simple to run, yours to keep.**
 
 [![CI](https://github.com/Madhur-Prakash/Personal-ERP/actions/workflows/ci.yml/badge.svg)](https://github.com/Madhur-Prakash/Personal-ERP/actions/workflows/ci.yml)
-![Backend tests](https://img.shields.io/badge/backend_tests-714_passing-2EA043?style=flat-square)
-![Desktop tests](https://img.shields.io/badge/desktop_tests-42_passing-2EA043?style=flat-square)
-![API](https://img.shields.io/badge/API-177_operations-4C8BF5?style=flat-square)
-![Licence](https://img.shields.io/badge/licence-proprietary-6E7681?style=flat-square)
+[![Licence](https://img.shields.io/badge/licence-MIT-2EA043?style=flat-square)](LICENSE)
+![API](https://img.shields.io/badge/API-197_operations-4C8BF5?style=flat-square)
+![Modules](https://img.shields.io/badge/backend_modules-15-8957E5?style=flat-square)
+![Permissions](https://img.shields.io/badge/RBAC-42_permissions-8957E5?style=flat-square)
+![Self-hosted](https://img.shields.io/badge/self--hosted-one_compose_file-6E7681?style=flat-square)
 
 ![Python](https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.118-009688?style=flat-square&logo=fastapi&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0_async-D71F00?style=flat-square&logo=sqlalchemy&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-7-FF4438?style=flat-square&logo=redis&logoColor=white)
+
 ![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
 ![Flutter](https://img.shields.io/badge/Flutter-3.44-02569B?style=flat-square&logo=flutter&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Dart](https://img.shields.io/badge/Dart-3.12-0175C2?style=flat-square&logo=dart&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
 [Documentation](docs/README.md) · [Quick start](#quick-start) · [Architecture](docs/architecture.md) · [Security](docs/security.md) · [Deployment](docs/deployment.md)
 
@@ -60,7 +64,7 @@ The design constraint is **restraint**:
 - React 19 + TypeScript + Vite web client
 - Flutter desktop client for Windows, macOS and Linux - same screens, same API, stays signed in across restarts
 - Alembic migrations: reversible and drift-checked
-- CI, Nginx, TLS, backups, zero-downtime deploy
+- CI on every push, verified backups, and a production stack that expects a proxy in front rather than shipping one
 
 </td></tr>
 
@@ -211,8 +215,8 @@ graph TB
         D[Desktop<br/>Flutter]
     end
 
-    subgraph Edge
-        N[Nginx<br/>TLS · rate limit · routing]
+    subgraph Edge["Edge - platform router or your own proxy"]
+        N[TLS · certificates · flood shedding]
     end
 
     subgraph Application
@@ -230,6 +234,12 @@ graph TB
     A --> P
     A --> R
 ```
+
+**The edge is not in this repository.** The API is served behind Render's router and
+the web client behind Vercel; a self-hosted install puts its own reverse proxy in
+front. `docker-compose.prod.yml` publishes plain HTTP on loopback and terminates no
+TLS - [Deployment](docs/deployment.md#3-tls---in-front-of-the-stack) says what that
+proxy has to do.
 
 **Dependencies point inward** - `router → service → repository → models`:
 
@@ -255,7 +265,7 @@ graph TB
 │   │   ├── modules/         One vertical slice per bounded context
 │   │   └── api/v1/          Router aggregation
 │   ├── migrations/          Alembic
-│   └── tests/               pytest - 714 tests
+│   └── tests/               pytest, against real PostgreSQL + Redis
 ├── frontend/                React 19 · TypeScript · Vite · Tailwind v4
 │   └── src/
 │       ├── components/      Design-system primitives and layout
@@ -269,12 +279,13 @@ graph TB
 │       ├── features/        One directory per screen, mirroring frontend/src/features
 │       └── core/            Env, HTTP client with a cookie jar, exact-decimal money
 ├── installer/               Inno Setup script for the Windows desktop build
-├── infra/
-│   ├── nginx/               Edge reverse proxy, TLS, rate limiting
-│   └── scripts/             Backup and restore
 ├── docs/                    Nine documents - start at docs/README.md
-└── .github/workflows/       CI
+└── .github/workflows/       CI - ci.yml
 ```
+
+That is the whole tree. There is no `infra/`: the production stack ships no proxy and
+no scripts, `make backup` and `make restore` run `pg_dump`/`pg_restore` inside the
+postgres container, and TLS belongs to whatever sits in front.
 
 Every backend module is the same vertical slice:
 
@@ -315,7 +326,7 @@ Each is explained where it lives, in the code.
 | **Backend** | FastAPI · Python 3.13 · uv · SQLAlchemy 2 (async) · Alembic · PostgreSQL 17 · Redis 7 · Pydantic v2 · Argon2id · PyJWT · pyotp · httpx · [logifyx](https://pypi.org/project/logifyx/) |
 | **Frontend** | React 19 · TypeScript · Vite 7 · Tailwind CSS v4 · TanStack Router/Query/Table · React Hook Form · Zod · Recharts · cmdk · Sonner · Lucide · Motion |
 | **Desktop** | Flutter 3.44 · Dart 3.12 · Material 3 · Riverpod · go_router · Dio with a persisted cookie jar · fl_chart · Lucide |
-| **Infrastructure** | Docker · Nginx · Let's Encrypt · GitHub Actions · Inno Setup |
+| **Infrastructure** | Docker Compose · GitHub Actions · Inno Setup · Render (API) and Vercel (web) for the managed deployment |
 
 > The desktop client uses the same API and the same design tokens - see
 > [app_frontend/README.md](app_frontend/README.md) for the four places a native window
@@ -329,23 +340,29 @@ Backend commands run from `backend/`, frontend commands from `frontend/`.
 
 ### Quality gates
 
-All are blocking in CI, so run them before pushing.
+`make check` runs all of them. One command per surface, if you prefer:
 
-| Backend | Frontend | Purpose |
-| --- | --- | --- |
-| `uv run ruff check app tests` | `npm run lint` | Find problems |
-| `uv run ruff format .` | `npm run format` | Fix formatting |
-| `uv run mypy app` | `npm run typecheck` | Typecheck |
-| `uv run pytest` | `npm run build` | Prove it works |
+| Backend | Frontend | Desktop | Purpose |
+| --- | --- | --- | --- |
+| `uv run ruff check app tests` | `npm run lint` | `dart format` | Find problems |
+| `uv run ruff format .` | `npm run format` | `dart format lib test` | Fix formatting |
+| `uv run mypy app` | `npm run typecheck` | `flutter analyze` | Typecheck |
+| `uv run pytest` | `npm run build` | `flutter test` | Prove it works |
 
 - **[ruff](https://docs.astral.sh/ruff/)** is linter and formatter in one, well under a second across the backend. Beyond style it enforces two things that matter here: `T20` bans `print()` so logging cannot bypass logifyx and lose its masking, and `ASYNC` catches blocking calls inside `async def` that would stall the event loop rather than one request
 - **[mypy](https://mypy-lang.org/)** runs `strict`. Its real job is making `None` impossible to ignore - `User.password_hash` is nullable for magic-link and invited users, and mypy forces every call site to handle that before reaching Argon2
-- CI runs `ruff check .` and `ruff format --check .` (the non-mutating form) across the whole project; narrowing to `app tests` locally is faster and covers what you edit
+
+> **What CI actually blocks on today.**
+> [`ci.yml`](.github/workflows/ci.yml) runs two jobs: **Frontend** (`tsc -b`, `eslint`,
+> `prettier --check`, `vite build`) and **Compose config** (both stacks parsed and
+> schema-checked). The backend job was removed when builds moved to Render and Vercel,
+> so **ruff, mypy, pytest and `alembic check` are local gates only** - nothing stops a
+> red backend from merging. Run `make check` before pushing and mean it.
 
 ### Tests, migrations, servers
 
 ```bash
-uv run pytest                                      # 714 tests, needs postgres + redis
+uv run pytest                                      # needs postgres + redis
 uv run pytest -q -k auth                           # just the auth suite
 uv run pytest --cov                                # with coverage
 
@@ -366,27 +383,31 @@ make desktop                                       # desktop client → native w
 
 ---
 
-## Verified state
+## How it is checked
 
-Everything below was run against real infrastructure, not mocks.
+**Against real infrastructure, not mocks.** The backend suite runs on PostgreSQL 17 and
+Redis 7 in containers, because the things worth testing here - partial unique indexes,
+JSONB behaviour, cursor pagination, `SELECT … FOR UPDATE` under concurrency - are exactly
+the things a substitute engine implements differently. Passing against SQLite would prove
+nothing.
 
-| Component | Result |
-| --- | --- |
-| Backend tests | 714 passing against PostgreSQL 17 + Redis 7 |
-| Backend lint | ruff: all checks passed |
-| Migrations | Apply, reverse, and report zero drift |
-| Frontend types | `tsc -b`: 0 errors |
-| Frontend lint | eslint: 0 problems, type-aware rules enabled |
-| Frontend build | `vite build` succeeds, 0 vulnerabilities in the dependency tree |
-| Desktop analysis | `flutter analyze`: 0 issues |
-| Desktop tests | 42 passing, including a live session round-trip against the API |
-| Desktop release | Windows binary builds, starts, and restores its session across three consecutive relaunches with no token reuse detected |
-| Compose | Dev and prod files validate |
-| Images | Both production images build, run non-root, and pass health checks |
-| Live journey | register → verify → login → refresh rotation → reuse detection → lineage revocation → critical audit row |
+| Surface | What runs | Where it runs |
+| --- | --- | --- |
+| Backend | `pytest` against real PostgreSQL + Redis, `ruff`, `mypy --strict` | Local / `make check` |
+| Migrations | `upgrade → downgrade → upgrade`, then `alembic check` for drift | Local / `make db-check` |
+| Web | `tsc -b`, `eslint` with type-aware rules, `prettier --check`, `vite build` | **CI** |
+| Desktop | `flutter analyze`, `flutter test` (a live API round-trip included, skipped when the stack is down) | Local / `make check` |
+| Compose | `docker compose config` on both the dev and prod stacks | **CI** |
 
-Coverage focuses where a bug is expensive: token rotation and reuse detection, permission
-expansion, cross-tenant isolation, owner-lockout prevention, and secret redaction.
+Coverage is weighted toward where a bug is expensive rather than toward a percentage:
+token rotation and reuse detection, permission expansion, cross-tenant isolation,
+owner-lockout prevention, ledger balance under concurrency, and secret redaction. Several
+suites assert a *refusal* - the cross-tenant cases attempt the bad thing and require a 404.
+
+Two properties were verified by hand rather than by a runner, because no runner can:
+a Windows release binary restores its session across three consecutive relaunches with no
+reuse detection server-side, and the live journey register → verify → login → rotation →
+reuse → lineage revocation lands the expected critical audit row.
 
 ---
 
@@ -403,13 +424,19 @@ documents relate. Every page carries a nav bar to every other.
 | [Accounting](docs/accounting.md) | Double-entry invariants, exact money, reversals, numbering, fiscal calendar |
 | [API](docs/api.md) | Auth flows, error contract, pagination, endpoints |
 | [Security](docs/security.md) | Threat model and every control, with rationale |
-| [Security audit](docs/security-audit.md) | Nine findings against running code, each with its fix and how to verify it |
+| [Security audit](docs/security-audit.md) | Sixteen findings against running code, each with its fix and how to verify it |
 | [Development](docs/development.md) | Local workflow, conventions, testing, adding a module |
-| [Deployment](docs/deployment.md) | VPS setup, TLS, backups, zero-downtime deploys |
+| [Deployment](docs/deployment.md) | VPS setup, the proxy you supply, backups, updates, pre-flight checklist |
 
-**Elsewhere:** [`app_frontend/README.md`](app_frontend/README.md) for the desktop client ·
-[`installer/README.md`](installer/README.md) for packaging the Windows build ·
-`/docs` on a running server for the generated OpenAPI reference.
+**Elsewhere in the repository:**
+
+| | |
+| --- | --- |
+| [`backend/README.md`](backend/README.md) | The FastAPI service - layout, commands, configuration |
+| [`frontend/README.md`](frontend/README.md) | The React web client - structure, conventions, build |
+| [`app_frontend/README.md`](app_frontend/README.md) | The Flutter desktop client, and where a native window honestly differs |
+| [`installer/README.md`](installer/README.md) | Packaging the Windows build with Inno Setup |
+| `/docs` on a running server | The generated OpenAPI reference - authoritative for the commercial modules |
 
 ---
 
@@ -460,4 +487,5 @@ rather than quietly rendering figures derived from a broken ledger.
 
 ## Licence
 
-Proprietary. All rights reserved.
+[MIT](LICENSE) - © 2026 Madhur Prakash Mangal. Use it, fork it, run it for your own
+business; keep the copyright notice with it.

@@ -1,7 +1,21 @@
+<div align="center">
+
 # Personal ERP - desktop client
 
 **The same product as the web app, as a native window.** Same screens, same design tokens,
 same backend. Windows, macOS, and Linux from one codebase.
+
+![Flutter](https://img.shields.io/badge/Flutter-3.44-02569B?style=flat-square&logo=flutter&logoColor=white)
+![Dart](https://img.shields.io/badge/Dart-3.12-0175C2?style=flat-square&logo=dart&logoColor=white)
+![Material](https://img.shields.io/badge/Material-3-757575?style=flat-square&logo=materialdesign&logoColor=white)
+![Riverpod](https://img.shields.io/badge/Riverpod-state-4A90E2?style=flat-square)
+![Platforms](https://img.shields.io/badge/platforms-Windows_macOS_Linux-6E7681?style=flat-square)
+
+[Root README](../README.md) · [API](../docs/api.md) · [Architecture](../docs/architecture.md) · [Installer](../installer/README.md)
+
+</div>
+
+---
 
 This is not a wrapper around the website. There is no embedded browser and no bundled web
 build: it is a Flutter application that talks to the same FastAPI backend over the same
@@ -222,7 +236,8 @@ tips, the reversal-not-delete flow, the exact wording of every explanation - is 
 flutter test
 ```
 
-92 unit and widget tests plus one integration test.
+105 unit and widget tests, plus one integration test that marks itself skipped when the
+backend is not running - so `flutter test` stays usable without Docker.
 
 The unit tests cover what must not be approximately right: the money path (exact decimal
 formatting, `BigInt` summation, scale-insensitive comparison), the OKLCH conversion, the

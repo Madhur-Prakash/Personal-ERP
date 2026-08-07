@@ -158,8 +158,13 @@ while destroying others, so there was nothing safe to add.
 **Planned per module** - Celery + Redis Streams (automation),
 Ollama/OpenAI-compatible + Sentence Transformers + Qdrant + LangGraph (AI).
 
-**Infrastructure** - Docker Compose, Nginx, GitHub Actions, Prometheus, Grafana,
-Loki, Sentry. Self-hosted on one VPS.
+**Infrastructure** - Docker Compose and GitHub Actions, deployed either on one VPS
+behind a reverse proxy the operator already runs, or on managed hosting (Render for
+the API, Vercel for the web client). **No proxy ships in this repository**: an nginx
+and certbot pair lived in the production stack, could not start because their
+configuration was never committed, and were removed rather than rebuilt - the edge is
+one of the few things every host already has an opinion about. Prometheus, Grafana,
+Loki and Sentry remain planned rather than present.
 
 No object store. Uploaded documents are compressed into PostgreSQL, so a single
 `pg_dump` captures the ledger and the scans that support it at one consistent moment
@@ -176,7 +181,7 @@ only when a real deployment's load demands it.
 
 ## Quality gates
 
-All blocking in CI:
+Every module passes all of these before it is called done:
 
 ```bash
 uv run ruff check app tests     # lint
@@ -189,6 +194,10 @@ uv run alembic check            # no schema drift
 Plus, per module: a reversible migration (`downgrade` then `upgrade` must both
 run), and a documented rationale in `docs/` for any decision where a common
 alternative was rejected.
+
+**These are local gates, not CI gates.** CI covers the frontend and the compose
+files only - see [Development](development.md#before-opening-a-pull-request). The bar
+is unchanged; what enforces it is discipline rather than a red check.
 
 <!-- related:start -->
 

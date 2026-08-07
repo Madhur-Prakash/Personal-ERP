@@ -1,10 +1,21 @@
+<div align="center">
+
 # Documentation
 
-Nine documents covering what this system is, how it is built, and how to run it.
+**Nine documents covering what this system is, how it is built, and how to run it.**
+
+[Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · [Deployment](deployment.md)
+
+</div>
+
+---
 
 Every one of them explains **why** as well as what. Where a common alternative was
 rejected, the reason is written down - a decision whose rationale nobody remembers is a
 decision that gets undone in the next refactor.
+
+Every page carries the nav bar above, so you are never more than one click from any
+other, and ends with three suggestions for where to go next.
 
 ---
 
@@ -34,9 +45,9 @@ Pick the row that matches what you are trying to do.
 | [**Accounting**](accounting.md) | The double-entry core: the invariants, why money is never a float, why entries are reversed rather than edited, numbering, and the fiscal calendar. |
 | [**API**](api.md) | The HTTP contract: authentication flows, the error envelope, endpoints, pagination, and rate limits. |
 | [**Security**](security.md) | The threat model and every control, each with its rationale - network edge, authentication, sessions, authorization, input handling, secrets, and rate limiting. |
-| [**Security audit**](security-audit.md) | A full review of the exposure surface: nine findings, each verified against the code, with the fix applied and how to confirm it. |
+| [**Security audit**](security-audit.md) | A full review of the exposure surface: sixteen findings, each verified against the code, with the fix applied and how to confirm it. Two carry supersession notes where the system has since changed. |
 | [**Development**](development.md) | Local setup, backend and frontend conventions, testing, the pre-PR checklist, debugging, and the gotchas hit while building this. |
-| [**Deployment**](deployment.md) | Self-hosting on a VPS: server preparation, TLS, launching, backups, zero-downtime updates, and a pre-flight checklist. |
+| [**Deployment**](deployment.md) | Self-hosting on a VPS: configuration, the proxy you have to supply, backups, updates, and a pre-flight checklist. |
 
 ---
 
@@ -76,6 +87,8 @@ where you are going.
 | | |
 | --- | --- |
 | [Root README](../README.md) | What the product does, quick start, everyday commands, and the design decisions worth knowing before reading any of the above. |
-| [`backend/README.md`](../backend/README.md) | Backend-specific notes. |
-| [`app_frontend/README.md`](../app_frontend/README.md) | The Flutter desktop client. |
-| `/docs` (running app) | Interactive OpenAPI reference, generated from the code. Development only - it is disabled in production and blocked at the edge, so [API](api.md) is the written contract. |
+| [`backend/README.md`](../backend/README.md) | The FastAPI service - layout, commands, configuration, optional extras. |
+| [`frontend/README.md`](../frontend/README.md) | The React web client - structure, conventions, design tokens. |
+| [`app_frontend/README.md`](../app_frontend/README.md) | The Flutter desktop client, and the four places a native window honestly differs from a browser. |
+| [`installer/README.md`](../installer/README.md) | Packaging the Windows build with Inno Setup. |
+| `/docs` (running app) | Interactive OpenAPI reference, generated from the code. Development only - it is disabled in production and returns 404 there, so [API](api.md) is the written contract. |

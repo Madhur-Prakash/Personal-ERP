@@ -22,7 +22,7 @@ What this system is actually defending against, in rough order of likelihood:
 | Threat | Primary control |
 | --- | --- |
 | Direct access to the API, bypassing our own edge | **Not defended** - this service *is* the edge. See below |
-| Credential stuffing from a breach elsewhere | Argon2id, per-account lockout, edge + app rate limiting, 2FA |
+| Credential stuffing from a breach elsewhere | Argon2id, per-account lockout, per-IP rate limiting, 2FA |
 | Spoofed client address defeating IP-based limits | Forwarding hops counted from the right, `--no-proxy-headers` |
 | API surface reconnaissance | No docs or OpenAPI schema in production, enforced in three places |
 | Account enumeration to build a target list | Identical responses *and timing* for existing/absent accounts |
@@ -116,11 +116,12 @@ Every IP-based control is only as good as the answer to "what is this caller's a
 and behind a proxy that answer comes from a header the caller can write.
 
 `X-Forwarded-For` is a list each proxy **appends** to. A client can send
-`X-Forwarded-For: 1.2.3.4` and our nginx faithfully appends the real address after it:
+`X-Forwarded-For: 1.2.3.4` and the router in front faithfully appends the real address
+after it:
 
 ```
 X-Forwarded-For: 1.2.3.4, 203.0.113.7
-                 ^spoofed  ^appended by our proxy - the real client
+                 ^spoofed  ^appended by the proxy - the real client
 ```
 
 So `app.core.net.client_ip` counts hops from the **right**, `TRUSTED_PROXY_HOPS` deep.
@@ -133,7 +134,8 @@ takes the left-most entry when `--forwarded-allow-ips` includes the peer, so
 as the real socket peer, one unforgeable fact underneath the resolution rule.
 
 Set `TRUSTED_PROXY_HOPS` to match the topology. Too high and the client controls its own
-apparent IP again: one nginx or one PaaS router is `1`, a CDN in front of nginx is `2`.
+apparent IP again: one reverse proxy or one platform router is `1`, a CDN in front of that
+is `2`. Deployed directly with nothing in front, it is `0`.
 
 ---
 
@@ -257,9 +259,10 @@ Two independent layers:
 - **Per-account lockout** (Redis) - 5 failures locks the account for 15 minutes.
   Keyed on email, not IP: an attacker rotates IPs trivially, and IP-based locking
   punishes everyone behind one NAT.
-- **Per-IP rate limiting** - at the edge (Nginx, 2 r/s on auth paths) and in the
-  application. Fixed-window in the app, because one `INCR` plus one `EXPIRE` keeps
-  it cheap enough to sit in front of everything.
+- **Per-IP rate limiting** in the application - a tight tier on auth paths, a looser
+  one everywhere else. Fixed-window, because one `INCR` plus one `EXPIRE` keeps it
+  cheap enough to sit in front of everything. Anything the platform router or a
+  reverse proxy sheds before that is a bonus, not a layer this system relies on.
 
 2FA failures count toward the same account lockout budget. Without that, the
 second factor is brute-forceable at leisure once the password is known.
@@ -643,17 +646,24 @@ The consequence is that **Redis availability is a security property**;
 `SWALLOW_STORAGE_ERRORS` in `app/core/limiter.py` is the switch if you want the credential
 endpoints to fail closed instead.
 
-The edge applies its own, looser `limit_req`/`limit_conn` budgets, whose job is shedding a
-volumetric flood before it reaches Python at all. Per-user fairness is the application's,
-where the caller's identity is actually known.
+**Volumetric shedding is not this system's job, and it is not claimed to be.** Whatever
+sits in front - a platform router, a CDN, a reverse proxy you run - is what stops a flood
+before it reaches Python at all. Everything above runs *after* the request has arrived, and
+buys per-caller fairness, where the caller's identity is actually known.
 
 ---
 
 ## Transport and headers
 
-TLS 1.2/1.3 only, AEAD cipher suites with forward secrecy only (no CBC, no RSA key
-exchange, no 3DES), OCSP stapling, and session tickets disabled - without key rotation a
-single stolen ticket key decrypts every session it ever issued.
+**TLS terminates in front of this application, not in it.** There is no proxy in this
+repository and none in `docker-compose.prod.yml`: the API is deployed behind Render's
+router and the web client behind Vercel, and a self-hosted stack is expected to sit behind
+a reverse proxy the operator already runs. So cipher suites, protocol versions, OCSP
+stapling and session-ticket policy are configured **there** - the checklist in
+[Deployment](deployment.md) says what to verify rather than what to paste.
+
+What this application controls is the headers on its own responses, and those it sets
+unconditionally.
 
 HSTS carries a two-year `max-age` and `includeSubDomains`. `preload` is **opt-in**
 (`HSTS_PRELOAD`): submitting a domain to the preload list is effectively permanent and
@@ -694,10 +704,12 @@ all is both correct and free.
 `Server` and `X-Powered-By` are stripped from application responses - naming the stack and
 its version is a free CVE shortlist - and uvicorn also runs with `--no-server-header`.
 
-One honest limit: the **edge** still emits `Server: nginx`. `server_tokens off` removes the
-*version*, which is the part that hands over a shortlist, but stock nginx offers no way to
-suppress the product name; that needs the third-party `headers-more` module. So a scanner
-learns "nginx" and nothing more specific.
+One honest limit: **whatever terminates TLS announces itself**, and this application cannot
+strip a header it never sees. A platform router advertises the platform; a self-hosted nginx
+emits `Server: nginx` even with `server_tokens off`, which removes the *version* - the part
+that hands over a CVE shortlist - but not the product name, since suppressing that needs the
+third-party `headers-more` module. So a scanner learns the proxy's identity and nothing more
+specific about what runs behind it.
 
 **A route that sets its own value keeps it.** The document-download endpoint returns bytes
 a stranger uploaded and sets a stricter `sandbox` CSP plus a deliberately private,

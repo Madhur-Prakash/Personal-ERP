@@ -11,6 +11,26 @@ Self-hosted on a single VPS with Docker Compose. Everything below assumes Ubuntu
 resource limits assume roughly that; PostgreSQL's `shared_buffers` should be
 raised to about 25% of RAM on anything larger.
 
+> **There is no proxy in this stack - you bring one.**
+>
+> `docker-compose.prod.yml` runs **postgres, redis, migrate, backend, frontend** and
+> nothing else. It terminates no TLS, holds no certificates, and binds neither 80 nor
+> 443. `backend` and `frontend` publish plain HTTP on `127.0.0.1` (`PUBLISH_ADDR`,
+> `BACKEND_PORT`, `FRONTEND_PORT`), so a fresh `up -d` is reachable only from the host
+> itself until you put something in front of it.
+>
+> Two supported shapes, and the first is what runs today:
+>
+> | Shape | TLS, certificates, edge rate limiting |
+> | --- | --- |
+> | **Managed** - API on Render, web client on Vercel | The platform's, and neither platform runs this compose file |
+> | **Self-hosted** - this stack on your VPS | A reverse proxy you already operate (nginx, Caddy, Traefik) forwards to the two ports below |
+>
+> Whichever you pick, set **`TRUSTED_PROXY_HOPS`** to the number of proxies in front of
+> the API - one router or one proxy is `1`, a CDN in front of that is `2`, nothing in
+> front is `0`. Get it wrong and every IP-based control reads an address the caller
+> chose; [Security](security.md#who-is-calling---client-address-resolution) explains why.
+
 ---
 
 ## 1. Prepare the server
@@ -41,7 +61,7 @@ sudo apt install -y unattended-upgrades && sudo dpkg-reconfigure -plow unattende
 ```bash
 sudo mkdir -p /srv/personalerp && sudo chown "$USER" /srv/personalerp
 git clone <repo> /srv/personalerp && cd /srv/personalerp
-cp .env.example .env
+cp .env.sample .env
 ```
 
 Generate real secrets - do not hand-write them:
@@ -68,6 +88,16 @@ FRONTEND_URL=https://app.yourdomain.com
 PUBLIC_API_URL=https://app.yourdomain.com
 LOG_JSON=true
 
+# How many proxies sit in front of the API. Wrong here means every IP-based
+# control reads an address the caller supplied. See docs/security.md.
+TRUSTED_PROXY_HOPS=1
+
+# Where the two HTTP services bind on the host. Loopback unless your proxy runs
+# on another machine and a firewall is doing the work instead.
+PUBLISH_ADDR=127.0.0.1
+BACKEND_PORT=8000
+FRONTEND_PORT=8080
+
 # Email. Base64 of a pickled Credentials with the gmail.send scope. Produce it with
 # `uv run python scripts/mint_gmail_token.py`, and keep it in a secret store.
 GMAIL_CREDENTIALS_B64=<output of scripts/mint_gmail_token.py>
@@ -90,26 +120,40 @@ traffic with a placeholder signing key.
 
 ---
 
-## 3. TLS
+## 3. TLS - in front of the stack
 
-Point an A record at the server, then edit
-`infra/nginx/conf.d/personalerp.conf`, replacing `app.example.com` with the real
-domain (three places: the HTTP block, the HTTPS block, and the certificate paths).
+Nothing in this repository terminates TLS. Point an A record at the server and let
+your proxy handle the certificate; the two upstreams it needs are the ports from
+step 2.
 
-```bash
-# The HTTP block must be live first - the ACME challenge is served over plain HTTP.
-docker compose -f docker-compose.prod.yml up -d nginx
+| Public path | Forward to | Notes |
+| --- | --- | --- |
+| `/api/`, `/health/` | `127.0.0.1:8000` | The API. Long-lived request budget on document upload - the OCR path is slow by nature |
+| everything else | `127.0.0.1:8080` | The built SPA, served by the frontend image's own nginx as an unprivileged user |
 
-docker compose -f docker-compose.prod.yml run --rm certbot certonly \
-  --webroot -w /var/www/certbot \
-  -d app.yourdomain.com \
-  --agree-tos -m you@yourdomain.com --no-eff-email
+Whatever proxies must, at minimum:
 
-docker compose -f docker-compose.prod.yml restart nginx
+- **Forward the real client address** and append rather than replace `X-Forwarded-For`,
+  then set `TRUSTED_PROXY_HOPS` to match. The application counts hops from the right
+  precisely because the left-most entry is the one a caller can write.
+- **Preserve the `Origin` header.** Every state-changing method is checked against
+  `CORS_ORIGINS`, and stripping it turns a working write into a 403.
+- **Not buffer responses indefinitely**, or report exports and file downloads stall.
+
+A minimal Caddy file does all of that with no tuning, which is why it is the easiest
+thing to reach for on a single host:
+
+```caddyfile
+app.yourdomain.com {
+    handle /api/*   { reverse_proxy 127.0.0.1:8000 }
+    handle /health/* { reverse_proxy 127.0.0.1:8000 }
+    handle          { reverse_proxy 127.0.0.1:8080 }
+}
 ```
 
-Renewal is automatic: the `certbot` service wakes twice daily and renews inside
-the 30-day window. Cheap, and a renewal is never missed.
+> **Managed deployment does this for you.** On Render the API is a service behind the
+> platform router, and on Vercel the web client is served from its edge. There is no
+> certificate to issue, renew, or forget - and no part of this section applies.
 
 ---
 
@@ -118,12 +162,14 @@ the 30-day window. Cheap, and a renewal is never missed.
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml ps
-curl -fsS https://app.yourdomain.com/health/ready
+curl -fsS http://127.0.0.1:8000/health/ready      # direct, before the proxy
+curl -fsS https://app.yourdomain.com/health/ready # through it
 ```
 
 Migrations run as a **one-shot `migrate` service** that the API waits on via
-`service_completed_successfully`. This is what makes two API replicas safe - they
-cannot race to apply the same migration.
+`service_completed_successfully`. That ordering is what stops a scaled-out API racing
+to apply the same migration, and it is why a failed migration leaves the previous
+version serving traffic untouched.
 
 Register the first account at `https://app.yourdomain.com/register`. The first user
 to create an organization becomes its owner.
@@ -132,86 +178,102 @@ to create an organization becomes its owner.
 
 ## 5. Backups
 
+`make backup` runs `pg_dump` inside the postgres container and writes to `./backups`,
+which is that container's `/backups` mount. There is no script tree to keep in step
+with the compose file and nothing extra to install on the server.
+
 ```bash
+make backup      # -> backups/personalerp-20260807T020000Z.dump
+
 # Nightly at 02:00
-(crontab -l 2>/dev/null; echo "0 2 * * * cd /srv/personalerp && ./infra/scripts/backup.sh >> logs/backup.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "0 2 * * * cd /srv/personalerp && make backup >> logs/backup.log 2>&1") | crontab -
 ```
 
-`backup.sh` writes a compressed custom-format dump, **verifies it** with
-`pg_restore --list`, and prunes archives older than 14 days. The verification step
-is not optional decoration: a backup that has never been read back is a guess.
+Two details that matter more than they look:
+
+- The dump is written as `.partial` and renamed only on success, so an interrupted
+  run never leaves a truncated file that looks like a valid backup.
+- It is **verified immediately** with `pg_restore --list` before that rename. A
+  backup that has never been read back is a guess, not a backup.
+
+Custom format, not plain SQL, because `pg_restore` can then restore selectively - a
+plain dump is all or nothing.
 
 Restoring:
 
 ```bash
-./infra/scripts/restore.sh infra/backups/personalerp-20260726T020000Z.dump
+make restore f=backups/personalerp-20260807T020000Z.dump
 ```
 
-It requires typing the database name, stops the app, restores in a single
-transaction, and re-applies any migrations newer than the backup.
+It requires typing the database name to confirm, stops the API first, restores
+inside a single transaction, re-applies any migrations newer than the backup, and
+starts the API again.
 
 **Copy backups off the machine.** A backup on the same disk as the database does
 not survive the failure it exists for:
 
 ```bash
-0 3 * * * rclone sync /srv/personalerp/infra/backups remote:personalerp-backups
+0 3 * * * rclone sync /srv/personalerp/backups remote:personalerp-backups
 ```
+
+Uploaded documents are compressed **into PostgreSQL**, so one dump captures the
+ledger and the scans supporting it at a single consistent moment. There is no second
+volume to remember.
 
 ---
 
 ## 6. Deploying updates
 
-### Automated
+**There is no deploy workflow in this repository.** `.github/workflows/ci.yml` runs
+checks and builds nothing that gets shipped - the managed deployment builds from
+source on the platform side, and a self-hosted stack builds on the server. An image
+built in CI would be a second artefact nobody deploys, misleading the moment it
+diverged.
 
-Tag a release. `.github/workflows/deploy.yml` builds and publishes images, then
-over SSH: backs up the database, pulls, migrates, and rolls out.
-
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-```
-
-Required secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_APP_PATH`, and the
-`PUBLIC_API_URL` variable.
-
-### Manual
+### Self-hosted
 
 ```bash
 cd /srv/personalerp
-./infra/scripts/backup.sh                                    # always first
+make backup                                                   # always first
 git pull --ff-only
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml run --rm migrate    # separate step, on purpose
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml run --rm migrate     # separate step, on purpose
 docker compose -f docker-compose.prod.yml up -d --no-deps backend frontend
-curl -fsS https://app.yourdomain.com/health/ready
+curl -fsS http://127.0.0.1:8000/health/ready
 ```
 
-### Why zero-downtime works
+**Migrations are a separate step on purpose.** If one fails, the running version
+keeps serving traffic untouched. Rolling out first and migrating after would leave
+new code pointed at an old schema - the failure mode that takes an application down
+rather than just stopping a deploy.
 
-Three things together:
+### The gap, and why it is honest to name it
 
-1. **`order: start-first`** - the replacement container starts and passes its
-   health check before the old one stops.
-2. **Stateless replicas** - no instance holds session state, so Nginx can route to
-   either during the overlap.
-3. **Migrations as a separate step** - if a migration fails, the currently-running
-   version keeps serving traffic untouched. Rolling out first and migrating after
-   would leave the new code pointed at an old schema.
+The old stack ran two API replicas behind an nginx that could route to either, so
+`order: start-first` gave a genuinely zero-downtime rollout. With the edge gone, each
+service publishes a host port and therefore runs **one** container - two cannot hold
+the same port, so the replacement starts only after the old one has stopped. A
+redeploy is a gap of a few seconds.
 
-The corollary is a constraint on migrations: during the overlap, two versions run
-against one schema. A migration must be **backward-compatible with the previous
-release**. Adding a nullable column is safe; dropping a column the old code still
-reads is not. Renames become expand → migrate → contract across two deploys.
+To get zero-downtime back, put a proxy in front, change the port mappings to a range
+(`'8000-8003:8000'`), raise `replicas`, and restore `order: start-first`.
+
+Either way, one constraint on migrations survives and is worth keeping even when
+nothing overlaps: a migration should be **backward-compatible with the previous
+release**, so a rollback does not need a schema change to go with it. Adding a
+nullable column is safe; dropping a column the old code still reads is not. Renames
+become expand → migrate → contract across two deploys.
 
 ### Rolling back
 
 ```bash
-# Images are tagged by commit SHA precisely so this is exact
-docker compose -f docker-compose.prod.yml pull
-IMAGE_TAG=sha-<previous> docker compose -f docker-compose.prod.yml up -d backend frontend
+git checkout <previous-tag>
+docker compose -f docker-compose.prod.yml up -d --build backend frontend
 ```
 
-If the schema also changed: `alembic downgrade -1`. CI verifies every migration is
-reversible on every pull request, so this path is tested before it is needed.
+If the schema also changed: `alembic downgrade -1`. Verify reversibility locally with
+`make db-check` before you need it - **CI does not check this any more**, since the
+backend job was removed along with the deploy workflow.
 
 ---
 
@@ -254,12 +316,25 @@ names every problem:
 docker compose -f docker-compose.prod.yml logs backend | head -30
 ```
 
-**502 from Nginx** - the backend is not healthy yet, or migrations failed:
+**502 or 504 from your proxy** - the backend is not healthy yet, or migrations
+failed. Check the container before you touch the proxy config:
 
 ```bash
 docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs migrate
+curl -fsS http://127.0.0.1:8000/health/ready       # bypasses the proxy entirely
 ```
+
+If that `curl` succeeds and the public URL does not, the fault is in the proxy or
+the firewall, not in this stack.
+
+**403 on every write, reads fine** - the proxy is stripping `Origin`. Every
+state-changing method is checked against `CORS_ORIGINS`; a proxy that drops the
+header makes each one look cross-site.
+
+**Rate limits trigger for everyone at once** - `TRUSTED_PROXY_HOPS` does not match
+the topology, so every request resolves to the proxy's own address and shares one
+budget.
 
 **No emails** - check `GMAIL_CREDENTIALS_B64` is set (unset means log-only, which
 is the development default and a common production oversight). A failure logs
@@ -285,35 +360,50 @@ was bumped, or the client and server clocks disagree. Check `timedatectl`.
 
 ### Scaling
 
-```bash
-# More API replicas on the same host
-docker compose -f docker-compose.prod.yml up -d --scale backend=4
-```
+The API process is stateless and holds no session state, so replicas need no
+coordination - what is missing is something to balance across them. Scaling out is
+therefore three coupled changes, not a flag:
 
-Nginx resolves the service name to every replica, so no config change is needed.
-Beyond one host, the ordered next steps are: move PostgreSQL to managed hosting
-with a read replica, put PgBouncer in front of it, add Redis Sentinel, and move
-static assets to a CDN.
+1. Put a reverse proxy in front, if there is not one already.
+2. Change the published port to a range in `docker-compose.prod.yml`:
+   `'${PUBLISH_ADDR:-127.0.0.1}:8000-8003:8000'`.
+3. Raise `deploy.replicas`, and restore `update_config: order: start-first` so a
+   rollout overlaps again.
+
+Beyond one host, the ordered next steps are: move PostgreSQL to managed hosting with
+a read replica, put PgBouncer in front of it, add Redis Sentinel, and serve static
+assets from a CDN.
 
 ---
 
 ## 8. Pre-flight checklist
 
+**The stack**
+
 - [ ] `.env` has real secrets; `chmod 600`
 - [ ] `ENVIRONMENT=production`, `DEBUG=false`
 - [ ] `CORS_ORIGINS` and `ALLOWED_HOSTS` name the real domain, no wildcards
-- [ ] `ENCRYPTION_KEY` set (2FA secrets are encrypted at rest)
-- [ ] TLS certificate issued; HTTP redirects to HTTPS
+- [ ] `ENCRYPTION_KEY` set (2FA secrets and bank account numbers are encrypted at rest)
 - [ ] `GMAIL_CREDENTIALS_B64` and `GMAIL_SENDER` set, and a test email received
-- [ ] Nightly backups scheduled **and a restore rehearsed**
-- [ ] Backups replicated off the machine
-- [ ] `ufw` allows only 22, 80, 443
+- [ ] `/docs` returns 404 in production
+- [ ] First owner account created
+
+**The edge you supplied**
+
+- [ ] TLS certificate issued and renewing; HTTP redirects to HTTPS
+- [ ] `TRUSTED_PROXY_HOPS` matches the number of proxies in front of the API
+- [ ] The proxy forwards `Origin` unmodified, and appends to `X-Forwarded-For`
+- [ ] `PUBLISH_ADDR` is `127.0.0.1` unless the proxy is on another machine
+- [ ] `ufw` allows only 22, 80, 443 - not 8000 or 8080
 - [ ] PostgreSQL and Redis not published to the host (`docker compose ps` shows no
       host ports for them)
-- [ ] `/docs` returns 404 in production
+
+**The part that saves you**
+
+- [ ] Nightly `make backup` scheduled **and a restore rehearsed**
+- [ ] Backups replicated off the machine
 - [ ] External monitoring on `/health/ready`
 - [ ] SSH key-only authentication; password login disabled
-- [ ] First owner account created
 
 The restore rehearsal is the one people skip, and it is the one that matters.
 

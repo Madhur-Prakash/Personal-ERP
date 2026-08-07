@@ -1,6 +1,16 @@
+<div align="center">
+
 # Windows installer
 
-Packages the Flutter desktop client into a single `PersonalERP-Setup.exe`.
+**Packages the Flutter desktop client into a single `PersonalERP-Setup.exe`.**
+
+![Inno Setup](https://img.shields.io/badge/Inno_Setup-6.3_or_newer-2D6099?style=flat-square)
+![Architecture](https://img.shields.io/badge/x64-only-6E7681?style=flat-square)
+![Scope](https://img.shields.io/badge/install-per--user_by_default-4C8BF5?style=flat-square)
+
+[Desktop client](../app_frontend/README.md) · [Root README](../README.md)
+
+</div>
 
 ---
 

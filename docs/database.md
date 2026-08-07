@@ -218,9 +218,9 @@ make db-check                            # assert no drift
 make rollback                            # undo the last one
 ```
 
-### What CI enforces
+### What to run before pushing
 
-Three separate checks, because they catch different mistakes:
+Four separate checks, because they catch different mistakes:
 
 ```bash
 alembic upgrade head      # the migration applies
@@ -232,6 +232,9 @@ alembic check             # models and migrations agree
 `alembic check` is the important one: it fails when someone changes a model
 without generating a migration. Without it, the drift is discovered on the next
 deploy against a schema that no longer matches the code.
+
+> **Nothing enforces this for you.** CI has no backend job, so a migration that does
+> not reverse will merge. `make db-check` is the local gate - run it.
 
 `compare_type` and `compare_server_default` are both enabled in
 [`migrations/env.py`](../backend/migrations/env.py). Both are off by default, and
@@ -282,23 +285,30 @@ is verified separately by `alembic check`.
 
 ## Backups
 
-`infra/scripts/backup.sh` uses `pg_dump --format=custom`, which is compressed and
-allows selective table restore via `pg_restore` - a plain SQL dump is all or
-nothing.
+`make backup` runs `pg_dump --format=custom` inside the postgres container and
+writes to `./backups`. Custom format because it is compressed and allows selective
+restore via `pg_restore` - a plain SQL dump is all or nothing.
 
 Two details that matter:
 
 - The archive is written to `.partial` and renamed on success, so an interrupted
   run never leaves a truncated file that looks like a valid backup.
-- Every archive is **verified** immediately with `pg_restore --list`. A backup that
-  has never been read back is a guess, not a backup.
+- Every archive is **verified** immediately with `pg_restore --list`, before that
+  rename. A backup that has never been read back is a guess, not a backup.
 
-Run before every deploy (see `deploy.yml`) and on a nightly cron. Retention
-defaults to 14 days.
+Run it before every deploy and on a nightly cron - see
+[Deployment](deployment.md#5-backups).
 
-`infra/scripts/restore.sh` requires typing the database name to confirm, stops the
-application first, restores inside a single transaction, then re-applies any
-migrations newer than the backup.
+`make restore f=<dump>` requires typing the database name to confirm, stops the API
+first, restores inside a single transaction, then re-applies any migrations newer
+than the backup.
+
+Both run through the container rather than a script tree, so there is nothing to
+install on the server and nothing that can drift out of step with the compose file.
+
+Uploaded documents live in PostgreSQL as compressed blobs, so one dump captures the
+ledger and the scans supporting it at a single consistent moment. There is no second
+volume to remember, which is the whole reason that storage decision was made.
 
 <!-- related:start -->
 

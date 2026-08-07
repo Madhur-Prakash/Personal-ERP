@@ -124,7 +124,7 @@ This is a real bug we hit and fixed - see the comment in
 
 1. Add it to the `Permission` enum in `rbac/permissions.py`.
 2. Add it to a `PermissionGroup`. A test asserts every permission belongs to
-   exactly one group, so a forgotten entry fails CI.
+   exactly one group, so a forgotten entry fails the suite.
 3. Grant it to the relevant `SYSTEM_ROLE_PERMISSIONS` entries.
 4. Enforce it: `Depends(require_permission(Permission.YOUR_THING))`.
 
@@ -221,11 +221,15 @@ domains cannot be used in fixtures.
 ## Before opening a pull request
 
 ```bash
-make check      # lint + typecheck + test, both sides
+make check      # lint + typecheck + test, every surface
 make db-check   # no migration drift
 ```
 
-CI additionally verifies migrations are reversible and builds both images.
+**Run both, because CI will not.** [`ci.yml`](../.github/workflows/ci.yml) has two
+jobs - Frontend (`tsc -b`, `eslint`, `prettier --check`, `vite build`) and Compose
+config. The backend job was removed when builds moved to Render and Vercel, so ruff,
+mypy, pytest, and `alembic check` block nothing on their own. A red backend merges
+unless you catch it here.
 
 ---
 

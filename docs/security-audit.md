@@ -8,7 +8,12 @@ Full review of the backend's exposure surface, and the hardening applied as a re
 Every finding below was verified against the code, not inferred from a pattern.
 
 - **Scope**: `backend/app/**`, `backend/Dockerfile`, `docker-compose.prod.yml`,
-  `frontend/nginx.conf`, `infra/nginx/**`, `.env` / `.env.sample`, `tests/conftest.py`.
+  `frontend/nginx.conf`, the edge proxy configuration as it stood at the time,
+  `.env` / `.env.sample`, `tests/conftest.py`.
+- **Read this alongside the two supersession notes.** Findings 3 and 5 have since changed:
+  the gateway check was removed, and the nginx/certbot edge was removed from the production
+  stack entirely. Each says so where it sits, and [security.md](security.md) is the current
+  statement of the control set.
 - **Method**: route-table introspection for authorization coverage, source review of
   every `app/core` module and the auth module, dependency-source review where behaviour
   mattered (uvicorn's proxy-header handling, slowapi's storage backend), 145 new tests,
@@ -28,7 +33,7 @@ Every finding below was verified against the code, not inferred from a pattern.
 | 2 | **High** | Client IP was attacker-controlled, defeating all IP-based limits | Fixed |
 | 3 | **High** | No control restricted the API to traffic from our own edge | Fixed |
 | 4 | **Medium** | One global rate-limit budget, with a boundary-burst weakness | Fixed |
-| 5 | **Medium** | `infra/nginx/**` did not exist, so the production stack could not start | Fixed |
+| 5 | **Medium** | `infra/nginx/**` did not exist, so the production stack could not start | Fixed - by removing the edge |
 | 6 | **Medium** | No request-body size limit | Fixed |
 | 7 | **Medium** | Security headers absent from every response the router did not produce | Fixed |
 | 8 | **Medium** | Uploaded documents had no durable storage in production | Fixed |
@@ -200,11 +205,19 @@ Implemented as:
   app, `curl`, a backup script, and refusing them would break every non-browser client
   while stopping no attacker.
 - `TrustedHostMiddleware` in production (pre-existing) plus the network topology in
-  `docker-compose.prod.yml`, where the API publishes no host port.
+  `docker-compose.prod.yml`, where the API published no host port.
 
-Reaching the API therefore requires network access to the internal bridge *and* the
-secret. The three layers are independent: the secret covers scripted callers, the origin
+Reaching the API therefore required network access to the internal bridge *and* the
+secret. The three layers were independent: the secret covered scripted callers, the origin
 check covers browser-driven CSRF, the host check covers Host-header injection.
+
+> **What is true today.** With the gateway check gone and the edge proxy removed from
+> `docker-compose.prod.yml` (see finding 5), the API *does* publish a host port - bound to
+> `127.0.0.1` by default, so it is still not reachable from the internet without a proxy
+> deliberately put in front of it. What remains as enforced controls is the origin check,
+> the host check, authentication, and the application's own rate limiter. Nothing claims to
+> restrict the API to one client any more, and [security.md](security.md#there-is-no-edge-gateway-deliberately)
+> explains why no such claim can be honestly made from a shipped client.
 
 ---
 
@@ -284,30 +297,37 @@ Neither existed. `docker compose -f docker-compose.prod.yml up` would have creat
 directory where nginx expected a file and failed to start - meaning the documented
 production deployment path had never been run.
 
-**Fixed.** Written, with the controls the compose comments already claimed:
-`infra/nginx/nginx.conf` (TLS 1.2/1.3, AEAD ciphers only, OCSP stapling, no session
-tickets, slowloris timeouts, four `limit_req` zones, `limit_conn`, JSON access logs with
-`escape=json`), `infra/nginx/conf.d/app.conf` (the vhost, per-location budgets, blocked
-paths, JSON error pages), and `infra/nginx/proxy-params.conf` (forwarding headers and the
-gateway credential).
+**Resolved by removing the edge, not by writing the configs.** The configuration was
+authored during the audit and did not survive into the repository; rather than restore a
+proxy nothing deploys, `nginx` and `certbot` were **deleted from
+`docker-compose.prod.yml`** along with every `./infra/**` mount. The production stack is
+now postgres, redis, migrate, backend, frontend - all of which exist, all of which start.
 
-Three mistakes were found and corrected by actually running `nginx -t` against the result
-rather than reading it:
+That matches how the system is actually served: the API runs behind Render's router and
+the web client behind Vercel, and neither runs this compose file. A self-hosted install
+puts its own reverse proxy in front, which is a thing the operator already has rather than
+a thing this repository should ship a half-tested opinion about.
 
-- The frontend upstream pointed at port 80, but that image drops root and listens on 8080.
-- `proxy-params.conf` needed its own mount, since nginx parses everything in
-  `conf.d/*.conf` as top-level configuration and a bare list of `proxy_set_header`
-  directives there fails the config check.
-- `proxy_read_timeout` appeared twice in the upload location - once for the longer OCR
-  timeout and once from the shared include. nginx treats that as **fatal**, not as an
-  override: `[emerg] "proxy_read_timeout" directive is duplicate`. The timeouts moved to
-  the `server` block, where locations inherit and may replace them.
+What moved out of the stack, and where it went:
 
-`proxy-params.conf` is an include repeated in every location rather than directives in
-the `server` block, for the reason `frontend/security-headers.conf` already documents:
-nginx inherits directives only when the inner block defines *none* of its own, so a
-location adding one `proxy_read_timeout` for uploads would silently drop the gateway
-credential - and every request through it would 404 with nothing in the nginx log.
+| Was the edge's job | Now |
+| --- | --- |
+| TLS termination, certificate renewal | The platform router, or the operator's proxy. `certbot` is gone |
+| `limit_req` / `limit_conn` volumetric shedding | The proxy in front. The application's own per-IP limiter is untouched and still runs |
+| Load-balancing two API replicas | Nothing - both services run **one** replica, because a published host port admits one container. Scaling out means putting a proxy back and switching to a port range |
+| Binding 80/443 | Nothing binds them. `backend` and `frontend` publish plain HTTP on `127.0.0.1` by default (`PUBLISH_ADDR`), so a fresh `up -d` exposes nothing publicly |
+
+Two consequences worth stating rather than discovering: a redeploy now has a brief gap
+where `order: start-first` used to cover it, and `docs/deployment.md` no longer describes
+issuing a certificate because this stack no longer can.
+
+The three configuration mistakes the audit caught by running `nginx -t` are kept here
+because they are the reason the config is not simply pasted back in by the next person:
+the frontend upstream pointed at port 80 while that image drops root and listens on 8080;
+`proxy-params.conf` needed its own mount, since nginx parses everything in `conf.d/*.conf`
+as top-level configuration and a bare list of `proxy_set_header` directives there fails the
+config check; and `proxy_read_timeout` appearing twice in one location is **fatal** to
+nginx rather than an override.
 
 ---
 
@@ -595,19 +615,18 @@ that does not.
   `SWALLOW_STORAGE_ERRORS` in `app/core/limiter.py` is the switch if you want the
   credential endpoints to fail closed instead.
 - **`TRUSTED_PROXY_HOPS` must match your topology.** Set too high, it hands the client
-  control of its own apparent IP again - the exact bug finding 2 fixed. One nginx or one
-  PaaS router is `1`; a CDN in front of nginx is `2`.
+  control of its own apparent IP again - the exact bug finding 2 fixed. One reverse proxy
+  or one platform router is `1`; a CDN in front of that is `2`; nothing in front is `0`.
 - **`RATE_LIMIT_IP` is currently the binding limit for reads** (finding 15). Fine for one
   or two people; raise it before more than that share an office network.
-- **Volumetric DDoS is out of scope.** `limit_req`/`limit_conn` at the edge shed a flood
-  before it reaches Python, but a single VPS cannot absorb a real attack. That needs
-  something in front of it.
-- **`GATEWAY_SECRET` needs rotating like any secret**, and rotating it means updating two
-  places (`.env` and `infra/nginx/conf.d/app.conf`) in step. The `map` block exists so it
-  appears exactly once in the nginx config.
-- **Frontend source maps** are built (`sourcemap: true`) and land in the image. Both nginx
-  configs return 404 for `*.map`, so they are not served - but they are present, and the
-  intent recorded in `vite.config.ts` is to upload them to an error tracker instead.
+- **Volumetric DDoS is out of scope, and now entirely somebody else's layer.** With the
+  edge removed (finding 5) there is no `limit_req`/`limit_conn` in this stack at all - the
+  application's limiter runs after the request has already reached Python. Absorbing a real
+  flood needs the platform router, a CDN, or a proxy you put in front.
+- **Frontend source maps** are built (`sourcemap: true`) and land in the image.
+  `frontend/nginx.conf` returns 404 for `*.map`, so they are not served - but they are
+  present, and the intent recorded in `vite.config.ts` is to upload them to an error
+  tracker instead.
 - **Twenty pre-existing test failures are unrelated to this work**, and were confirmed on
   a clean tree: 19 OCR tests fail because the optional `ocr` extra (`pypdf`) is not
   installed in this virtualenv, and

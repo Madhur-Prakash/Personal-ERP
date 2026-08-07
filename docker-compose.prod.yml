@@ -1,7 +1,7 @@
 # =============================================================================
 # Personal ERP - production stack for a self-hosted VPS
 #
-#   cp .env.example .env      # then fill in real secrets
+#   cp .env.sample .env       # then fill in real secrets
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
 # Differences from the development stack that matter:
@@ -9,11 +9,37 @@
 #   * PostgreSQL and Redis are NOT published to the host. They are reachable only
 #     on the internal Docker network, so the database is not exposed to the
 #     internet by a misconfigured firewall.
-#   * Only the edge proxy binds host ports (80/443).
-#   * Migrations run as a one-shot job that the API waits on, so two replicas can
-#     never race to apply the same migration.
+#   * Migrations run as a one-shot job that the API waits on, so a scaled-out API
+#     can never race to apply the same migration.
 #   * Every service has resource limits, log rotation, and a restart policy.
 #   * Every service drops all Linux capabilities and forbids privilege escalation.
+#
+# ---- There is no edge proxy in this stack ----------------------------------
+#
+# `backend` and `frontend` publish plain HTTP ports and nothing terminates TLS
+# here. Something in front of them has to, and it is expected to be one of:
+#
+#   * the managed platform this is actually deployed on today - Render for the
+#     API, Vercel for the web client, both of which terminate TLS, rate-limit at
+#     their own edge, and never run this file; or
+#   * a reverse proxy you already operate on the host (nginx, Caddy, Traefik).
+#
+# Consequences of that, stated plainly rather than discovered later:
+#
+#   * `PUBLISH_ADDR` defaults to 127.0.0.1, so a fresh `up -d` exposes nothing to
+#     the internet. Set it to 0.0.0.0 only when the proxy is on another machine
+#     and the firewall is doing the work instead.
+#   * Both services run ONE replica. A published host port can only be held by
+#     one container, so `replicas: 2` would fail to bind - and with no proxy
+#     there is nothing to load-balance across replicas anyway. Scaling out means
+#     putting a proxy back in front and switching these to a port range.
+#   * A redeploy therefore has a short gap while the container is replaced;
+#     `order: start-first` cannot apply when the old and new container would
+#     contend for the same host port. Migrations still run as their own step, so
+#     a failed migration still leaves the running version untouched.
+#   * Edge rate limiting is whatever the proxy in front provides. The
+#     application's own per-IP limiter (see app/core/ratelimit.py) is unaffected
+#     and still runs.
 # =============================================================================
 
 name: personalerp-prod
@@ -62,7 +88,11 @@ services:
       POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C --data-checksums'
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./infra/backups:/backups
+      # Where `pg_dump` writes from inside the container. Compose creates the host
+      # directory on first start; keep it out of the repository (.gitignore covers
+      # it) and replicate it off the machine - a backup on the same disk as the
+      # database does not survive the failure it exists for.
+      - ./backups:/backups
     # Deliberately no `ports:` - internal network only.
     command:
       # Modest tuning for a small VPS. Raise shared_buffers to ~25% of RAM.
@@ -169,9 +199,12 @@ services:
       # `env_file` beats the image's own ENV - so the deployed container would inherit a
       # path it cannot execute and report OCR as unavailable.
       TESSERACT_CMD: /usr/bin/tesseract
-    # Longer than uvicorn's own 25s graceful timeout (see the Dockerfile), so a replica
+    # Longer than uvicorn's own 25s graceful timeout (see the Dockerfile), so a container
     # being replaced always exits by finishing its requests rather than by SIGKILL.
     stop_grace_period: 30s
+    # Plain HTTP. Bound to loopback by default - whatever terminates TLS proxies to it.
+    ports:
+      - '${PUBLISH_ADDR:-127.0.0.1}:${BACKEND_PORT:-8000}:8000'
     volumes:
       - ./logs:/app/logs
       # No documents volume, and none needed. Uploaded files are compressed into
@@ -188,15 +221,14 @@ services:
       # Waits for the migration job to exit 0. This is what makes replicas safe.
       migrate: { condition: service_completed_successfully }
     deploy:
-      # Scale horizontally: every instance is stateless, so replicas need no
-      # coordination. Nginx load-balances across them by service name.
-      replicas: 2
+      # One replica, because the host port below can only be held by one container.
+      # The process itself is stateless and scales horizontally without coordination -
+      # what is missing is something to balance across the replicas. Put a proxy in
+      # front, change this port to a range (e.g. '8000-8003:8000'), and raise this.
+      replicas: 1
       resources:
         limits: { cpus: '2', memory: 1G }
       update_config:
-        # Start the replacement and confirm it is healthy before stopping the
-        # old one - this is what makes a deploy zero-downtime.
-        order: start-first
         failure_action: rollback
         delay: 10s
     logging: *default-logging
@@ -214,72 +246,17 @@ services:
     restart: always
     <<: *hardening
     read_only: true
-    # nginx writes its pid and its proxy/fastcgi scratch buffers; both must exist even
-    # for a container that only serves static files.
+    # The image serves static files from nginx on 8080 as an unprivileged user. It still
+    # writes its pid and its scratch buffers, so those paths must be writable.
     tmpfs: [/tmp, /var/cache/nginx, /var/run]
+    # Plain HTTP, loopback by default - same arrangement as the API above.
+    ports:
+      - '${PUBLISH_ADDR:-127.0.0.1}:${FRONTEND_PORT:-8080}:8080'
     deploy:
-      replicas: 2
+      # One replica, for the same reason as the API: one container per host port.
+      replicas: 1
       resources:
         limits: { cpus: '0.5', memory: 256M }
-      update_config:
-        order: start-first
-    logging: *default-logging
-    networks: [internal]
-
-  # ---------------------------------------------------------------------------
-  # Edge
-  # ---------------------------------------------------------------------------
-  nginx:
-    image: nginx:1.27-alpine
-    restart: always
-    <<: *hardening
-    # The edge runs as root to bind 80/443, so it is given back exactly the four
-    # capabilities that requires and nothing else. NET_BIND_SERVICE is the privileged-port
-    # bind; the SETUID/SETGID/CHOWN trio is nginx's master process dropping to the
-    # unprivileged `nginx` user for its workers - which is what makes a worker
-    # compromise a compromise of a nobody account.
-    cap_add: [NET_BIND_SERVICE, SETGID, SETUID, CHOWN]
-    read_only: true
-    tmpfs: [/tmp, /var/cache/nginx, /var/run]
-    # The only service exposed to the host.
-    ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
-      # Included by every proxying location in conf.d/app.conf. Mounted at the root of
-      # /etc/nginx rather than inside conf.d/, because nginx loads `conf.d/*.conf` as
-      # top-level configuration - a partial file of `proxy_set_header` directives placed
-      # there is parsed as a server-block-less config and fails to start.
-      - ./infra/nginx/proxy-params.conf:/etc/nginx/proxy-params.conf:ro
-      - ./infra/certbot/conf:/etc/letsencrypt:ro
-      - ./infra/certbot/www:/var/www/certbot:ro
-    depends_on: [backend, frontend]
-    healthcheck:
-      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost/healthz']
-      interval: 30s
-      timeout: 3s
-      retries: 3
-    deploy:
-      resources:
-        limits: { cpus: '1', memory: 256M }
-    logging: *default-logging
-    networks: [internal]
-
-  certbot:
-    image: certbot/certbot:latest
-    restart: unless-stopped
-    <<: *hardening
-    volumes:
-      - ./infra/certbot/conf:/etc/letsencrypt
-      - ./infra/certbot/www:/var/www/certbot
-    # Wakes twice daily; certbot renews only inside the 30-day window, so this
-    # is cheap and means a renewal is never missed.
-    entrypoint: >
-      /bin/sh -c "trap exit TERM;
-      while :; do certbot renew --webroot -w /var/www/certbot --quiet;
-      sleep 12h & wait $${!}; done"
     logging: *default-logging
     networks: [internal]
 
