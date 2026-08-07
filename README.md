@@ -26,6 +26,10 @@
 
 ---
 
+https://github.com/user-attachments/assets/a1e230bf-942b-4f5b-aeb9-542d5b277387
+
+---
+
 ## Why it exists
 
 Small businesses are offered two bad options. This is the third.
