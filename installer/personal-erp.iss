@@ -35,8 +35,8 @@
 ; why. It is ~25 MB of Microsoft's binary, so it is deliberately not committed; this
 ; check is what stops a fresh clone producing an installer that is silently missing it.
 ; Download it once and it stays put.
-#if !FileExists(SourcePath + "vc_redist.x64.exe")
-  #error vc_redist.x64.exe not found beside this script. Download it from https://aka.ms/vs/17/release/vc_redist.x64.exe into the installer folder.
+#if !FileExists(SourcePath + "VC_redist.x64.exe")
+  #error VC_redist.x64.exe not found beside this script. Download it from https://aka.ms/vs/17/release/VC_redist.x64.exe into the installer folder.
 #endif
 
 [Setup]
@@ -126,7 +126,7 @@ Source: "{#BuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 ; unpacked, used, and removed rather than left behind in Program Files, and the
 ; `Check:` on the [Run] entry skips the whole step on the machines that already have
 ; it, which is most of them.
-Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+Source: "VC_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
@@ -141,7 +141,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 ; on a per-user install (the default) Windows raises a UAC prompt for it; declining
 ; leaves the app installed but unable to start on a machine that lacks the runtime.
 ; README.md beside this file documents that for whoever hits it.
-Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ runtime..."; Check: not VCRedistInstalled
+Filename: "{tmp}\VC_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ runtime..."; Check: not VCRedistInstalled
 
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
@@ -152,8 +152,10 @@ Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(
 Type: dirifempty; Name: "{app}"
 
 [Code]
-// True when the MSVC 2015-2022 x64 runtime is already registered. Only consulted by
-// the optional vc_redist [Run] entry above; harmless when that stays commented out.
+// True when the MSVC 2015-2022 x64 runtime is already registered. The [Run] entry
+// above consults it so the bundled redistributable is executed only on the machines
+// that actually need it - which is the minority, and they are the ones that would
+// otherwise install an app that never opens.
 function VCRedistInstalled: Boolean;
 var
   Installed: Cardinal;

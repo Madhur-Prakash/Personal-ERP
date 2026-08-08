@@ -140,6 +140,27 @@ Register at <http://localhost:5173/register>. `make help` lists every task.
 > prints the `GMAIL_CREDENTIALS_B64` line ready to paste. Full walkthrough:
 > [Getting a real Gmail token](docs/development.md#getting-a-real-gmail-token).
 
+### Packaging the Windows installer
+
+```powershell
+make installer-deps                        # once per clone - fetches VC_redist.x64.exe
+cd app_frontend; flutter build windows --release
+# then compile installer\personal-erp.iss with Inno Setup (F9)
+```
+
+**`make installer-deps` is not optional.** The installer bundles Microsoft's Visual C++
+redistributable, because a Flutter release build links against a runtime that is *not* in
+the build folder. Most Windows machines already have it; the ones that do not install the
+app successfully and then **do nothing at all** when it is launched - no window, no error,
+nothing to diagnose at either end. That 25 MB file is not committed (git would carry it
+forever), so [`personal-erp.iss`](installer/personal-erp.iss) refuses to compile without
+it rather than letting you ship that failure.
+
+Two more things decide whether the result works on someone else's machine: `API_BASE_URL`
+in `app_frontend/.env` is **baked into the build**, not read at runtime, and an unsigned
+installer trips SmartScreen. Both are covered in
+[installer/README.md](installer/README.md).
+
 ---
 
 ## The simple path: just record money

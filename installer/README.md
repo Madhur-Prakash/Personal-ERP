@@ -35,14 +35,21 @@ flutter build windows --release
 The script refuses to compile if that output is missing, rather than producing an empty
 installer that only fails on the machine you were installing it on.
 
-**3. `vc_redist.x64.exe`, beside this file**
+**3. `VC_redist.x64.exe`, beside this file**
 
-<https://aka.ms/vs/17/release/vc_redist.x64.exe> - about 25 MB. Download it once into
-`installer\` and it stays there.
+```bash
+make installer-deps
+```
 
-It is **not committed**, because a 25 MB Microsoft binary does not belong in the
-repository, so a fresh clone has to fetch it. The script fails the compile with that URL
-in the message rather than quietly building an installer without it - see
+Or download <https://aka.ms/vs/17/release/VC_redist.x64.exe> into `installer\` by hand -
+about 25 MB, fetched once, and it stays there for every future build.
+
+**It is deliberately not committed.** Git would carry those 25 MB forever, every future
+version of the redistributable would add another 25 MB that cannot be removed without
+rewriting history, and a committed copy goes stale while the `aka.ms` link always serves
+the current one. So a fresh clone fetches it, and
+[`personal-erp.iss`](personal-erp.iss) **fails the compile** with that URL in the message
+rather than quietly building an installer without it - see
 [Why the runtime is bundled](#why-the-runtime-is-bundled) for what that would cost.
 
 ---

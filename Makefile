@@ -260,6 +260,24 @@ build: ## Build the web frontend for production
 build-desktop: ## Build a release desktop binary for this platform
 	$(DESKTOP) flutter build $(DESKTOP_DEVICE) --release
 
+# Fetched rather than committed. It is 25 MB of Microsoft's binary that git would then
+# carry forever - and every future version would add another 25 MB that cannot be
+# removed without rewriting history. The aka.ms link always serves the current build,
+# which a committed copy would not.
+#
+# `personal-erp.iss` fails the compile when it is missing, so a fresh clone is told what
+# to run rather than silently producing an installer without it.
+.PHONY: installer-deps
+installer-deps: ## Fetch the Visual C++ redistributable the Windows installer bundles
+	@if [ -f installer/VC_redist.x64.exe ]; then \
+		echo "installer/VC_redist.x64.exe is already here - nothing to do."; \
+	else \
+		echo "Fetching VC_redist.x64.exe (~25 MB) into installer/ ..."; \
+		curl -fL --progress-bar -o installer/VC_redist.x64.exe \
+			https://aka.ms/vs/17/release/VC_redist.x64.exe && \
+		echo "Done. Now compile installer/personal-erp.iss with Inno Setup."; \
+	fi
+
 # -----------------------------------------------------------------------------
 # Production
 # -----------------------------------------------------------------------------
