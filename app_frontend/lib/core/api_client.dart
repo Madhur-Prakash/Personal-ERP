@@ -272,6 +272,19 @@ class _AuthInterceptor extends Interceptor {
     );
 
     if (err.response?.statusCode != 401 || alreadyRetried || exempt) {
+      // A 401 that survived a refresh is not stale - the brand-new token was
+      // rejected too, which means revoked or a bumped token epoch. Retrying
+      // cannot fix it, and leaving the session in place leaves the open screen
+      // firing requests that will every one of them 401. End it, so the router's
+      // guard sends the user to sign in.
+      //
+      // Deliberately not applied to the exempt paths: a 401 from `/auth/login`
+      // is a wrong password, and signing the user out for mistyping one would be
+      // absurd. Those never reach here already retried.
+      if (err.response?.statusCode == 401 && alreadyRetried && !exempt) {
+        _client.accessToken = null;
+        _client.onSessionExpired?.call();
+      }
       handler.next(err);
       return;
     }

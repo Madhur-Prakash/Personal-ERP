@@ -361,6 +361,19 @@ http.interceptors.response.use(
       status === 401 && !config._retried && !NO_REFRESH_PATHS.some((path) => url.includes(path));
 
     if (!shouldAttemptRefresh) {
+      // A 401 that survived a refresh is not stale - the brand-new token was
+      // rejected too, which means revoked or a bumped token epoch. Retrying
+      // cannot fix it, and leaving the session in place leaves the open page
+      // firing requests that will every one of them 401. End it, so the guard
+      // sends the user to sign in.
+      //
+      // Deliberately not applied to the paths that never refresh: a 401 from
+      // `/auth/login` is a wrong password, and signing the user out for
+      // mistyping one would be absurd. Those never carry `_retried`.
+      if (status === 401 && config._retried) {
+        setAccessToken(null);
+        onSessionExpired?.();
+      }
       return Promise.reject(toApiError(error));
     }
 

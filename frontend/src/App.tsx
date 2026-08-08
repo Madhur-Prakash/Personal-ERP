@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ThemeProvider, useTheme } from '@/features/theme/ThemeProvider';
@@ -53,6 +53,31 @@ function RouterBridge() {
     () => ({ isAuthenticated, isLoading, hasPermission: can }),
     [isAuthenticated, isLoading, can],
   );
+
+  // Re-run the route guards whenever the session resolves to "signed out".
+  //
+  // `beforeLoad` is evaluated on navigation, not when auth state changes under a
+  // page that is already open - and new router context alone does not re-run it.
+  // That left two ways to sit on a protected page with no session:
+  //
+  //   * the guard passes on first load because the restore is still in flight,
+  //     then the restore fails and nothing re-checks; and
+  //   * the refresh token expires or is revoked mid-visit, the HTTP layer clears
+  //     the session, and the open page keeps firing requests that 401 - which is
+  //     why a dead session showed a shell of loading skeletons rather than the
+  //     sign-in screen.
+  //
+  // Invalidating makes the router evaluate the guards again against the current
+  // context, and the guard does the redirecting. The rule for "where you go when
+  // signed out" stays in one place rather than being copied here.
+  //
+  // Harmless on public routes: the sign-in pages guard on *being* authenticated,
+  // so re-running them while signed out changes nothing, and the effect only
+  // fires when one of these two values actually changes.
+  useEffect(() => {
+    if (isLoading || isAuthenticated) return;
+    void router.invalidate();
+  }, [isAuthenticated, isLoading]);
 
   return <RouterProvider router={router} context={context} />;
 }
