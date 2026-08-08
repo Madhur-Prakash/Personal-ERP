@@ -222,7 +222,7 @@ graph TB
         D[Desktop<br/>Flutter]
     end
 
-    subgraph Edge["Edge - platform router or your own proxy"]
+    subgraph Edge["Edge - the TLS terminator you run"]
         N[TLS · certificates · flood shedding]
     end
 
@@ -242,11 +242,10 @@ graph TB
     A --> R
 ```
 
-**The edge is not in this repository.** The API is served behind Render's router and
-the web client behind Vercel; a self-hosted install puts its own reverse proxy in
-front. `docker-compose.prod.yml` publishes plain HTTP on loopback and terminates no
-TLS - [Deployment](docs/deployment.md#3-tls---in-front-of-the-stack) says what that
-proxy has to do.
+**The edge is not in this repository.** You put your own TLS terminator in front.
+`docker-compose.prod.yml` publishes plain HTTP on loopback and terminates no TLS -
+[Deployment](docs/deployment.md#3-tls---in-front-of-the-stack) says what that
+terminator has to do.
 
 **Dependencies point inward** - `router → service → repository → models`:
 
@@ -333,7 +332,7 @@ Each is explained where it lives, in the code.
 | **Backend** | FastAPI · Python 3.13 · uv · SQLAlchemy 2 (async) · Alembic · PostgreSQL 17 · Redis 7 · Pydantic v2 · Argon2id · PyJWT · pyotp · httpx · [logifyx](https://pypi.org/project/logifyx/) |
 | **Frontend** | React 19 · TypeScript · Vite 7 · Tailwind CSS v4 · TanStack Router/Query/Table · React Hook Form · Zod · Recharts · cmdk · Sonner · Lucide · Motion |
 | **Desktop** | Flutter 3.44 · Dart 3.12 · Material 3 · Riverpod · go_router · Dio with a persisted cookie jar · fl_chart · Lucide |
-| **Infrastructure** | Docker Compose · GitHub Actions · Inno Setup · Render (API) and Vercel (web) for the managed deployment |
+| **Infrastructure** | Docker Compose · GitHub Actions · Inno Setup · your server, your TLS terminator |
 
 > The desktop client uses the same API and the same design tokens - see
 > [app_frontend/README.md](app_frontend/README.md) for the four places a native window

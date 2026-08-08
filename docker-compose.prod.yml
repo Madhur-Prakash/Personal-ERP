@@ -17,12 +17,11 @@
 # ---- There is no edge proxy in this stack ----------------------------------
 #
 # `backend` and `frontend` publish plain HTTP ports and nothing terminates TLS
-# here. Something in front of them has to, and it is expected to be one of:
+# here. Something in front of them has to: a TLS terminator you already operate
+# on the host (Caddy, Traefik) or a tunnel that terminates for you.
 #
-#   * the managed platform this is actually deployed on today - Render for the
-#     API, Vercel for the web client, both of which terminate TLS, rate-limit at
-#     their own edge, and never run this file; or
-#   * a reverse proxy you already operate on the host (nginx, Caddy, Traefik).
+# This is not optional. Production boot requires https origins, so a stack with
+# nothing in front does not run insecurely - it refuses to start.
 #
 # Consequences of that, stated plainly rather than discovered later:
 #

@@ -2,10 +2,9 @@
 # CI - runs on every push and pull request.
 #
 # **Checks only.** Nothing here builds a container image, publishes to a registry,
-# or deploys. The backend is built from source by Render and the frontend by
-# Vercel, so an image built here would be a second artefact nobody deploys - slow
-# to produce, and misleading the moment it diverges from what the platforms
-# actually run.
+# or deploys. A self-hosted install builds from source on its own server, so an
+# image built here would be a second artefact nobody deploys - slow to produce,
+# and misleading the moment it diverges from what the server actually runs.
 #
 # Two independent jobs - Frontend (type check, lint, format, build) and Compose
 # config (both stacks parsed and schema-checked) - so one failure does not hide the
@@ -71,8 +70,8 @@ jobs:
         run: npm run format:check
 
       - name: Build
-        # A check, not a deliverable: Vercel builds its own bundle from source on
-        # every deploy, and the output here is discarded. It stays because the
+        # A check, not a deliverable: the server builds its own bundle from source
+        # on every deploy, and the output here is discarded. It stays because the
         # bundler catches a class of mistake `tsc` does not - an unresolvable
         # import, a bad chunking config - and finding that here is much cheaper
         # than finding it in a failed deploy.

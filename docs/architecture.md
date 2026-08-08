@@ -57,7 +57,7 @@ graph TB
     end
 
     subgraph Edge["Edge - not in this repository"]
-        N[Platform router or your reverse proxy<br/>TLS · certificates · volumetric shedding]
+        N[The TLS terminator you run<br/>TLS · certificates · volumetric shedding]
     end
 
     subgraph Application
@@ -84,8 +84,8 @@ graph TB
 ```
 
 **The edge is dashed for a reason: nothing in this repository is it.** TLS is
-terminated by Render's router in the managed deployment, and by whatever proxy the
-operator already runs in a self-hosted one. `docker-compose.prod.yml` publishes the
+terminated by whatever the operator already runs in front of the stack.
+`docker-compose.prod.yml` publishes the
 two HTTP ports above on loopback and stops there - see
 [Deployment](deployment.md#3-tls---in-front-of-the-stack).
 

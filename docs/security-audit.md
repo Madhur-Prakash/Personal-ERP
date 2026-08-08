@@ -87,8 +87,8 @@ DATABASE_URL=postgresql://personalerp:<password>@dpg-d9piqie1egvs73ffrgj0-a/pers
 REDIS_URL=redis://red-d8bu4ke7r5hc738u2fq0:6379
 ```
 
-Those are managed-Render hostnames. So `POSTGRES_DB=personalerp_test` had no effect, and
-the session fixture ran:
+Those are remote managed-database hostnames, not local ones. So `POSTGRES_DB=personalerp_test`
+had no effect, and the session fixture ran:
 
 ```python
 engine = create_async_engine(settings.sqlalchemy_dsn)   # <- the deployment's database
@@ -100,9 +100,9 @@ while an autouse fixture ran `await redis.flushdb()` around every test.
 
 `make test` from a machine that can resolve those hostnames drops every table in the
 deployment's database and flushes its Redis. Nothing in the output would say so - the
-suite would pass. The only thing that prevented it here is that Render's internal DNS
-does not resolve from outside Render, which is why the Redis tests failed with
-`getaddrinfo failed` rather than succeeding against production.
+suite would pass. The only thing that prevented it here is that those private hostnames do
+not resolve from outside the network they belong to, which is why the Redis tests failed
+with `getaddrinfo failed` rather than succeeding against a live database.
 
 **Fixed** in three independent places, because one is not enough for this:
 
@@ -187,8 +187,8 @@ means in a deployment where the frontend is served from that same edge.
 
 > **SUPERSEDED — the gateway check has since been removed.** Every `GATEWAY_SECRET` /
 > `X-Gateway-Key` / `GatewayGuardMiddleware` reference in the rest of this report is
-> historical. The deployment turned out to have no proxy of its own — it runs behind a
-> platform router (Render), which is the `ALLOW_DIRECT_BACKEND_ACCESS=true` topology this
+> historical. The stack turned out to have no edge of its own — it sits behind whatever the
+> operator runs in front, which is the `ALLOW_DIRECT_BACKEND_ACCESS=true` topology this
 > section already described as the escape hatch. The `infra/nginx/` configuration the
 > control depended on was never in the repository, so the check had no counterpart to stamp
 > the header and refused every browser request.
@@ -317,16 +317,15 @@ proxy nothing deploys, `nginx` and `certbot` were **deleted from
 `docker-compose.prod.yml`** along with every `./infra/**` mount. The production stack is
 now postgres, redis, migrate, backend, frontend - all of which exist, all of which start.
 
-That matches how the system is actually served: the API runs behind Render's router and
-the web client behind Vercel, and neither runs this compose file. A self-hosted install
-puts its own reverse proxy in front, which is a thing the operator already has rather than
-a thing this repository should ship a half-tested opinion about.
+That matches how the system is actually served: an install puts its own TLS terminator in
+front, which is a thing the operator already has rather than a thing this repository should
+ship a half-tested opinion about.
 
 What moved out of the stack, and where it went:
 
 | Was the edge's job | Now |
 | --- | --- |
-| TLS termination, certificate renewal | The platform router, or the operator's proxy. `certbot` is gone |
+| TLS termination, certificate renewal | Whatever the operator runs in front. `certbot` is gone |
 | `limit_req` / `limit_conn` volumetric shedding | The proxy in front. The application's own per-IP limiter is untouched and still runs |
 | Load-balancing two API replicas | Nothing - both services run **one** replica, because a published host port admits one container. Scaling out means putting a proxy back and switching to a port range |
 | Binding 80/443 | Nothing binds them. `backend` and `frontend` publish plain HTTP on `127.0.0.1` by default (`PUBLISH_ADDR`), so a fresh `up -d` exposes nothing publicly |

@@ -98,7 +98,7 @@ is absent.
 time is compiled into the installer:
 
 ```
-API_BASE_URL=https://personal-erp.onrender.com
+API_BASE_URL=https://erp.yourdomain.com
 ```
 
 Check that before building a release, because it is not a runtime setting - pointing an

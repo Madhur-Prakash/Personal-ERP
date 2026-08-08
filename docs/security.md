@@ -133,9 +133,9 @@ readable by whoever holds the client and replayable from `curl`. There is no cli
 version of this control, and `X-Gateway-Key` was never sent by the frontend — that was the
 point, not an omission.
 
-**Only an edge could,** and there isn't one of ours. This service runs behind a platform
-router (Render), not behind an edge we configure, so there is nothing positioned to inject
-a server-side value. A `GATEWAY_SECRET` check was removed rather than left half-wired.
+**Only an edge could,** and there isn't one of ours. This service runs behind whatever the
+operator puts in front, not behind an edge we configure and ship, so there is nothing
+positioned to inject a server-side value. A `GATEWAY_SECRET` check was removed rather than left half-wired.
 
 What it *would* have bought, if a proxy is ever added: it closes the **side door** — the
 backend reachable at its own address, where the edge's TLS, logging, IP rules and rate
@@ -733,10 +733,9 @@ buys per-caller fairness, where the caller's identity is actually known.
 
 ## Transport and headers
 
-**TLS terminates in front of this application, not in it.** There is no proxy in this
-repository and none in `docker-compose.prod.yml`: the API is deployed behind Render's
-router and the web client behind Vercel, and a self-hosted stack is expected to sit behind
-a reverse proxy the operator already runs. So cipher suites, protocol versions, OCSP
+**TLS terminates in front of this application, not in it.** There is no edge in this
+repository and none in `docker-compose.prod.yml`: the stack is expected to sit behind a
+terminator the operator already runs. So cipher suites, protocol versions, OCSP
 stapling and session-ticket policy are configured **there** - the checklist in
 [Deployment](deployment.md) says what to verify rather than what to paste.
 

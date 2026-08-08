@@ -166,9 +166,8 @@ while destroying others, so there was nothing safe to add.
 **Planned per module** - Celery + Redis Streams (automation),
 Ollama/OpenAI-compatible + Sentence Transformers + Qdrant + LangGraph (AI).
 
-**Infrastructure** - Docker Compose and GitHub Actions, deployed either on one VPS
-behind a TLS terminator the operator already runs, or on managed hosting (Render for
-the API, Vercel for the web client). **No edge ships in this repository**: the one that
+**Infrastructure** - Docker Compose and GitHub Actions, deployed on your own server
+behind a TLS terminator you already run. **No edge ships in this repository**: the one that
 used to live in the production stack could not start, because its configuration was
 never committed, and it was removed rather than rebuilt - the edge is one of the few
 things every host already has an opinion about. Prometheus, Grafana, Loki and Sentry

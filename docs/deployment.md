@@ -6,7 +6,7 @@
 
 ![Stack](https://img.shields.io/badge/services-postgres_redis_migrate_backend_frontend-2496ED?style=flat-square&logo=docker&logoColor=white)
 ![TLS](https://img.shields.io/badge/TLS-terminated_in_front-D29922?style=flat-square)
-![Managed](https://img.shields.io/badge/managed-Render_+_Vercel-000000?style=flat-square&logo=vercel&logoColor=white)
+![Self-hosted](https://img.shields.io/badge/self--hosted-your_server-6E7681?style=flat-square)
 
 <!-- nav:start -->
 [Docs](README.md) · [Spec](spec.md) · [Architecture](architecture.md) · [Database](database.md) · [Accounting](accounting.md) · [API](api.md) · [Security](security.md) · [Audit](security-audit.md) · [Development](development.md) · **Deployment**
@@ -31,12 +31,8 @@ raised to about 25% of RAM on anything larger.
 > `BACKEND_PORT`, `FRONTEND_PORT`), so a fresh `up -d` is reachable only from the host
 > itself until you put something in front of it.
 >
-> Two supported shapes, and the first is what runs today:
->
-> | Shape | TLS, certificates, edge rate limiting |
-> | --- | --- |
-> | **Managed** - API on Render, web client on Vercel | The platform's, and neither platform runs this compose file |
-> | **Self-hosted** - this stack on your VPS | A TLS terminator you already operate (Caddy, Traefik, a tunnel) forwards to the two ports below |
+> TLS, certificates and any edge rate limiting belong to a terminator you operate -
+> Caddy, Traefik, or a tunnel - forwarding to the two ports below.
 >
 > **Something has to sit in front, and the application enforces it.** Production boot
 > requires every `CORS_ORIGINS` entry and `FRONTEND_URL` to be `https://`, and nothing
@@ -185,9 +181,9 @@ app.yourdomain.com {
 }
 ```
 
-> **Managed deployment does this for you.** On Render the API is a service behind the
-> platform router, and on Vercel the web client is served from its edge. There is no
-> certificate to issue, renew, or forget - and no part of this section applies.
+> **The certificate is yours to keep alive.** Nothing in this repository issues or renews
+> one, so whatever you put in front owns that job - Caddy does it automatically, and a
+> tunnel that terminates TLS for you removes the question entirely.
 
 ---
 
@@ -259,10 +255,9 @@ volume to remember.
 ## 6. Deploying updates
 
 **There is no deploy workflow in this repository.** `.github/workflows/ci.yml` runs
-checks and builds nothing that gets shipped - the managed deployment builds from
-source on the platform side, and a self-hosted stack builds on the server. An image
-built in CI would be a second artefact nobody deploys, misleading the moment it
-diverged.
+checks and builds nothing that gets shipped - the stack builds from source on your own
+server. An image built in CI would be a second artefact nobody deploys, misleading the
+moment it diverged.
 
 ### Self-hosted
 
