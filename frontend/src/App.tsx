@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { useMemo } from 'react';
 import { Toaster } from 'sonner';
-
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ThemeProvider, useTheme } from '@/features/theme/ThemeProvider';
 import { ApiError } from '@/lib/api';
