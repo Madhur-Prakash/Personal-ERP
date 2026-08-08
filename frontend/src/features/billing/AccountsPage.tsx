@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Hint } from '@/components/ui/Hint';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -218,53 +219,6 @@ export function AccountsPage() {
         </CardBody>
       </Card>
     </div>
-  );
-}
-
-/**
- * Carries a hover explanation for a control that may be disabled.
- *
- * **A disabled `<button>` never shows its own `title`.** Browsers suppress pointer events on
- * disabled form controls, and `Button` makes that explicit with `disabled:pointer-events-none`
- * - so the greyed-out Delete had a perfectly good `title` that could never fire, and the row
- * read as "greyed out for no stated reason".
- *
- * The same `pointer-events-none` is what makes this work: the hover passes straight through
- * the button to this wrapper, which is not disabled and does show its title. `inline-flex` so
- * wrapping does not disturb the row's layout.
- */
-function Hint({ text, children }: { text: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <span
-      className="relative inline-flex"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      {children}
-      {/* Always in the DOM for a screen reader, which never gets a hover. Not a `title` on
-          the wrapper: that would fire the browser's own unstyled tooltip *as well*, giving
-          two explanations of the same thing a moment apart. */}
-      <span className="sr-only">{text}</span>
-      {open && (
-        <span
-          role="tooltip"
-          /* `right-0`, so the panel's right edge lines up with the button's and it grows
-             *leftwards*. This control sits hard against the right edge of the row, so a
-             tooltip anchored on the left would run straight off the window - which is
-             exactly what the browser's native one did. */
-          className={cn(
-            'bg-surface-raised border-border text-content-secondary absolute top-full right-0 z-50 mt-1.5',
-            'w-80 rounded-lg border p-2.5 text-left text-[12px] leading-relaxed font-normal shadow-lg',
-            // The row is `whitespace-nowrap` in places; this text has to wrap.
-            'whitespace-normal',
-          )}
-        >
-          {text}
-        </span>
-      )}
-    </span>
   );
 }
 

@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Lock, Plus, ShieldCheck, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { PageHeader } from '@/components/layout/AppShell';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { Hint } from '@/components/ui/Hint';
 import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/features/auth/AuthProvider';
@@ -98,6 +99,26 @@ export function RolesPage() {
   const [name, setName] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string>();
+  const nameField = useRef<HTMLInputElement>(null);
+
+  /**
+   * Report a problem with the name, and take the user to it.
+   *
+   * The inline message alone was not enough. "Create role" sits below the whole
+   * permission catalogue, so by the time it is pressed the name field is usually
+   * scrolled off the top of the window - the rejection rendered somewhere the user
+   * was not looking, and the form read as if the button had done nothing at all.
+   *
+   * The toast says *that* something was refused; the scroll says *where*. Focusing
+   * as well means the correction can be typed immediately, and a screen reader
+   * lands on the field whose `aria-describedby` carries the same message.
+   */
+  function rejectName(message: string) {
+    setError(message);
+    toast.error(message);
+    nameField.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    nameField.current?.focus({ preventScroll: true });
+  }
 
   const { data: roles, isLoading } = useQuery({
     queryKey: ['roles'],
@@ -125,7 +146,7 @@ export function RolesPage() {
       void queryClient.invalidateQueries({ queryKey: ['roles'] });
     },
     onError: (err) => {
-      setError(err instanceof ApiError ? err.message : 'Could not create the role');
+      rejectName(err instanceof ApiError ? err.message : 'Could not create the role');
     },
   });
 
@@ -191,6 +212,7 @@ export function RolesPage() {
           <CardBody className="space-y-5">
             <div className="max-w-sm">
               <Input
+                ref={nameField}
                 label="Role name"
                 placeholder="e.g. Invoice Clerk"
                 value={name}
@@ -257,7 +279,7 @@ export function RolesPage() {
                 disabled={!name.trim() || selected.size === 0}
                 onClick={() => {
                   if (!name.trim()) {
-                    setError('Give the role a name');
+                    rejectName('Give the role a name');
                     return;
                   }
                   create.mutate();
@@ -305,25 +327,37 @@ export function RolesPage() {
                   </span>
 
                   {can('role:delete') && !role.is_system && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title={`Delete ${role.name}`}
-                      aria-label={`Delete ${role.name}`}
-                      disabled={role.member_count > 0}
-                      onClick={() => {
-                        if (window.confirm(`Delete the "${role.name}" role?`)) {
-                          remove.mutate(role.id);
-                        }
-                      }}
+                    // The desktop client has said why this is greyed out since it shipped;
+                    // the web had a `title` that could never fire, because a disabled
+                    // button suppresses pointer events. Same wording as the app - two
+                    // clients explaining one rule differently is worse than either.
+                    <Hint
+                      text={
+                        role.member_count > 0
+                          ? 'People still hold this role'
+                          : `Delete ${role.name}`
+                      }
+                      width="w-52"
                     >
-                      <Trash2
-                        className={cn(
-                          'h-3.5 w-3.5',
-                          role.member_count > 0 ? 'text-content-muted' : 'text-danger',
-                        )}
-                      />
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Delete ${role.name}`}
+                        disabled={role.member_count > 0}
+                        onClick={() => {
+                          if (window.confirm(`Delete the "${role.name}" role?`)) {
+                            remove.mutate(role.id);
+                          }
+                        }}
+                      >
+                        <Trash2
+                          className={cn(
+                            'h-3.5 w-3.5',
+                            role.member_count > 0 ? 'text-content-muted' : 'text-danger',
+                          )}
+                        />
+                      </Button>
+                    </Hint>
                   )}
                 </div>
               </CardBody>
