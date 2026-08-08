@@ -629,18 +629,24 @@ that does not.
   `SWALLOW_STORAGE_ERRORS` in `app/core/limiter.py` is the switch if you want the
   credential endpoints to fail closed instead.
 - **`TRUSTED_PROXY_HOPS` must match your topology.** Set too high, it hands the client
-  control of its own apparent IP again - the exact bug finding 2 fixed. One reverse proxy
-  or one platform router is `1`; a CDN in front of that is `2`; nothing in front is `0`.
+  control of its own apparent IP again - the exact bug finding 2 fixed. One terminator or
+  one platform router is `1`; a CDN in front of that is `2`. `0` is rejected outright
+  (`ge=1`), since production will not boot without https origins either.
 - **`RATE_LIMIT_IP` is currently the binding limit for reads** (finding 15). Fine for one
   or two people; raise it before more than that share an office network.
 - **Volumetric DDoS is out of scope, and now entirely somebody else's layer.** With the
-  edge removed (finding 5) there is no `limit_req`/`limit_conn` in this stack at all - the
-  application's limiter runs after the request has already reached Python. Absorbing a real
-  flood needs the platform router, a CDN, or a proxy you put in front.
-- **Frontend source maps** are built (`sourcemap: true`) and land in the image.
-  `frontend/nginx.conf` returns 404 for `*.map`, so they are not served - but they are
-  present, and the intent recorded in `vite.config.ts` is to upload them to an error
-  tracker instead.
+  edge removed (finding 5) there is no connection- or request-rate shedding in front of the
+  application at all - its own limiter runs only after the request has already reached
+  Python. Absorbing a real flood needs the platform router, a CDN, or whatever you put in
+  front.
+- **Frontend source maps are now served.** `vite.config.ts` still sets `sourcemap: true`
+  with the comment "not served publicly", and that used to be true: the frontend's own edge
+  configuration returned 404 for `*.map`. That configuration was deleted when the edge was
+  removed, and **nothing replaced the rule** - so wherever `dist/` is served from, the maps
+  beside it are fetchable, and `dist/assets` holds seven of them today. They expose original
+  sources, not secrets, and the intent recorded in `vite.config.ts` is to upload them to an
+  error tracker rather than ship them. Either restore the 404 at whatever now serves the
+  bundle, or set `sourcemap: false` for production builds.
 - **Twenty pre-existing test failures are unrelated to this work**, and were confirmed on
   a clean tree: 19 OCR tests fail because the optional `ocr` extra (`pypdf`) is not
   installed in this virtualenv, and

@@ -84,8 +84,9 @@ for you.
 For the findings that produced the rate-limiting and header controls described here -
 including one critical issue in the test harness and the reason a shipped client cannot
 authenticate itself - see [security-audit.md](security-audit.md). **That report predates
-two changes**: the edge-gateway check was removed, and the nginx/certbot edge was removed
-from the production stack entirely. Findings 3 and 5 carry notes saying so.
+two changes**: the edge-gateway check was removed, and the edge itself - proxy and
+certificate tooling both - was removed from the production stack entirely. Findings 3 and 5
+carry notes saying so.
 
 ---
 
@@ -132,8 +133,8 @@ readable by whoever holds the client and replayable from `curl`. There is no cli
 version of this control, and `X-Gateway-Key` was never sent by the frontend — that was the
 point, not an omission.
 
-**Only a proxy could,** and there isn't one of ours. This service runs behind a platform
-router (Render), not behind an nginx we configure, so there is nothing positioned to inject
+**Only an edge could,** and there isn't one of ours. This service runs behind a platform
+router (Render), not behind an edge we configure, so there is nothing positioned to inject
 a server-side value. A `GATEWAY_SECRET` check was removed rather than left half-wired.
 
 What it *would* have bought, if a proxy is ever added: it closes the **side door** — the
@@ -209,8 +210,10 @@ takes the left-most entry when `--forwarded-allow-ips` includes the peer, so
 as the real socket peer, one unforgeable fact underneath the resolution rule.
 
 Set `TRUSTED_PROXY_HOPS` to match the topology. Too high and the client controls its own
-apparent IP again: one reverse proxy or one platform router is `1`, a CDN in front of that
-is `2`. Deployed directly with nothing in front, it is `0`.
+apparent IP again: one terminator or one platform router is `1`, a CDN in front of that
+is `2`. **`0` is not a legal value** - the field is `ge=1`, because production also refuses
+to boot without https origins, and nothing in this stack terminates TLS. "Deployed directly
+with nothing in front" is not a shape this application supports.
 
 ---
 
@@ -780,11 +783,10 @@ all is both correct and free.
 its version is a free CVE shortlist - and uvicorn also runs with `--no-server-header`.
 
 One honest limit: **whatever terminates TLS announces itself**, and this application cannot
-strip a header it never sees. A platform router advertises the platform; a self-hosted nginx
-emits `Server: nginx` even with `server_tokens off`, which removes the *version* - the part
-that hands over a CVE shortlist - but not the product name, since suppressing that needs the
-third-party `headers-more` module. So a scanner learns the proxy's identity and nothing more
-specific about what runs behind it.
+strip a header it never sees. A platform router advertises the platform, and a self-hosted
+terminator generally advertises its own product name - most of them will drop the *version*
+on request, which is the part that hands over a CVE shortlist, but not the name itself. So a
+scanner learns the edge's identity and nothing more specific about what runs behind it.
 
 **A route that sets its own value keeps it.** The document-download endpoint returns bytes
 a stranger uploaded and sets a stricter `sandbox` CSP plus a deliberately private,

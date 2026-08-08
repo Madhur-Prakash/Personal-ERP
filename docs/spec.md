@@ -167,12 +167,12 @@ while destroying others, so there was nothing safe to add.
 Ollama/OpenAI-compatible + Sentence Transformers + Qdrant + LangGraph (AI).
 
 **Infrastructure** - Docker Compose and GitHub Actions, deployed either on one VPS
-behind a reverse proxy the operator already runs, or on managed hosting (Render for
-the API, Vercel for the web client). **No proxy ships in this repository**: an nginx
-and certbot pair lived in the production stack, could not start because their
-configuration was never committed, and were removed rather than rebuilt - the edge is
-one of the few things every host already has an opinion about. Prometheus, Grafana,
-Loki and Sentry remain planned rather than present.
+behind a TLS terminator the operator already runs, or on managed hosting (Render for
+the API, Vercel for the web client). **No edge ships in this repository**: the one that
+used to live in the production stack could not start, because its configuration was
+never committed, and it was removed rather than rebuilt - the edge is one of the few
+things every host already has an opinion about. Prometheus, Grafana, Loki and Sentry
+remain planned rather than present.
 
 No object store. Uploaded documents are compressed into PostgreSQL, so a single
 `pg_dump` captures the ledger and the scans that support it at one consistent moment

@@ -36,12 +36,19 @@ raised to about 25% of RAM on anything larger.
 > | Shape | TLS, certificates, edge rate limiting |
 > | --- | --- |
 > | **Managed** - API on Render, web client on Vercel | The platform's, and neither platform runs this compose file |
-> | **Self-hosted** - this stack on your VPS | A reverse proxy you already operate (nginx, Caddy, Traefik) forwards to the two ports below |
+> | **Self-hosted** - this stack on your VPS | A TLS terminator you already operate (Caddy, Traefik, a tunnel) forwards to the two ports below |
 >
-> Whichever you pick, set **`TRUSTED_PROXY_HOPS`** to the number of proxies in front of
-> the API - one router or one proxy is `1`, a CDN in front of that is `2`, nothing in
-> front is `0`. Get it wrong and every IP-based control reads an address the caller
-> chose; [Security](security.md#who-is-calling---client-address-resolution) explains why.
+> **Something has to sit in front, and the application enforces it.** Production boot
+> requires every `CORS_ORIGINS` entry and `FRONTEND_URL` to be `https://`, and nothing
+> in this stack terminates TLS - so a deployment with nothing in front does not merely
+> run insecurely, it refuses to start. That is deliberate: a credentialled session over
+> plain HTTP is a session anyone on the path can read.
+>
+> Set **`TRUSTED_PROXY_HOPS`** to the number of hops in front of the API - one router or
+> one terminator is `1`, a CDN in front of that is `2`. **`0` is not accepted**: the
+> setting is `ge=1`, because there is no supported production shape with nothing in
+> front. Get it wrong and every IP-based control reads an address the caller chose;
+> [Security](security.md#who-is-calling---client-address-resolution) explains why.
 
 ---
 
@@ -156,7 +163,7 @@ step 2.
 | Public path | Forward to | Notes |
 | --- | --- | --- |
 | `/api/`, `/health/` | `127.0.0.1:8000` | The API. Long-lived request budget on document upload - the OCR path is slow by nature |
-| everything else | `127.0.0.1:8080` | The built SPA, served by the frontend image's own nginx as an unprivileged user |
+| everything else | `127.0.0.1:8080` | The built SPA, served as static files by an unprivileged user |
 
 Whatever proxies must, at minimum:
 
@@ -276,7 +283,7 @@ rather than just stopping a deploy.
 
 ### The gap, and why it is honest to name it
 
-The old stack ran two API replicas behind an nginx that could route to either, so
+The old stack ran two API replicas behind an edge that could route to either, so
 `order: start-first` gave a genuinely zero-downtime rollout. With the edge gone, each
 service publishes a host port and therefore runs **one** container - two cannot hold
 the same port, so the replacement starts only after the old one has stopped. A
