@@ -172,6 +172,27 @@ Note the absence of an id in these paths. The active organization comes from the
 signed token, which is what makes cross-tenant access impossible rather than
 merely checked.
 
+**Membership is many-to-many, and there is no cap.** One person can own or belong to
+any number of organizations; `POST /organizations` needs only a verified email and
+makes the caller owner of the new one. `GET /organizations` returns every membership
+and is what a client's organization switcher renders.
+
+Two consequences worth designing a client around:
+
+- **The switcher excludes suspended memberships.** `GET /organizations` lists *usable*
+  memberships only, because a suspended member must not be able to switch into that
+  organization. A user whose only membership is suspended therefore looks, to the
+  client, exactly like a user with no organization at all - and needs a route to
+  creating or joining one rather than an empty dashboard.
+- **Switching re-mints the token.** Permissions are per-organization and are embedded
+  in the access token, so `POST /auth/switch-organization/{id}` issues a new one; the
+  old token cannot be pointed at the new organization. A client must also drop every
+  cached query, since all of it was scoped to the previous organization.
+
+Creating an organization sets `last_organization_id` but does **not** change the
+token already in the caller's hand - so a client that creates one and only refreshes
+its profile is still looking at the previous set of books. Switch into it.
+
 | Method | Path | Permission |
 | --- | --- | --- |
 | GET | `/` | - (own memberships) |

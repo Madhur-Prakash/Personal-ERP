@@ -315,6 +315,31 @@ What holds it together:
   It is called every two seconds by design and is not a guessing surface: 256 bits,
   bounded by its own TTL, destroyed on first success.
 
+### What counts as proof of an email address
+
+**Login refuses an unverified address** ([`auth/service.py`](../backend/app/modules/auth/service.py)),
+so "verified" is a gate rather than a badge. Four things satisfy it, and only the
+first is the dedicated flow:
+
+| Proof | Why it counts |
+| --- | --- |
+| The verification link | The obvious one - a token delivered to the address, redeemed |
+| A magic link, on first use | Same proof, arriving through a different door |
+| An email OTP, on first use | The code was readable only in that mailbox |
+| **Registering through an invitation** | The invite token is emailed to the invited address, is never returned by any API, and registration rejects a mismatched email - so holding it *is* control of the mailbox |
+
+The last one surprises people, including its author, so it is worth being explicit:
+someone who signs up through an invitation link is **already verified and never
+receives a verification email**. Removing that would not add a check - it would send
+a second email asking for proof the first one already provided, and until they opened
+it they could not sign in at all, having just been added to an organization.
+
+The exposure this accepts is a **forwarded invitation**: whoever holds the link can
+register as the invited address. That is inherent to bearer invite links rather than
+particular to this design, it needs the invitee to hand it over, the token is
+single-use with a seven-day expiry, and the address owner still controls password
+reset.
+
 ### Account enumeration
 
 Password reset, magic link, OTP request, and resend-verification all return the

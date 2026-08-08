@@ -13,7 +13,10 @@
 #define AppName        "Personal ERP"
 #define AppVersion     "1.0.0"
 #define AppPublisher   "Personal ERP"
-#define AppUrl         "https://personal-erp-seven.vercel.app"
+; The repository, not a running deployment. This is what Windows shows as the
+; publisher link in Add/Remove Programs, and every install points at it - so it has
+; to be somewhere that answers for *this software*, not for one person's server.
+#define AppUrl         "https://github.com/Madhur-Prakash/Personal-ERP"
 #define AppExeName     "personalerp_desktop.exe"
 
 ; Relative to this script. `flutter build windows` writes here; nothing else in the
@@ -26,6 +29,14 @@
 ; is only discovered on the machine you were trying to install it on.
 #if !FileExists(SourcePath + BuildDir + "\" + AppExeName)
   #error Release build not found. Run: cd app_frontend && flutter build windows --release
+#endif
+
+; The Visual C++ runtime is bundled rather than assumed - see the note in [Files] for
+; why. It is ~25 MB of Microsoft's binary, so it is deliberately not committed; this
+; check is what stops a fresh clone producing an installer that is silently missing it.
+; Download it once and it stays put.
+#if !FileExists(SourcePath + "vc_redist.x64.exe")
+  #error vc_redist.x64.exe not found beside this script. Download it from https://aka.ms/vs/17/release/vc_redist.x64.exe into the installer folder.
 #endif
 
 [Setup]
@@ -100,15 +111,22 @@ Source: "{#BuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 
 ; --- Visual C++ runtime -------------------------------------------------------------
 ; A Flutter release build links against the MSVC 2015-2022 runtime (msvcp140.dll,
-; vcruntime140.dll, vcruntime140_1.dll). Practically every Windows 10/11 machine has it
-; because so many applications install it - but "practically every" is not "every", and
-; the failure mode is a launch that does nothing at all.
+; vcruntime140.dll, vcruntime140_1.dll). Those are not in the build folder - the
+; executable declares them and expects Windows to have them.
 ;
-; To make the installer self-contained, download vc_redist.x64.exe from Microsoft into
-; this folder and uncomment the two lines below.
+; Practically every Windows 10/11 machine does, because hundreds of applications
+; install it. But "practically every" is not "every" - a freshly imaged laptop, a
+; locked-down corporate build, a clean VM or a Server install often does not - and the
+; failure mode gives nobody anything to work with: Windows cannot resolve the imports,
+; kills the process before a single line of our code runs, and the user sees a
+; double-click that does *nothing at all*. No window, no error, no log they will find.
+; It reads as a broken build, and the report we get is "it doesn't open".
 ;
-; Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
-; (and the matching [Run] entry further down)
+; So it ships in the box. `{tmp}` with `deleteafterinstall` means the payload is
+; unpacked, used, and removed rather than left behind in Program Files, and the
+; `Check:` on the [Run] entry skips the whole step on the machines that already have
+; it, which is most of them.
+Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
@@ -116,8 +134,14 @@ Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-; Uncomment alongside the [Files] entry above to install the runtime first.
-; Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ runtime..."; Check: not VCRedistInstalled
+; The runtime first, and only when it is missing - see the note in [Files].
+;
+; `/quiet` keeps Microsoft's own wizard from appearing in the middle of ours, and
+; `/norestart` stops it rebooting the machine unasked. This step is machine-wide, so
+; on a per-user install (the default) Windows raises a UAC prompt for it; declining
+; leaves the app installed but unable to start on a machine that lacks the runtime.
+; README.md beside this file documents that for whoever hits it.
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ runtime..."; Check: not VCRedistInstalled
 
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 

@@ -64,3 +64,8 @@ desktop.ini
 backend/var/
 credentials.json
 token.pickle
+
+# Microsoft's Visual C++ redistributable, bundled into the Windows installer. ~25 MB
+# of someone else's binary, so it is fetched rather than committed - installer/README.md
+# says where from, and the .iss fails the compile with that URL when it is absent.
+installer/vc_redist.x64.exe
