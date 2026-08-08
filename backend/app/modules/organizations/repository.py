@@ -22,7 +22,7 @@ from app.modules.organizations.models import (
 )
 
 #: Slugs are used in URLs, so anything outside this set is collapsed to hyphens.
-_SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+_SLUG_STRIP = re.compile(r"[^a-z0-9]+") 
 
 #: Reserved because they would collide with real or future application routes.
 RESERVED_SLUGS: frozenset[str] = frozenset(
