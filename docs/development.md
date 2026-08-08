@@ -78,6 +78,123 @@ the flows at an address you own; there is no local inbox to intercept them.
 
 ---
 
+## Getting a real Gmail token
+
+`GMAIL_CREDENTIALS_B64` is **base64 of a pickled `Credentials` object** carrying the
+`gmail.send` scope. It is not an API key, and it is not the `credentials.json` you
+download from Google - that file is only the input. Producing it is a one-time chore.
+
+### 1. Get `credentials.json` from Google
+
+1. [Google Cloud Console](https://console.cloud.google.com/) - a project, new or existing
+2. **APIs & Services → Library → Gmail API → Enable**
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID**, application
+   type **Desktop app**
+4. Download the JSON. That file is your `credentials.json`
+
+**A service-account key will not work.** Sending as a user needs that user's consent, or
+domain-wide delegation this transport does not implement.
+
+**Publish the consent screen** - *Google Auth Platform → Audience → Publish app*. While it
+sits in **Testing**, Google expires every refresh token it issues after **seven days**, and
+sending starts failing with `invalid_grant` a week after it last worked. Publishing first
+turns a weekly chore into a one-time one.
+
+### 2. Mint the token
+
+The script runs the consent flow and prints the finished `.env` line:
+
+```bash
+cd backend
+uv sync --group dev     # google-auth-oauthlib is a dev dependency - only this script needs it
+uv run python scripts/mint_gmail_token.py path/to/credentials.json
+```
+
+A browser opens. **Consent as the mailbox that should send the mail** - whatever account
+signs in is the `From:` on every email the deployment sends, and it has to match
+`GMAIL_SENDER` if that is set. What comes back is one line:
+
+```
+GMAIL_CREDENTIALS_B64=gASVvQMAAAAAAACMHmdvb2dsZS5vYXV0aDIuY3JlZGVudGlhbHOU...
+```
+
+### By hand, if you would rather see the moving parts
+
+The script is exactly the OAuth flow plus `base64(pickle.dumps(creds))`. Written out, it is
+these two snippets - run them from `backend/`, next to `credentials.json`:
+
+**Mint `token.pickle`:**
+
+```python
+import pickle
+import os
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+
+# Sending, and nothing else. A token scoped this narrowly cannot read the mailbox it
+# sends from, so a leak costs spam rather than the contents of the inbox.
+SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+
+creds = None
+# Reuse an existing token if one is already lying around
+if os.path.exists("token.pickle"):
+    with open("token.pickle", "rb") as token:
+        creds = pickle.load(token)
+# If credentials are missing or invalid, get new ones
+if not creds or not creds.valid:
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    else:
+        flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+        # Both arguments matter - see the note below
+        creds = flow.run_local_server(port=0, access_type="offline", prompt="consent")
+    # Save the credentials for future use
+    with open("token.pickle", "wb") as token:
+        pickle.dump(creds, token)
+print("token.pickle created successfully")
+```
+
+**Turn it into the environment value:**
+
+```python
+import base64
+
+data = open("token.pickle", "rb").read()
+print(base64.b64encode(data).decode())
+```
+
+Paste that output as `GMAIL_CREDENTIALS_B64` - in `.env` locally, or as an environment
+variable in whatever hosts the backend.
+
+> **`access_type="offline"` and `prompt="consent"` are not optional.** Without both,
+> re-consenting for a client Google has already authorised returns an access token with
+> **no refresh token attached**. It sends mail for about an hour and then stops for good,
+> and nothing in the response says so. `mint_gmail_token.py` passes them and then checks
+> `credentials.refresh_token` before printing anything, which is the one thing this
+> shorter version does not do for you.
+
+### 3. Set it, and restart
+
+```env
+GMAIL_CREDENTIALS_B64=<the base64 line>
+GMAIL_SENDER=you@yourdomain.com
+EMAIL_FROM_NAME=Personal ERP
+```
+
+**Restart the backend.** Settings are read once at import, so a running server keeps using
+the old value - including "unset", which means it carries on logging emails instead of
+sending them.
+
+**Neither file belongs in a commit.** `credentials.json` and `token.pickle` are both in
+[`.gitignore`](../.gitignore) and `backend/.dockerignore`; delete them once the base64 is
+in your secret store, since the env var is the only copy anything reads.
+
+**If sending fails with `invalid_grant`**, Google has rejected the refresh token itself -
+nothing is misconfigured and there is no fix but a new token. Re-run the script, and
+publish the consent screen if you have not.
+
+---
+
 ## Backend conventions
 
 ### Module layout

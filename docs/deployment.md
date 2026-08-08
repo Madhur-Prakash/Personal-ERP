@@ -121,6 +121,21 @@ EMAIL_FROM_NAME=Personal ERP
 chmod 600 .env
 ```
 
+> **Where `GMAIL_CREDENTIALS_B64` comes from.** It is base64 of a pickled OAuth
+> `Credentials` with the `gmail.send` scope - minted once from a **Desktop app** OAuth
+> client's `credentials.json`, not an API key:
+>
+> ```bash
+> cd backend
+> uv sync --group dev
+> uv run python scripts/mint_gmail_token.py path/to/credentials.json
+> ```
+>
+> Consent as the mailbox that should send, and paste the printed line. The full
+> walkthrough - the Google Cloud setup, the by-hand version of the two scripts, and why the
+> consent screen must be **published** or the token dies after seven days - is
+> [Getting a real Gmail token](development.md#getting-a-real-gmail-token).
+
 The app **validates this at boot and refuses to start** if `SECRET_KEY` is a
 placeholder, `DEBUG` is true, CORS is `*`, `ENCRYPTION_KEY` is missing, or the
 database password is still a default. Crashing at boot beats silently serving

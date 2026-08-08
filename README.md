@@ -134,6 +134,11 @@ Register at <http://localhost:5173/register>. `make help` lists every task.
 > [Email in development](docs/development.md#email-in-development). With no credentials,
 > emails are written to the log instead; logifyx masks `token=...` out of the URL, so set
 > `LOG_MASK=false` to make the link usable locally.
+>
+> To send real mail, mint the token once from a Desktop-app `credentials.json` -
+> `cd backend && uv run python scripts/mint_gmail_token.py path/to/credentials.json`
+> prints the `GMAIL_CREDENTIALS_B64` line ready to paste. Full walkthrough:
+> [Getting a real Gmail token](docs/development.md#getting-a-real-gmail-token).
 
 ---
 
