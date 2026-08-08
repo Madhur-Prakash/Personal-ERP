@@ -603,6 +603,52 @@ class TestInvitations:
         assert "members" not in body
         assert "id" not in body
 
+    async def test_preview_names_the_inviter_on_a_cold_session(
+        self,
+        client: AsyncClient,
+        authed_client: AsyncClient,
+        api: str,
+        db: AsyncSession,
+        user: User,
+    ) -> None:
+        """Regression: previewing a perfectly valid invitation returned 503.
+
+        `get_by_token` eager-loaded the organization and the role but not
+        `invited_by`, and the preview endpoint reads `invited_by.full_name` to
+        render "X invited you". A lazy load under `AsyncSession` raises
+        `MissingGreenlet`, which is a `SQLAlchemyError` - so the handler turned it
+        into a 503 and the acceptance page rendered *every* live invitation link
+        as "this invitation is no longer valid".
+
+        `expunge_all()` is what makes this a test rather than a formality. The
+        suite shares one session with the app, so the inviter is normally already
+        in the identity map and the traversal resolves with no IO at all - which
+        is exactly why `test_preview_is_public_and_minimal` above kept passing
+        while the endpoint was broken for every real caller. A production request
+        starts with a cold session; this models that.
+        """
+        from app.core.security import generate_token, hash_token
+
+        inviter_name = user.full_name
+
+        await authed_client.post(
+            f"{api}/organizations/current/invitations", json={"email": "cold@example.com"}
+        )
+        token = generate_token()
+        stored = await db.scalar(select(Invitation).where(Invitation.email == "cold@example.com"))
+        assert stored is not None
+        stored.token_hash = hash_token(token)
+        await db.commit()
+
+        # Nothing left in the identity map, so every relationship the endpoint
+        # touches has to be loaded for real - as it is on a fresh request.
+        db.expunge_all()
+
+        response = await client.get(f"{api}/invitations/{token}")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["invited_by_name"] == inviter_name
+
     async def test_expired_invitation_cannot_be_previewed(
         self, client: AsyncClient, authed_client: AsyncClient, api: str, db: AsyncSession
     ) -> None:

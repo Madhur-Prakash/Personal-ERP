@@ -195,10 +195,18 @@ class InvitationRepository(BaseRepository[Invitation]):
     sortable_fields: ClassVar[frozenset[str]] = frozenset({"created_at", "email"})
 
     async def get_by_token(self, token: str) -> Invitation | None:
-        """Look up by the token's digest, with org and role eager-loaded.
+        """Look up by the token's digest, with org, role and inviter eager-loaded.
 
         The acceptance flow needs the org name for the confirmation screen and
         the role to create the membership.
+
+        `invited_by` is loaded here for the same reason, and the omission was a
+        real bug: the preview endpoint reads `invitation.invited_by.full_name`
+        to render "X invited you", and a lazy load under `AsyncSession` raises
+        `MissingGreenlet`. That is a `SQLAlchemyError`, so the handler turned it
+        into a 503 and every genuinely valid invitation link rendered as "this
+        invitation is no longer valid". Nothing caught it because the invitation
+        itself was fine - the failure was one attribute away from the check.
         """
         query = (
             select(Invitation)
@@ -206,6 +214,7 @@ class InvitationRepository(BaseRepository[Invitation]):
             .options(
                 selectinload(Invitation.organization),
                 selectinload(Invitation.role),
+                selectinload(Invitation.invited_by),
             )
         )
         return (await self.session.execute(query)).scalar_one_or_none()

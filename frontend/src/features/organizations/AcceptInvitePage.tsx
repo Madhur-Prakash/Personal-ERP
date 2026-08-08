@@ -29,12 +29,17 @@ export function AcceptInvitePage() {
   const {
     data: preview,
     isLoading,
+    isFetching,
     error,
+    refetch,
   } = useQuery({
     queryKey: ['invitation', token],
     queryFn: () => organizationsApi.previewInvitation(token!),
     enabled: Boolean(token),
-    retry: false, // an invalid token will not become valid on retry
+    // An invalid or expired token will not become valid on retry, so those must
+    // not be retried. A 5xx or a dropped connection is a different thing
+    // entirely and may well succeed a second later.
+    retry: (failureCount, err) => err instanceof ApiError && err.isRetryable && failureCount < 2,
   });
 
   const accept = useMutation({
@@ -82,6 +87,42 @@ export function AcceptInvitePage() {
   }
 
   if (error || !preview) {
+    // A server fault is not an invalid invitation, and reporting one as the other
+    // is actively harmful: it tells the recipient to ask for a new link, and the
+    // new link fails in exactly the same way. This screen once rendered "This
+    // invitation is no longer valid / A database error occurred" - two claims that
+    // contradict each other, one of them wrong.
+    const serverFault = !(error instanceof ApiError) || error.isRetryable;
+
+    if (serverFault) {
+      return (
+        <AuthLayout
+          title="We could not check your invitation"
+          subtitle="Something went wrong on our side. Your invitation is most likely fine."
+          footer={
+            <Link to="/login" className="text-primary font-medium hover:underline">
+              Go to sign in
+            </Link>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-content-muted text-center text-[13px] leading-relaxed">
+              This is a problem with the server, not with your link - asking for a new invitation
+              will not help. Try again in a moment.
+            </p>
+            <Button fullWidth size="lg" loading={isFetching} onClick={() => void refetch()}>
+              Try again
+            </Button>
+            {error instanceof ApiError && error.requestId !== undefined && (
+              <p className="text-content-muted text-center font-mono text-[11px]">
+                Reference: {error.requestId}
+              </p>
+            )}
+          </div>
+        </AuthLayout>
+      );
+    }
+
     return (
       <AuthLayout
         title="This invitation is no longer valid"
