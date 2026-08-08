@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,11 +27,61 @@ import '../../widgets/toast.dart';
 import '../auth/password_policy.dart';
 
 /// Settings - profile, security, organization, appearance.
-class SettingsScreen extends ConsumerWidget {
-  const SettingsScreen({super.key});
+class SettingsScreen extends ConsumerStatefulWidget {
+  const SettingsScreen({super.key, this.scrollToCreateOrganization = false});
+
+  /// Arrived from "Create an organization" - scroll the form into view instead of
+  /// opening at the top of the page with it below the fold.
+  final bool scrollToCreateOrganization;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  /// Anchors the create-organization card so arriving from the switcher can
+  /// scroll to it.
+  final GlobalKey _createOrganizationKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.scrollToCreateOrganization) _scrollToCreateOrganization();
+  }
+
+  @override
+  void didUpdateWidget(SettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The switcher is in the sidebar, so it is reachable *from this screen* -
+    // tapping create while already on Settings changes the query string without
+    // remounting anything, and `initState` never runs a second time.
+    if (widget.scrollToCreateOrganization &&
+        !oldWidget.scrollToCreateOrganization) {
+      _scrollToCreateOrganization();
+    }
+  }
+
+  void _scrollToCreateOrganization() {
+    // Post-frame because the card does not exist yet during `initState`, and the
+    // scrollable it lives in has not been laid out either.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final BuildContext? target = _createOrganizationKey.currentContext;
+      // Null when the user already has an organization, so the card is not built.
+      if (target == null) return;
+      unawaited(
+        Scrollable.ensureVisible(
+          target,
+          duration: Motion.slow,
+          curve: Motion.easeOutQuart,
+          alignment: 0.1,
+        ),
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final AuthState auth = ref.watch(authControllerProvider);
     final bool canEditOrganization =
         auth.can('organization:update') && auth.organization != null;
@@ -49,7 +101,14 @@ class SettingsScreen extends ConsumerWidget {
               const _PasswordCard(),
               const _SessionsCard(),
               if (canEditOrganization) const _OrganizationCard(),
-              if (auth.organization == null) const CreateOrganizationCard(),
+              // Always present, for two reasons that used to be two dead ends: the
+              // onboarding path lands here with no organization, and membership is
+              // many-to-many, so gating this on having none contradicted the
+              // switcher's "Create another organization".
+              KeyedSubtree(
+                key: _createOrganizationKey,
+                child: const CreateOrganizationCard(),
+              ),
             ];
             final List<Widget> side = <Widget>[
               const _AppearanceCard(),
@@ -1117,7 +1176,11 @@ class _OrganizationCardState extends ConsumerState<_OrganizationCard> {
   }
 }
 
-/// Used by the dashboard's onboarding path when the user has no organization.
+/// Create an organization - the onboarding path, and the "one more" path.
+///
+/// One person can own or belong to any number of organizations; the server sets no
+/// limit, and the sidebar switcher is how you move between them. So this card is not
+/// onboarding-only, and its copy says which case you are in.
 class CreateOrganizationCard extends ConsumerStatefulWidget {
   const CreateOrganizationCard({super.key});
 
@@ -1146,11 +1209,22 @@ class _CreateOrganizationCardState
         _saving = true;
       });
       try {
-        await ref
+        final Organization created = await ref
             .read(organizationsApiProvider)
             .create(name: _name.text.trim());
-        await ref.read(authControllerProvider.notifier).refresh();
-        if (context.mounted) context.toastSuccess('Organization created');
+        // Switch into it rather than only refreshing. The server does set
+        // `last_organization_id`, but the access token still carries the old
+        // organization - so a plain refresh leaves you looking at the previous
+        // set of books having just been told a new one exists.
+        try {
+          await ref
+              .read(authControllerProvider.notifier)
+              .switchOrganization(created.id);
+        } catch (_) {
+          await ref.read(authControllerProvider.notifier).refresh();
+        }
+        if (mounted) _name.clear();
+        if (context.mounted) context.toastSuccess('${created.name} created');
       } catch (error) {
         if (mounted) {
           setState(() => _error = ApiError.from(error).message);
@@ -1164,9 +1238,15 @@ class _CreateOrganizationCardState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const CardHeader(
-            title: 'Create an organization',
-            description: 'You will be its owner, with full access.',
+          CardHeader(
+            title: ref.watch(authControllerProvider).organization == null
+                ? 'Create an organization'
+                : 'Create another organization',
+            description:
+                ref.watch(authControllerProvider).organization == null
+                ? 'You will be its owner, with full access.'
+                : 'You will be its owner. Your existing organizations stay exactly '
+                      'as they are, and the sidebar switcher moves between them.',
           ),
           CardBody(
             child: Column(

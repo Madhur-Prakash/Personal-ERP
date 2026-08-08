@@ -222,7 +222,20 @@ final Provider<GoRouter> routerProvider = Provider<GoRouter>((Ref ref) {
           GoRoute(path: '/members', builder: (_, _) => const MembersScreen()),
           GoRoute(path: '/roles', builder: (_, _) => const RolesScreen()),
           GoRoute(path: '/audit', builder: (_, _) => const AuditScreen()),
-          GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
+          GoRoute(
+            path: '/settings',
+            // `create=1` arrives from the sidebar switcher and the dashboard's
+            // onboarding button, and asks the screen to scroll its create-
+            // organization card into view. Read here rather than inside the
+            // screen: every other query parameter in this router is passed down
+            // as a constructor argument, and a `const SettingsScreen()` would not
+            // rebuild when only the query string changed.
+            builder: (BuildContext context, GoRouterState state) =>
+                SettingsScreen(
+                  scrollToCreateOrganization:
+                      state.uri.queryParameters['create'] == '1',
+                ),
+          ),
         ],
       ),
     ],

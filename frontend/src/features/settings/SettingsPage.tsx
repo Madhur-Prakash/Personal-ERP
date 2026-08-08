@@ -12,7 +12,8 @@ import {
   Sun,
   Trash2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useLocation } from '@tanstack/react-router';
+import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 
 import { PageHeader } from '@/components/layout/AppShell';
@@ -38,6 +39,33 @@ import { formatRelative } from '@/lib/format';
 export function SettingsPage() {
   const { user, refresh, can } = useAuth();
 
+  // Arriving from the switcher's "Create an organization", or from the dashboard's
+  // onboarding button. Both land here with `#create-organization`; without this the
+  // page opens at the top with the form below the fold, which reads as the button
+  // having gone to the wrong place.
+  //
+  // The hash is compared with any leading `#` stripped, because that is a detail of
+  // the router's location shape rather than something to depend on.
+  const hash = useLocation({ select: (location) => location.hash });
+  const wantsCreateCard = hash.replace(/^#/, '') === 'create-organization';
+
+  // A ref *callback*, not an effect over a ref object. The card renders only when
+  // there is no active organization, so on the render the hash arrives in the node
+  // may not exist yet - an effect would run against `null` and silently do nothing,
+  // which is exactly what it did. This fires the moment the node attaches, and React
+  // re-runs it whenever `wantsCreateCard` flips, covering the other direction too:
+  // pressing create from the sidebar while already on this page.
+  //
+  // `requestAnimationFrame` because a node that attached this frame has no final
+  // layout yet, and scrolling to a position that is about to change lands short.
+  const createCard = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node || !wantsCreateCard) return;
+      requestAnimationFrame(() => node.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    },
+    [wantsCreateCard],
+  );
+
   return (
     <div>
       <PageHeader title="Settings" description="Your profile, security, and organization." />
@@ -49,6 +77,20 @@ export function SettingsPage() {
           <PasswordCard />
           <SessionsCard />
           {can('organization:update') && user?.active_organization && <OrganizationCard />}
+          {/* Always rendered, for two reasons that used to be two dead ends.
+
+              The onboarding path lands here: the dashboard's "Create organization"
+              button points at Settings, which rendered nothing at all for a user with
+              no organization - so the one screen the button exists to reach had no
+              form on it. That also stranded a *suspended* member, whose memberships
+              are excluded from the switcher by design.
+
+              And membership is many-to-many: the server puts no limit on how many
+              organizations one person owns or belongs to, so gating this card on
+              having none contradicted the switcher's "Create another organization". */}
+          <div id="create-organization" ref={createCard} className="scroll-mt-20">
+            <CreateOrganizationCard />
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -802,17 +844,33 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Used by the dashboard's onboarding path when the user has no organization. */
+/**
+ * Create an organization - the onboarding path, and the "one more" path.
+ *
+ * One person can own or belong to any number of organizations; the server sets no
+ * limit, and the switcher in the sidebar is how you move between them. So this card
+ * is not onboarding-only, and its copy says which case you are in.
+ */
 export function CreateOrganizationCard() {
-  const { refresh } = useAuth();
+  const { user, refresh, switchOrganization } = useAuth();
   const [name, setName] = useState('');
   const [error, setError] = useState<string>();
+  const hasOrganization = Boolean(user?.active_organization);
 
   const create = useMutation({
     mutationFn: () => organizationsApi.create({ name: name.trim() }),
-    onSuccess: async () => {
-      toast.success('Organization created');
-      await refresh();
+    onSuccess: async (organization) => {
+      toast.success(`${organization.name} created`, { description: 'You are its owner.' });
+      setName('');
+      // Switch into it rather than only refreshing. The server does set
+      // `last_organization_id`, but the access token still carries the old
+      // organization - so a plain refresh leaves you looking at the previous set of
+      // books having just been told a new one exists.
+      try {
+        await switchOrganization(organization.id);
+      } catch {
+        await refresh();
+      }
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : 'Could not create it'),
   });
@@ -820,8 +878,12 @@ export function CreateOrganizationCard() {
   return (
     <Card>
       <CardHeader
-        title="Create an organization"
-        description="You will be its owner, with full access."
+        title={hasOrganization ? 'Create another organization' : 'Create an organization'}
+        description={
+          hasOrganization
+            ? 'You will be its owner. Your existing organizations stay exactly as they are, and the sidebar switcher moves between them.'
+            : 'You will be its owner, with full access.'
+        }
       />
       <CardBody className="space-y-4">
         <Input

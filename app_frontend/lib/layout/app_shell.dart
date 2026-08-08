@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../core/api_error.dart';
 import '../models/auth.dart';
 import '../state/auth_controller.dart';
 import '../theme/oklch.dart';
@@ -14,6 +15,7 @@ import '../theme/tokens.dart';
 import '../widgets/app_badge.dart';
 import '../widgets/app_button.dart';
 import '../widgets/primitives.dart';
+import '../widgets/toast.dart';
 import 'command_palette.dart';
 import 'footer.dart';
 import 'nav.dart';
@@ -55,6 +57,52 @@ class _AppShellState extends ConsumerState<AppShell> {
     final AuthState auth = ref.watch(authControllerProvider);
     final double width = MediaQuery.sizeOf(context).width;
     final bool wide = width >= AppShell.desktopBreakpoint;
+
+    // The router's guard deliberately does nothing while the session restore is in
+    // flight - redirecting on `!isAuthenticated` before we know would bounce a
+    // signed-in user to the sign-in screen on every launch. The cost was that this
+    // shell built anyway, so a first launch showed chrome and an empty dashboard
+    // before landing on sign-in, which reads as the app having loaded and then
+    // thrown the user out. A window with no address bar makes that worse, not
+    // better: there is nothing else on screen to explain what happened.
+    //
+    // So the protected shell shows nothing of itself until the answer is known.
+    // The sign-in screens are unaffected; they are public and build immediately.
+    if (auth.isLoading) {
+      return Scaffold(
+        backgroundColor: t.canvas,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            spacing: 12,
+            children: <Widget>[
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: t.primary,
+                  borderRadius: BorderRadius.circular(Radii.xl),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  'E',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: t.primaryContent,
+                    height: 1,
+                  ),
+                ),
+              ),
+              Text(
+                'Signing you in…',
+                style: TextStyle(fontSize: 13, color: t.contentMuted),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     // Cmd/Ctrl+K opens the palette from anywhere. Registered on the shell rather than
     // per-screen so it works regardless of which route is showing, and on both
@@ -185,6 +233,30 @@ class _SidebarState extends ConsumerState<_Sidebar> {
   /// The path of the row under the pointer, or null.
   String? _hoveredPath;
 
+  /// Sentinel for the menu's create entry, which is not an organization id.
+  static const String _createOrganizationValue = '__create_organization__';
+
+  Future<void> _chooseOrganization(String value) async {
+    if (value == _createOrganizationValue) {
+      widget.onNavigate();
+      // `create=1` is what makes Settings scroll its create card into view. The
+      // card sits below profile, security and appearance, so landing at the top
+      // of the page hides the one thing the tap asked for.
+      context.go('/settings?create=1');
+      return;
+    }
+    if (value == widget.auth.organization?.id) return;
+
+    final ToastScopeState toasts = ToastScope.of(context);
+    try {
+      await ref.read(authControllerProvider.notifier).switchOrganization(value);
+    } catch (error) {
+      toasts.show(
+        ToastData(message: ApiError.from(error).message, tone: ToastTone.error),
+      );
+    }
+  }
+
   void _setHovered(String path, bool entered) {
     if (entered) {
       if (_hoveredPath != path) setState(() => _hoveredPath = path);
@@ -277,18 +349,81 @@ class _SidebarState extends ConsumerState<_Sidebar> {
             ),
           ),
 
-          // Organization switcher.
-          if (organization != null)
-            Padding(
-              padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
-              child: _OrganizationRow(
-                organization: organization,
-                onTap: () {
-                  onNavigate();
-                  context.go('/settings');
-                },
-              ),
+          // Organization switcher. A real one: it lists every organization the
+          // session carries and switches on selection, rather than carrying a
+          // chevron and navigating to Settings - which is the shape of a dropdown
+          // making a promise it did not keep. The memberships were already in the
+          // session and `switchOrganization` was already wired for the command
+          // palette, which you have to know exists to find.
+          //
+          // Rendered with no active organization too. That case is not
+          // hypothetical: a suspended member is excluded from the switcher by
+          // design, and someone who registered without a company never had one -
+          // so hiding the control removes the only signpost from exactly the
+          // people with nowhere to go.
+          Padding(
+            padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
+            child: PopupMenuButton<String>(
+              tooltip: 'Switch organization',
+              position: PopupMenuPosition.under,
+              color: t.surfaceRaised,
+              onSelected: (String value) => _chooseOrganization(value),
+              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                for (final OrganizationSummary item in widget.auth.user
+                        ?.organizations ??
+                    const <OrganizationSummary>[])
+                  PopupMenuItem<String>(
+                    value: item.id,
+                    child: Row(
+                      spacing: 10,
+                      children: <Widget>[
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                item.name,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: t.content,
+                                ),
+                              ),
+                              Text(
+                                item.roleName,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: t.contentMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (item.id == organization?.id)
+                          Icon(LucideIcons.check, size: 14, color: t.primary),
+                      ],
+                    ),
+                  ),
+                const PopupMenuDivider(),
+                PopupMenuItem<String>(
+                  value: _createOrganizationValue,
+                  child: Row(
+                    spacing: 10,
+                    children: <Widget>[
+                      Icon(LucideIcons.plus, size: 14, color: t.contentMuted),
+                      Text(
+                        organization == null
+                            ? 'Create an organization'
+                            : 'Create another organization',
+                        style: TextStyle(fontSize: 13, color: t.content),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              child: _OrganizationRow(organization: organization),
             ),
+          ),
 
           Expanded(
             child: SingleChildScrollView(
@@ -398,11 +533,13 @@ class _SidebarState extends ConsumerState<_Sidebar> {
       item.path == '/' ? location == '/' : location.startsWith(item.path);
 }
 
+/// The switcher's face. Nullable, because a user can legitimately have no active
+/// organization - suspended, or registered without a company - and that is exactly
+/// when they most need the control that leads somewhere.
 class _OrganizationRow extends StatefulWidget {
-  const _OrganizationRow({required this.organization, required this.onTap});
+  const _OrganizationRow({required this.organization});
 
-  final OrganizationSummary organization;
-  final VoidCallback onTap;
+  final OrganizationSummary? organization;
 
   @override
   State<_OrganizationRow> createState() => _OrganizationRowState();
@@ -414,13 +551,14 @@ class _OrganizationRowState extends State<_OrganizationRow> {
   @override
   Widget build(BuildContext context) {
     final AppTokens t = context.tokens;
+    final OrganizationSummary? organization = widget.organization;
+    final String name = organization?.name ?? 'No organization';
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
+      child: Builder(
+        builder: (BuildContext context) => AnimatedContainer(
           duration: Motion.fast,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
@@ -442,12 +580,7 @@ class _OrganizationRowState extends State<_OrganizationRow> {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  widget.organization.name
-                      .substring(
-                        0,
-                        widget.organization.name.length >= 2 ? 2 : 1,
-                      )
-                      .toUpperCase(),
+                  name.substring(0, name.length >= 2 ? 2 : 1).toUpperCase(),
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
@@ -461,7 +594,7 @@ class _OrganizationRowState extends State<_OrganizationRow> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      widget.organization.name,
+                      name,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
@@ -470,7 +603,7 @@ class _OrganizationRowState extends State<_OrganizationRow> {
                       ),
                     ),
                     Text(
-                      widget.organization.roleName,
+                      organization?.roleName ?? 'Create or join one',
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 11, color: t.contentMuted),
                     ),

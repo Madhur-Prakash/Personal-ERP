@@ -116,7 +116,11 @@ export function DashboardPage() {
             title="Create your organization"
             description="An organization holds your books, your team, and your data. Create one to get started, or ask a colleague to invite you to theirs."
             action={
-              <Link to="/settings" className={buttonClasses('primary', 'md')}>
+              <Link
+                to="/settings"
+                hash="create-organization"
+                className={buttonClasses('primary', 'md')}
+              >
                 <Plus className="mr-2 h-4 w-4" aria-hidden />
                 Create organization
               </Link>

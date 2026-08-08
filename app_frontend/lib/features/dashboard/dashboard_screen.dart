@@ -58,7 +58,9 @@ class DashboardScreen extends ConsumerWidget {
                   'An organization holds your books, your team, and your data. Create one '
                   'to get started, or ask a colleague to invite you to theirs.',
               action: AppButton(
-                onPressed: () => context.go('/settings'),
+                // `create=1` scrolls Settings to the form rather than landing at
+                // the top of the page with it below the fold.
+                onPressed: () => context.go('/settings?create=1'),
                 leftIcon: LucideIcons.plus,
                 label: 'Create organization',
               ),
