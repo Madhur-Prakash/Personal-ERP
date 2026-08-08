@@ -112,7 +112,7 @@ The design constraint is **restraint**:
 
 ## Quick start
 
-**Requires** Docker, plus [uv](https://docs.astral.sh/uv/) and Node 24 for running outside containers.
+**Requires** Docker, plus [uv](https://docs.astral.sh/uv/) and Node 22 for running outside containers.
 
 ```bash
 git clone https://github.com/Madhur-Prakash/Personal-ERP && cd Personal-ERP

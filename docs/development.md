@@ -14,7 +14,7 @@
 
 ## Setup
 
-Requires Docker, [uv](https://docs.astral.sh/uv/), and Node 24.
+Requires Docker, [uv](https://docs.astral.sh/uv/), and Node 22.
 
 ```bash
 make setup     # .env, dependencies, services, migrations

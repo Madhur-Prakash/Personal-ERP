@@ -72,7 +72,7 @@ is easier to get right once the first is written down.
 
 ## Setting up to work on it
 
-Requires Docker, [uv](https://docs.astral.sh/uv/), Node 24, and Flutter for the desktop
+Requires Docker, [uv](https://docs.astral.sh/uv/), Node 22, and Flutter for the desktop
 client.
 
 ```bash
