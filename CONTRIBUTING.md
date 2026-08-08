@@ -158,9 +158,8 @@ make db-check   # no migration drift
 
 **Run both, because CI will not.** [`ci.yml`](.github/workflows/ci.yml) has two jobs -
 Frontend (`tsc -b`, `eslint`, `prettier --check`, `vite build`) and Compose config. The
-backend job was removed when builds moved to Render and Vercel, so `ruff`, `mypy --strict`,
-`pytest` and `alembic check` block nothing on their own. A red backend merges unless you
-catch it here.
+There is no backend job, so `ruff`, `mypy --strict`, `pytest` and `alembic check` block
+nothing on their own. A red backend merges unless you catch it here.
 
 ---
 

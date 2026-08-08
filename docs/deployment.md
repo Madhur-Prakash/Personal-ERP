@@ -284,8 +284,8 @@ docker compose -f docker-compose.prod.yml up -d --build backend frontend
 ```
 
 If the schema also changed: `alembic downgrade -1`. Verify reversibility locally with
-`make db-check` before you need it - **CI does not check this any more**, since the
-backend job was removed along with the deploy workflow.
+`make db-check` before you need it - **CI does not check this**, because there is no
+backend job.
 
 ---
 

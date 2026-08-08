@@ -821,10 +821,10 @@ project on that port.
 | A10 SSRF | No user-supplied URL is fetched server-side. Documents arrive as uploaded bytes, never as a URL the server retrieves |
 
 > **Two rows above depend on a person, not a pipeline.** CI runs the frontend checks and
-> validates the compose files; the backend job was removed when builds moved to Render and
-> Vercel. So `uv sync --frozen`, `alembic check`, ruff, mypy and pytest block nothing on
-> their own - `make check` before pushing is what enforces them. Restoring that job is the
-> single highest-value hardening change available to this repository.
+> validates the compose files; there is no backend job. So `uv sync --frozen`,
+> `alembic check`, ruff, mypy and pytest block nothing on their own - `make check` before
+> pushing is what enforces them. Adding that job is the single highest-value hardening
+> change available to this repository.
 
 ---
 

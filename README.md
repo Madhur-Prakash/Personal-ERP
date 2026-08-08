@@ -357,9 +357,9 @@ Backend commands run from `backend/`, frontend commands from `frontend/`.
 > **What CI actually blocks on today.**
 > [`ci.yml`](.github/workflows/ci.yml) runs two jobs: **Frontend** (`tsc -b`, `eslint`,
 > `prettier --check`, `vite build`) and **Compose config** (both stacks parsed and
-> schema-checked). The backend job was removed when builds moved to Render and Vercel,
-> so **ruff, mypy, pytest and `alembic check` are local gates only** - nothing stops a
-> red backend from merging. Run `make check` before pushing and mean it.
+> schema-checked). There is no backend job, so **ruff, mypy, pytest and `alembic check`
+> are local gates only** - nothing stops a red backend from merging. Run `make check`
+> before pushing and mean it.
 
 ### Tests, migrations, servers
 

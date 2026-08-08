@@ -7,13 +7,17 @@
 # to produce, and misleading the moment it diverges from what the platforms
 # actually run.
 #
-# Backend and frontend are independent jobs so a frontend type error does not hide
-# a backend test failure, and both report in parallel.
+# Two independent jobs - Frontend (type check, lint, format, build) and Compose
+# config (both stacks parsed and schema-checked) - so one failure does not hide the
+# other, and both report in parallel.
 #
-# The backend job runs against real PostgreSQL and Redis service containers rather
-# than mocks or SQLite. The test suite verifies partial unique indexes, JSONB
-# behaviour, and cursor pagination - none of which SQLite implements the same way,
-# so passing against a substitute would prove nothing.
+# **There is no backend job.** ruff, mypy, pytest and `alembic check` are local
+# gates only, run through `make check` and `make db-check`, so nothing here stops a
+# red backend from merging. Adding one is the highest-value change to this file, and
+# it has to bring real PostgreSQL and Redis service containers with it: the suite
+# verifies partial unique indexes, JSONB behaviour and cursor pagination - none of
+# which SQLite implements the same way, so passing against a substitute would prove
+# nothing.
 # =============================================================================
 
 name: CI
