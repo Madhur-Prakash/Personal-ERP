@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../api/organizations_api.dart';
 import '../../models/organization.dart';
 import '../../state/auth_controller.dart';
 import '../../state/data_providers.dart';
@@ -32,10 +33,16 @@ class RolesScreen extends ConsumerStatefulWidget {
 
 class _RolesScreenState extends ConsumerState<RolesScreen> {
   bool _creating = false;
+
+  /// The custom role being edited, or null when the form is creating a new one.
+  Role? _editing;
+
   final TextEditingController _name = TextEditingController();
   final Set<String> _selected = <String>{};
   String? _error;
   bool _saving = false;
+
+  bool get _formOpen => _creating || _editing != null;
 
   @override
   void dispose() {
@@ -46,31 +53,68 @@ class _RolesScreenState extends ConsumerState<RolesScreen> {
   void _reset() {
     setState(() {
       _creating = false;
+      _editing = null;
       _name.clear();
       _selected.clear();
       _error = null;
     });
   }
 
-  Future<void> _create() async {
+  /// Open the form on an existing role.
+  ///
+  /// The same form serves both jobs rather than a second copy of the permission
+  /// catalogue: the fields are identical, and two of them would drift the moment
+  /// a permission group changed.
+  void _beginEdit(Role role) {
+    setState(() {
+      _creating = false;
+      _editing = role;
+      _name.text = role.name;
+      _selected
+        ..clear()
+        // The stored grants, not the expanded set - editing `invoice:*` as
+        // eleven separate ticks would silently rewrite a wildcard into a
+        // snapshot of what it happens to cover today.
+        ..addAll(role.permissions);
+      _error = null;
+    });
+  }
+
+  Future<void> _save() async {
     if (_name.text.trim().isEmpty) {
       setState(() => _error = 'Give the role a name');
       return;
     }
 
+    final Role? editing = _editing;
     setState(() => _saving = true);
     try {
-      final Role role = await ref
-          .read(organizationsApiProvider)
-          .createRole(name: _name.text.trim(), permissions: _selected.toList());
+      final OrganizationsApi api = ref.read(organizationsApiProvider);
+      final Role role = editing == null
+          ? await api.createRole(
+              name: _name.text.trim(),
+              permissions: _selected.toList(),
+            )
+          : await api.updateRole(
+              editing.id,
+              name: _name.text.trim(),
+              permissions: _selected.toList(),
+            );
       ref.invalidate(rolesProvider);
       if (!mounted) return;
-      context.toastSuccess('Role "${role.name}" created');
+      context.toastSuccess(
+        editing == null
+            ? 'Role "${role.name}" created'
+            : 'Role "${role.name}" updated',
+      );
       _reset();
     } catch (error) {
+      final String fallback = editing == null
+          ? 'Could not create the role'
+          : 'Could not update the role';
       if (mounted) {
-        setState(() => _error = 'Could not create the role');
-        context.toastApiError(error, 'Could not create the role');
+        setState(() => _error = fallback);
+        context.toastApiError(error, fallback);
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -114,25 +158,31 @@ class _RolesScreenState extends ConsumerState<RolesScreen> {
           description:
               'Roles bundle permissions. Built-in roles cannot be renamed or deleted, but '
               'their permissions can be adjusted.',
-          action: auth.can('role:create') && !_creating
+          action: auth.can('role:create') && !_formOpen
               ? AppButton(
-                  onPressed: () => setState(() => _creating = true),
+                  onPressed: () {
+                    _reset();
+                    setState(() => _creating = true);
+                  },
                   leftIcon: LucideIcons.plus,
                   label: 'New role',
                 )
               : null,
         ),
 
-        // ---- Create ----
-        if (_creating) ...<Widget>[
+        // ---- Create / edit ----
+        if (_formOpen) ...<Widget>[
           AppCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 CardHeader(
-                  title: 'Create a role',
-                  description:
-                      'Pick a name, then choose exactly what it can do.',
+                  title: _editing == null
+                      ? 'Create a role'
+                      : 'Edit ${_editing!.name}',
+                  description: _editing == null
+                      ? 'Pick a name, then choose exactly what it can do.'
+                      : 'Changes apply immediately to everyone holding this role.',
                   action: AppButton(
                     onPressed: _reset,
                     variant: AppButtonVariant.ghost,
@@ -190,9 +240,11 @@ class _RolesScreenState extends ConsumerState<RolesScreen> {
                                     _selected.isEmpty ||
                                     _saving
                                 ? null
-                                : _create,
+                                : _save,
                             loading: _saving,
-                            label: 'Create role',
+                            label: _editing == null
+                                ? 'Create role'
+                                : 'Save changes',
                           ),
                           Text(
                             '${_selected.length} '
@@ -229,7 +281,9 @@ class _RolesScreenState extends ConsumerState<RolesScreen> {
                   role: role,
                   groups: catalogue?.groups,
                   canDelete: auth.can('role:delete'),
+                  canEdit: auth.can('role:update'),
                   onDelete: () => _delete(role),
+                  onEdit: () => _beginEdit(role),
                 ),
             ],
           ),
@@ -286,13 +340,17 @@ class _RoleCard extends StatelessWidget {
     required this.role,
     required this.groups,
     required this.canDelete,
+    required this.canEdit,
     required this.onDelete,
+    required this.onEdit,
   });
 
   final Role role;
   final List<PermissionGroup>? groups;
   final bool canDelete;
+  final bool canEdit;
   final VoidCallback onDelete;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -352,6 +410,18 @@ class _RoleCard extends StatelessWidget {
                           style: TextStyle(fontSize: 12, color: t.contentMuted),
                         ),
                       ),
+                      // A custom role is editable; a built-in one is not
+                      // renameable or deletable, which is what `isSystem` guards.
+                      // The server enforces both - this only avoids offering a
+                      // control that would come back refused.
+                      if (canEdit && !role.isSystem)
+                        AppIconButton(
+                          icon: LucideIcons.pencil,
+                          tooltip: 'Edit ${role.name}',
+                          size: 14,
+                          colour: t.contentMuted,
+                          onPressed: onEdit,
+                        ),
                       if (canDelete && !role.isSystem)
                         AppIconButton(
                           icon: LucideIcons.trash2,

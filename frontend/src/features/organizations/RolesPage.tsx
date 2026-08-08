@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Lock, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Lock, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -15,7 +15,7 @@ import { organizationsApi } from '@/features/organizations/api';
 import { summariseRole } from '@/features/organizations/permissionSummary';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import type { PermissionGroup } from '@/types/api';
+import type { PermissionGroup, Role } from '@/types/api';
 
 /**
  * What a role can do, as tags.
@@ -96,10 +96,44 @@ export function RolesPage() {
   const queryClient = useQueryClient();
 
   const [creating, setCreating] = useState(false);
+  /** The custom role being edited, or null when the form is creating a new one. */
+  const [editing, setEditing] = useState<Role | null>(null);
   const [name, setName] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string>();
   const nameField = useRef<HTMLInputElement>(null);
+
+  const formOpen = creating || editing !== null;
+
+  function closeForm() {
+    setCreating(false);
+    setEditing(null);
+    setName('');
+    setSelected(new Set());
+    setError(undefined);
+  }
+
+  /**
+   * Open the form on an existing role.
+   *
+   * The same form serves both jobs rather than a second copy of the permission
+   * catalogue: the fields are identical, and two of them would drift the moment a
+   * permission group changed.
+   */
+  function beginEdit(role: Role) {
+    setCreating(false);
+    setEditing(role);
+    setName(role.name);
+    // The stored grants, not the expanded set - editing `invoice:*` as eleven
+    // separate ticks would silently rewrite a wildcard into a snapshot of what it
+    // happens to cover today.
+    setSelected(new Set(role.permissions));
+    setError(undefined);
+    requestAnimationFrame(() => {
+      nameField.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      nameField.current?.focus({ preventScroll: true });
+    });
+  }
 
   /**
    * Report a problem with the name, and take the user to it.
@@ -139,14 +173,34 @@ export function RolesPage() {
       }),
     onSuccess: (role) => {
       toast.success(`Role "${role.name}" created`);
-      setCreating(false);
-      setName('');
-      setSelected(new Set());
-      setError(undefined);
+      closeForm();
       void queryClient.invalidateQueries({ queryKey: ['roles'] });
     },
     onError: (err) => {
       rejectName(err instanceof ApiError ? err.message : 'Could not create the role');
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: (role: Role) =>
+      organizationsApi.updateRole(role.id, {
+        name: name.trim(),
+        permissions: [...selected],
+      }),
+    onSuccess: (role) => {
+      toast.success(`Role "${role.name}" updated`, {
+        // Worth stating plainly. This is not a draft that takes effect on next
+        // sign-in: the server applies it to everyone holding the role at once.
+        description:
+          role.member_count > 0
+            ? `Applied immediately to ${role.member_count} member${role.member_count === 1 ? '' : 's'}.`
+            : undefined,
+      });
+      closeForm();
+      void queryClient.invalidateQueries({ queryKey: ['roles'] });
+    },
+    onError: (err) => {
+      rejectName(err instanceof ApiError ? err.message : 'Could not update the role');
     },
   });
 
@@ -189,22 +243,32 @@ export function RolesPage() {
         title="Roles and permissions"
         description="Roles bundle permissions. Built-in roles cannot be renamed or deleted, but their permissions can be adjusted."
         action={
-          can('role:create') && !creating ? (
-            <Button leftIcon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>
+          can('role:create') && !formOpen ? (
+            <Button
+              leftIcon={<Plus className="h-4 w-4" />}
+              onClick={() => {
+                closeForm();
+                setCreating(true);
+              }}
+            >
               New role
             </Button>
           ) : undefined
         }
       />
 
-      {/* ---- Create ---- */}
-      {creating && (
+      {/* ---- Create / edit ---- */}
+      {formOpen && (
         <Card className="mb-4">
           <CardHeader
-            title="Create a role"
-            description="Pick a name, then choose exactly what it can do."
+            title={editing ? `Edit ${editing.name}` : 'Create a role'}
+            description={
+              editing
+                ? 'Changes apply immediately to everyone holding this role.'
+                : 'Pick a name, then choose exactly what it can do.'
+            }
             action={
-              <Button variant="ghost" size="sm" onClick={() => setCreating(false)}>
+              <Button variant="ghost" size="sm" onClick={closeForm}>
                 Cancel
               </Button>
             }
@@ -275,17 +339,18 @@ export function RolesPage() {
 
             <div className="flex items-center gap-3">
               <Button
-                loading={create.isPending}
+                loading={create.isPending || update.isPending}
                 disabled={!name.trim() || selected.size === 0}
                 onClick={() => {
                   if (!name.trim()) {
                     rejectName('Give the role a name');
                     return;
                   }
-                  create.mutate();
+                  if (editing) update.mutate(editing);
+                  else create.mutate();
                 }}
               >
-                Create role
+                {editing ? 'Save changes' : 'Create role'}
               </Button>
               <span className="text-content-muted text-[12px]">
                 {selected.size} permission{selected.size === 1 ? '' : 's'} selected
@@ -326,39 +391,57 @@ export function RolesPage() {
                     {role.is_default && ' · default'}
                   </span>
 
-                  {can('role:delete') && !role.is_system && (
-                    // The desktop client has said why this is greyed out since it shipped;
-                    // the web had a `title` that could never fire, because a disabled
-                    // button suppresses pointer events. Same wording as the app - two
-                    // clients explaining one rule differently is worse than either.
-                    <Hint
-                      text={
-                        role.member_count > 0
-                          ? 'People still hold this role'
-                          : `Delete ${role.name}`
-                      }
-                      width="w-52"
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Delete ${role.name}`}
-                        disabled={role.member_count > 0}
-                        onClick={() => {
-                          if (window.confirm(`Delete the "${role.name}" role?`)) {
-                            remove.mutate(role.id);
-                          }
-                        }}
+                  <span className="flex items-center gap-0.5">
+                    {/* A custom role is editable; a built-in one is not renameable
+                        or deletable, which is what `is_system` guards. The server
+                        enforces both - this only avoids offering a control that
+                        would come back refused. */}
+                    {can('role:update') && !role.is_system && (
+                      <Hint text={`Edit ${role.name}`} width="w-44">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Edit ${role.name}`}
+                          onClick={() => beginEdit(role)}
+                        >
+                          <Pencil className="text-content-muted h-3.5 w-3.5" />
+                        </Button>
+                      </Hint>
+                    )}
+                    {can('role:delete') && !role.is_system && (
+                      // The desktop client has said why this is greyed out since it shipped;
+                      // the web had a `title` that could never fire, because a disabled
+                      // button suppresses pointer events. Same wording as the app - two
+                      // clients explaining one rule differently is worse than either.
+                      <Hint
+                        text={
+                          role.member_count > 0
+                            ? 'People still hold this role'
+                            : `Delete ${role.name}`
+                        }
+                        width="w-52"
                       >
-                        <Trash2
-                          className={cn(
-                            'h-3.5 w-3.5',
-                            role.member_count > 0 ? 'text-content-muted' : 'text-danger',
-                          )}
-                        />
-                      </Button>
-                    </Hint>
-                  )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Delete ${role.name}`}
+                          disabled={role.member_count > 0}
+                          onClick={() => {
+                            if (window.confirm(`Delete the "${role.name}" role?`)) {
+                              remove.mutate(role.id);
+                            }
+                          }}
+                        >
+                          <Trash2
+                            className={cn(
+                              'h-3.5 w-3.5',
+                              role.member_count > 0 ? 'text-content-muted' : 'text-danger',
+                            )}
+                          />
+                        </Button>
+                      </Hint>
+                    )}
+                  </span>
                 </div>
               </CardBody>
             </Card>

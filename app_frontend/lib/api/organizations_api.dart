@@ -152,6 +152,27 @@ class OrganizationsApi {
     ),
   );
 
+  /// Rename a custom role or change what it can do.
+  ///
+  /// Only the fields passed are sent: the server treats an absent key as "leave
+  /// it alone", so sending nulls for the untouched ones would clear them.
+  /// Permission changes apply immediately to everyone holding the role.
+  Future<Role> updateRole(
+    String roleId, {
+    String? name,
+    List<String>? permissions,
+    String? description,
+  }) async => Role.fromJson(
+    await _client.patch<Json>(
+      '/roles/$roleId',
+      body: <String, dynamic>{
+        'name': ?name,
+        'permissions': ?permissions,
+        'description': ?description,
+      },
+    ),
+  );
+
   Future<void> deleteRole(String roleId) =>
       _client.delete<Json>('/roles/$roleId');
 
