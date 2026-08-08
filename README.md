@@ -32,13 +32,16 @@ https://github.com/user-attachments/assets/a1e230bf-942b-4f5b-aeb9-542d5b277387
 
 ## Why it exists
 
-Small businesses are offered two bad options. This is the third.
+Small businesses get offered two bad options. **This is the good one.**
 
-| Option | What it costs you |
-| --- | --- |
-| Cloud SaaS | Rents you your own books, and raises the price once you depend on it |
-| Legacy desktop software | Lives on one machine and dies with its hard drive |
-| **Personal ERP** | **Runs on your server, data in your PostgreSQL, no vendor in between** |
+| Option | What it costs you | Where it leaves you |
+| --- | --- | :---: |
+| Cloud SaaS | Rents you your own books, and raises the price once you depend on it | Renting |
+| Legacy desktop software | Lives on one machine and dies with its hard drive | Stranded |
+| **Personal ERP** | **Runs on your server, data in your PostgreSQL, no vendor in between** | **Owning it** |
+
+**That last row is the whole point.** Your machine, your database, your books - no seat
+count, no renewal email, no export button you have to ask permission to press.
 
 The design constraint is **restraint**:
 
@@ -431,6 +434,7 @@ documents relate. Every page carries a nav bar to every other.
 
 | | |
 | --- | --- |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to report a bug, propose a feature, and get a change merged |
 | [`backend/README.md`](backend/README.md) | The FastAPI service - layout, commands, configuration |
 | [`frontend/README.md`](frontend/README.md) | The React web client - structure, conventions, build |
 | [`app_frontend/README.md`](app_frontend/README.md) | The Flutter desktop client, and where a native window honestly differs |
@@ -484,7 +488,55 @@ rather than quietly rendering figures derived from a broken ledger.
 
 ---
 
+## Contributing
+
+Contributions are welcome, and so are bug reports - a report with the failing request's
+`X-Request-ID` and the smallest sequence that reproduces it is worth more than most
+patches.
+
+**[CONTRIBUTING.md](CONTRIBUTING.md)** is the guide: how to report something, how a feature
+proposal is judged against the restraint constraint, the conventions a review actually
+catches, and the two commands to run before opening a pull request.
+
+| | |
+| --- | --- |
+| **Found a bug** | [Open a bug report](https://github.com/Madhur-Prakash/Personal-ERP/issues/new?labels=bug) - include the commit SHA and how to reproduce it |
+| **Want a feature** | [Open a feature request](https://github.com/Madhur-Prakash/Personal-ERP/issues/new?labels=enhancement) - check [Delivery status](#delivery-status) first; stages 6, 7, 9 and 10 are planned rather than missing |
+| **Found a vulnerability** | **Not a public issue** - use GitHub's private vulnerability reporting, see [Reporting a vulnerability](docs/security.md#reporting-a-vulnerability) |
+| **Want to write code** | Start at [Development](docs/development.md), then run `make check` and `make db-check` before the pull request. CI does not cover the backend, so those two are the gate |
+
+This is a single-maintainer project. Small, focused changes land quickly; large ones land
+if the shape was agreed before the code was written.
+
+---
+
 ## Licence
 
-[MIT](LICENSE) - © 2026 Madhur Prakash Mangal. Use it, fork it, run it for your own
-business; keep the copyright notice with it.
+<div align="center">
+
+### [MIT](LICENSE) · © 2026 Madhur Prakash Mangal
+
+**The permissive one. Use it, fork it, run your business on it.**
+
+</div>
+
+| | |
+| :--- | :--- |
+| **Run it** | For your own business or a client's. Commercially. No seat count, no renewal, no phone-home |
+| **Change it** | Fork it, modify it, rebrand it, ship it inside something larger and closed |
+| **Keep** | The copyright notice and the licence text with any copy you pass on. That is the entire obligation |
+| **Expect** | No warranty. It is your ledger on your server - take the backups, and walk the [pre-flight checklist](docs/deployment.md#8-pre-flight-checklist) before it holds real money |
+
+The whole licence is **21 lines**. [Read it](LICENSE) - it is shorter than this section.
+
+---
+
+<div align="center">
+
+**Made with ❤️ by [Madhur Prakash](https://github.com/Madhur-Prakash)**
+
+[Report Bug](https://github.com/Madhur-Prakash/Personal-ERP/issues/new?labels=bug) · [Request Feature](https://github.com/Madhur-Prakash/Personal-ERP/issues/new?labels=enhancement) · [Contribute](CONTRIBUTING.md) · [Documentation](docs/README.md)
+
+<sub>If this is useful to you, a star helps other small businesses find it.</sub>
+
+</div>
